@@ -1,0 +1,17 @@
+[Unit]
+Description=AgentDeck multi-tenant Feishu gateway
+After=network-online.target
+
+[Service]
+Type=simple
+UMask=0077
+# Keep this file 0600; copy gateway.env.example and fill it on the gateway host.
+EnvironmentFile=%h/.config/agentdeck/gateway.env
+ExecStart=/opt/agentdeck/agentdeck serve --role gateway --data %h/.agentdeck-gateway --behind-proxy --listen 127.0.0.1:8080 --public-url https://agent.example.com --rotation 15m
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

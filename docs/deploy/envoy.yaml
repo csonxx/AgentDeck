@@ -1,0 +1,76 @@
+# Standalone reference. Merge routes/cluster into your existing Envoy if it
+# already owns HTTPS/SDS. Replace domain, certificate paths and upstream address.
+static_resources:
+  listeners:
+    - name: agentdeck_https
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 443 }
+      filter_chains:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_params: { tls_minimum_protocol_version: TLSv1_3 }
+                alpn_protocols: [http/1.1]
+                tls_certificates:
+                  - certificate_chain: { filename: /etc/envoy/certs/fullchain.pem }
+                    private_key: { filename: /etc/envoy/certs/privkey.pem }
+          filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: agentdeck
+                codec_type: AUTO
+                stream_idle_timeout: 120s
+                upgrade_configs:
+                  - upgrade_type: websocket
+                route_config:
+                  name: agentdeck
+                  virtual_hosts:
+                    - name: agentdeck
+                      domains: [agent.example.com, "agent.example.com:443"]
+                      routes:
+                        - match: { path: /v1/stream }
+                          route:
+                            cluster: agentdeck
+                            timeout: 0s
+                            idle_timeout: 120s
+                        - match: { path: /v1/pair }
+                          route: { cluster: agentdeck, timeout: 15s }
+                        - match: { path: /v1/time-sync }
+                          route: { cluster: agentdeck, timeout: 15s }
+                        # Required only for direct Local WorkBuddy authorization.
+                        - match: { path: /v1/agents/workbuddy/callback }
+                          route: { cluster: agentdeck, timeout: 60s }
+                        - match: { path: /v1/session }
+                          route: { cluster: agentdeck, timeout: 15s }
+                        - match: { path: /v2/local/tunnel }
+                          route: { cluster: agentdeck, timeout: 0s, idle_timeout: 120s }
+                        - match: { prefix: /v2/relay/ }
+                          route: { cluster: agentdeck, timeout: 0s, idle_timeout: 120s }
+                        - match: { prefix: /v2/auth/ }
+                          route: { cluster: agentdeck, timeout: 60s }
+                        - match: { prefix: /v2/account/ }
+                          route: { cluster: agentdeck, timeout: 15s }
+                        - match: { path: /v2/time-sync }
+                          route: { cluster: agentdeck, timeout: 15s }
+                        - match: { path: /v2/local/grants }
+                          route: { cluster: agentdeck, timeout: 15s }
+                        - match: { path: /healthz }
+                          route: { cluster: agentdeck, timeout: 5s }
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+    - name: agentdeck
+      type: STATIC
+      connect_timeout: 3s
+      load_assignment:
+        cluster_name: agentdeck
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: 127.0.0.1, port_value: 8080 }

@@ -1,0 +1,55 @@
+{
+  "source": "csukuangfj/k2fsa-zipformer-bilingual-zh-en-t",
+  "revision": "e2382758de9a0219b4efe682b95af30b399db3b8",
+  "license": "Apache-2.0",
+  "chunk_frames": 32,
+  "files": [
+    {
+      "asset": "encoder.int8.onnx",
+      "source": "exp/32/encoder-epoch-99-avg-1.int8.onnx",
+      "sha256": "db6f51551762e40e549166fe041ea3e45464370b595e9ad23f06478ec3794fbb",
+      "bytes": 42980793
+    },
+    {
+      "asset": "decoder.onnx",
+      "source": "exp/32/decoder-epoch-99-avg-1.onnx",
+      "sha256": "89be509a83175261695bdef5fd1c7b9ab1129a663d1284e7ba9f8507b21e0906",
+      "bytes": 13877276
+    },
+    {
+      "asset": "joiner.int8.onnx",
+      "source": "exp/32/joiner-epoch-99-avg-1.int8.onnx",
+      "sha256": "bdda356d6f9b8c2d7cee9ee0e26075fa537490f7fd06520be408d287073667b9",
+      "bytes": 3228485
+    },
+    {
+      "asset": "tokens.txt",
+      "source": "data/lang_char_bpe/tokens.txt",
+      "sha256": "a8e0e4ec53810e433789b54a5c0134a7eaa2ffca595a6334d54c00da858841d3",
+      "bytes": 56317
+    },
+    {
+      "asset": "refiner.int8.onnx",
+      "source": "model.int8.onnx",
+      "repository": "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+      "revision": "2365baeacb507f821a0c8120fcee3d484dba7a07",
+      "sha256": "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
+      "bytes": 239233841
+    },
+    {
+      "asset": "refiner.tokens.txt",
+      "source": "tokens.txt",
+      "repository": "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+      "revision": "2365baeacb507f821a0c8120fcee3d484dba7a07",
+      "sha256": "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc",
+      "bytes": 315894
+    }
+  ],
+  "decoder_precision": "float32",
+  "variant": "fp32-decoder-sensevoice-final",
+  "refiner": {
+    "source": "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+    "revision": "2365baeacb507f821a0c8120fcee3d484dba7a07",
+    "license": "FunASR Model Open Source License Agreement 1.1"
+  }
+}

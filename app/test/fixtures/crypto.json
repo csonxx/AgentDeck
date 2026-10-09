@@ -1,0 +1,18 @@
+{
+  "box": {
+    "epoch": 17,
+    "seq": 3,
+    "nonce": "pM7mzYax4QeZetjW",
+    "data": "/f4Y0BtKziXwy5mfBonnTozoJhPcZ2CrDmo3YMAJM/5hvdz35QKb2V7Zy8G7scag+nPMczNwlpSThUfNpA=="
+  },
+  "key": "trECchsiu//PaVupe+uH+KbS+l2cHeW77VM6lUYIGEI=",
+  "plain": {
+    "message": "你好 AgentDeck",
+    "nested": [
+      1,
+      2
+    ]
+  },
+  "root": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "salt": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8="
+}

@@ -1,0 +1,6 @@
+Public streaming ASR model: csukuangfj/k2fsa-zipformer-bilingual-zh-en-t
+Source: https://huggingface.co/csukuangfj/k2fsa-zipformer-bilingual-zh-en-t
+Revision: e2382758de9a0219b4efe682b95af30b399db3b8
+Upstream declares Apache-2.0. Model weights are unmodified.
+Runtime: sherpa-onnx, Copyright Xiaomi Corporation and contributors, Apache-2.0.
+See manifest.json for original paths and SHA-256 hashes.

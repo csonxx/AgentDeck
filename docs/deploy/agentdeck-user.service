@@ -1,0 +1,15 @@
+[Unit]
+Description=AgentDeck encrypted coding-agent companion
+After=network-online.target
+
+[Service]
+Type=simple
+UMask=0077
+ExecStart=/opt/agentdeck/agentdeck serve --data %h/.agentdeck --behind-proxy --listen 127.0.0.1:8080 --public-url https://agent.example.com --codex-sessions %h/.codex/sessions --claude-sessions %h/.claude/projects --media-roots %h/workspace --project-roots %h/workspace
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

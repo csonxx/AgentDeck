@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<title>AgentDeck: layered decks and a terminal cursor</title>
+<rect width="1024" height="1024" rx="220" fill="#191C20"/>
+<rect x="320" y="336" width="480" height="464" rx="72" fill="none" stroke="#6B7079" stroke-width="28"/>
+<rect x="280" y="292" width="480" height="464" rx="72" fill="none" stroke="#B0B5BF" stroke-width="28"/>
+<rect x="224" y="224" width="480" height="464" rx="72" fill="#F4F5F6"/>
+<path d="M330 364 L416 448 L330 532" fill="none" stroke="#191C20" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M484 532 H604" fill="none" stroke="#EF633C" stroke-width="38" stroke-linecap="round"/>
+</svg>

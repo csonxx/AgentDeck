@@ -1,0 +1,5 @@
+SenseVoiceSmall by Alibaba Group / FunAudioLLM. ONNX conversion by sherpa-onnx / Fangjun Kuang.
+Original: https://huggingface.co/FunAudioLLM/SenseVoiceSmall
+Conversion: https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17
+Conversion revision: 2365baeacb507f821a0c8120fcee3d484dba7a07
+Weights are under FunASR Model Open Source License Agreement 1.1, not Apache-2.0. See REFINER_LICENSE.

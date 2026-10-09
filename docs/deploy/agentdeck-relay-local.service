@@ -1,0 +1,16 @@
+[Unit]
+Description=AgentDeck outbound encrypted Local
+After=network-online.target
+
+[Service]
+Type=simple
+UMask=0077
+# Run local-login with this data directory before enabling this service.
+ExecStart=/opt/agentdeck/agentdeck serve --relay --data %h/.agentdeck --codex-sessions %h/.codex/sessions --claude-sessions %h/.claude/projects --media-roots %h/workspace --project-roots %h/workspace --rotation 15m
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

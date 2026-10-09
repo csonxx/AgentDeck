@@ -1,0 +1,15 @@
+{
+  "opencode": {
+    "url": "http://127.0.0.1:4096",
+    "username": "opencode",
+    "password_env": "OPENCODE_SERVER_PASSWORD"
+  },
+  "qoder": {"command": "qoder", "args": ["--acp"]},
+  "trae": {"command": "traecli", "args": ["acp", "serve"]},
+  "workbuddy": {
+    "api": "https://www.workbuddy.cn/openapi/v2",
+    "client_id": "",
+    "client_secret_env": "AGENTDECK_WORKBUDDY_CLIENT_SECRET",
+    "redirect_uri": ""
+  }
+}
