@@ -92,3 +92,54 @@ func (t *rewriteTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	u.Header = r.Header
 	return t.base.RoundTrip(u.WithContext(r.Context()))
 }
+
+func TestPlainAddressBootstrapRejectsCrossOriginAccess(t *testing.T) {
+	c := New(nil, "127.0.0.1:8787")
+	if c.URL() != "http://127.0.0.1:8787/" {
+		t.Fatal("console URL should be directly bookmarkable")
+	}
+	for _, tc := range []struct {
+		name, method, host, origin, site, header, remote string
+		status                                           int
+	}{
+		{"fresh tab", "POST", c.Host, "http://" + c.Host, "same-origin", "1", "127.0.0.1:20", 200},
+		{"localhost tab", "POST", "localhost:8787", "http://localhost:8787", "same-origin", "1", "127.0.0.1:20", 200},
+		{"form without header", "POST", c.Host, "http://" + c.Host, "same-origin", "", "127.0.0.1:20", 403},
+		{"navigation", "GET", c.Host, "", "none", "1", "127.0.0.1:20", 403},
+		{"cors preflight", "OPTIONS", c.Host, "http://evil.example", "cross-site", "1", "127.0.0.1:20", 403},
+		{"different port", "POST", c.Host, "http://127.0.0.1:8788", "same-site", "1", "127.0.0.1:20", 403},
+		{"cross-site", "POST", c.Host, "", "cross-site", "1", "127.0.0.1:20", 403},
+		{"cross-site origin", "POST", c.Host, "http://evil.example", "", "1", "127.0.0.1:20", 403},
+		{"dns rebinding", "POST", "evil.example:8787", "http://evil.example:8787", "same-origin", "1", "127.0.0.1:20", 403},
+		{"remote network", "POST", c.Host, "http://" + c.Host, "same-origin", "1", "192.168.1.2:20", 403},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(tc.method, "http://"+tc.host+"/api/bootstrap", nil)
+			r.Host = tc.host
+			r.RemoteAddr = tc.remote
+			r.Header.Set("Origin", tc.origin)
+			r.Header.Set("Sec-Fetch-Site", tc.site)
+			r.Header.Set("X-AgentDeck-Console", tc.header)
+			w := httptest.NewRecorder()
+			c.Handler().ServeHTTP(w, r)
+			if w.Code != tc.status {
+				t.Fatalf("got %d want %d", w.Code, tc.status)
+			}
+			if tc.status == 200 {
+				var reply map[string]string
+				if json.Unmarshal(w.Body.Bytes(), &reply) != nil || reply["token"] != c.Token || w.Header().Get("Cache-Control") != "no-store" {
+					t.Fatal("invalid bootstrap response")
+				}
+			} else if strings.Contains(w.Body.String(), c.Token) {
+				t.Fatal("rejected request leaked capability")
+			}
+			if w.Header().Get("Access-Control-Allow-Origin") != "" {
+				t.Fatal("console must not enable CORS")
+			}
+		})
+	}
+	next := New(nil, c.Host)
+	if next.Token == c.Token {
+		t.Fatal("process capability reused")
+	}
+}

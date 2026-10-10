@@ -81,7 +81,7 @@ func main() {
 		if d.IsDir() && d.Name() == "console" {
 			return filepath.SkipDir
 		}
-		if strings.HasSuffix(filepath.ToSlash(path), "/server/association.go") {
+		if strings.HasSuffix(filepath.ToSlash(path), "/server/association.go") || strings.HasSuffix(filepath.ToSlash(path), "/relay/unlink.go") {
 			return nil
 		}
 		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {

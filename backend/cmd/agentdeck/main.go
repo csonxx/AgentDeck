@@ -77,7 +77,8 @@ func run() error {
 	revokeKind := f.String("kind", "local", "gateway revoke: local, grant, account")
 	pairCode := f.String("code", "", "Local/App comparison code to approve")
 	noOpen := f.Bool("no-open", false, "print login page without opening browser")
-	consoleListen := f.String("console-listen", "127.0.0.1:0", "owner console: IPv4 loopback address; port 0 selects a free port")
+	consoleListen := f.String("console-listen", "127.0.0.1:8787", "local workstation controls: IPv4 loopback address")
+	noConsole := f.Bool("no-console", false, "disable local workstation web controls (S-LOCAL only)")
 	kind := f.String("agent", "codex", "bridge agent: codex or claude")
 	if e := f.Parse(os.Args[2:]); e != nil {
 		return e
@@ -357,6 +358,24 @@ func run() error {
 		}
 	}
 	defer s.Manager.Close()
+	if !*noConsole {
+		controls, err := startConsole(*dir, *consoleListen)
+		if err != nil {
+			return err
+		}
+		defer controls.server.Close()
+		log.Printf("AgentDeck workstation controls: %s", controls.URL)
+		go func() {
+			select {
+			case <-ctx.Done():
+			case err := <-controls.done:
+				if err != nil && !errors.Is(err, http.ErrServerClosed) {
+					log.Print("workstation controls stopped unexpectedly")
+					stop()
+				}
+			}
+		}()
+	}
 	if *relayMode {
 		if err := s.EnableRelay(ctx); err != nil {
 			return err
@@ -389,7 +408,7 @@ func run() error {
 		}
 	}()
 	if *relayMode {
-		log.Print("AgentDeck relay mode; open workstation controls with: agentdeck console --data <same-directory>")
+		log.Print("AgentDeck relay mode; encrypted outbound gateway connection enabled")
 		<-ctx.Done()
 		s.Association.Wait()
 		stop()

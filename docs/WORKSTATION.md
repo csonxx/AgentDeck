@@ -2,8 +2,8 @@
 
 ## 关联网关 / Link a gateway
 
-1. 启动 S-LOCAL。保留已有来源目录、项目、附件、Agent 配置和桌面 IPC 等参数，使用 `serve --relay --data <原数据目录>`。未关联时也能启动，不开手机可访问的 TCP 端口。 / Start S-LOCAL with `serve --relay --data <existing-directory>`, retaining source, project, attachment, agent and desktop IPC flags. An unlinked workstation starts successfully without a phone-facing TCP listener.
-2. 在同一操作系统用户下另开终端运行 `artifacts/agentdeck console --data <相同目录>`。浏览器自动打开本机管理页面，保持两个进程运行。 / Run `artifacts/agentdeck console --data <same-directory>` as the same OS user in another terminal. The browser opens local controls; keep both processes running.
+1. 启动 S-LOCAL。保留已有来源目录、项目、附件、Agent 配置和桌面 IPC 等参数，使用 `serve --relay --data <原数据目录>`。未关联时也能启动；手机通过网关连接，本机管理页固定监听回环地址。 / Start S-LOCAL with `serve --relay --data <existing-directory>`, retaining source, project, attachment, agent and desktop IPC flags. An unlinked workstation starts successfully; phones connect through the gateway while local controls listen on loopback.
+2. 浏览器打开 **http://127.0.0.1:8787/**，可直接收藏。页面随后端启动，不需要另起控制台、启动文件或复制凭据；刷新和新标签页都可直接访问。 / Open **http://127.0.0.1:8787/** and bookmark it. Controls start with S-LOCAL. No second console, launcher or copied credential is required; reloads and fresh tabs work directly.
 3. 在「网关连接」输入完整 HTTPS 地址和工作站名称，点击「通过飞书关联工作站」，再点击「打开飞书授权页面」。测试地址为 `https://web-test-omnivibe.ttyuyin.com/agentdeck`，保留路径前缀。 / Enter the full HTTPS gateway address and workstation name, start enrollment, then open the Feishu authorization page. Preserve `/agentdeck` for the testing address above.
 4. 飞书确认后返回管理页，关联会加密保存并自动建立出站 WSS 隧道。页面每两秒刷新，显示在线、重连、最近连接时间、尝试次数及失败类别。重启后沿用原关联，不会自动覆盖已有账号。 / Return after Feishu authorization. Enrollment is saved encrypted and the outbound WSS tunnel starts automatically. Status refreshes every two seconds, including online/reconnecting state, last connection, attempts and error category. Restart reuses the saved association; an existing association is never silently overwritten.
 
@@ -18,12 +18,20 @@
 
 多个请求分别输入各自手机显示的码。页面不会自动批准，也不会把电脑端预期码回填给用户。重置 App 后重新配对，电脑绑定不受影响。 / Approve each request using the corresponding phone code. The page never approves automatically or fills the expected code for you. An app reset requires a new pairing while retaining workstation enrollment.
 
+## 解除和重新关联 / Unlink and link again
+
+1. 在「网关连接」点击「解除网关关联」，核对影响后点击「确认解除关联」。网关先验证工作站签名，只撤销调用者自己的身份及手机路由，返回绑定本次请求的加密回执。 / Choose Unlink gateway, review the effect, and confirm. The gateway authenticates the workstation signature, revokes only that workstation and its grants, and returns an encrypted receipt bound to the request.
+2. 回执验证通过后，本机停止隧道及自动重连，原子清除关联凭据和未完成的配对；会话历史、已保存设备密钥及 Agent 配置保留。网关不可用或版本不支持时保留本机关联，并显示错误供重试。 / After validating the receipt, S-LOCAL stops the tunnel/retries and atomically clears enrollment and unfinished pairings. History, saved device keys and agent settings remain. An unreachable or unsupported gateway leaves local enrollment intact with a retryable error.
+3. 页面立即显示「尚未关联」，并恢复网关地址和工作站名称输入框。点击「连接网关 · 飞书授权」，完成飞书授权后自动连接。新工作站身份及密钥与旧关联不同，手机需要重新选择工作站和配对。 / The page switches to Unlinked and restores the URL/name form. Start Feishu authorization and the tunnel connects automatically. The new identity/key differs from the revoked one, so phones must select and pair again.
+4. 默认数据目录为 `~/.agentdeck`，页面展示实际目录。迁移已有安装时先正常停止后端，保留原数据库和 `storage.key` 配套迁移，不生成新密钥覆盖旧数据库；已有 `tools` 目录保持不变。 / The default directory is `~/.agentdeck`, with the effective path shown in controls. Stop an existing backend cleanly before moving its database and matching storage.key together. Never replace the old key with a new key; preserve existing tools.
+
 ## 本机访问边界 / Local access boundary
 
-- 管理页面为独立 `console` 进程，默认监听系统分配的 `127.0.0.1` 端口；`--console-listen 127.0.0.1:PORT` 可指定端口，拒绝非回环地址。 / Controls use a separate console process and a dynamically allocated IPv4 loopback port. An explicit loopback port is supported; non-loopback addresses are rejected.
-- API 使用进程级随机凭据，浏览器首次打开从 URL fragment 读取后立即移除；仅放在该标签页的临时 `sessionStorage`，便于刷新页面，不使用持久 `localStorage`、Cookie、查询串或日志。它不含手机 root 或会话数据，关闭标签页后清除，控制台进程结束即失效。 / The per-process capability is consumed from the initial URL fragment and immediately removed. Tab-scoped `sessionStorage` supports reloads; persistent localStorage, cookies, query strings and logs are not used. This capability contains no phone root or session data, clears with the tab and expires when the console process ends.
-- 启动文件权限 `0600`，只存本次进程有效的控制台入口，不含工作站/手机加密密钥；正常退出删除，异常退出残留也不能在原进程结束后继续访问。 / The temporary launcher is mode `0600` and contains only the process-lifetime console capability, never workstation/phone cryptographic keys. It is removed on clean exit; a crash leftover is unusable after that process ends.
-- 校验 Host、Origin、Fetch Metadata，并设置 CSP、禁止嵌入、禁缓存。页面只允许关联状态、发起/取消关联、待配对列表及批准；不代理设备 root、会话内容、shell 或通用 owner API。 / Host, Origin and Fetch Metadata checks, CSP, frame denial and no-store headers restrict access. Only association status/enrollment/cancellation and pairing list/approval are exposed; device roots, sessions, shell execution and generic owner operations are excluded.
+- S-LOCAL 默认同时启动本机管理页面，固定监听 `127.0.0.1:8787`。`--console-listen 127.0.0.1:PORT` 修改端口，拒绝非回环地址；端口冲突明确报错，不自动跳到其他端口。`--no-console` 可禁用。S-GATEWAY 不启动该页面。 / S-LOCAL starts controls at fixed `127.0.0.1:8787`. A loopback-only port override is supported. Port conflicts fail explicitly instead of silently changing the URL. `--no-console` disables controls; S-GATEWAY never starts them.
+- 浏览器同源脚本通过带专用 Header 的 POST 自动获取进程级随机凭据，仅保留在页面内存中；拒绝跨源 Origin、Fetch Metadata 和 CORS 预检。无需 Cookie、URL fragment、启动文件或浏览器持久存储。重启后刷新页面自动获取新凭据，已打开页面会自动恢复。 / A same-origin script uses a custom-header POST to bootstrap an in-memory process capability. Cross-origin requests and CORS preflights are rejected. No cookie, URL fragment, launcher or browser storage is needed. Reloading after a restart acquires the new capability; an open page also recovers automatically.
+- 直接打开回环地址的使用方式信任本机用户及进程；Host/Origin 校验用于阻止其他网站跨源访问，不提供操作系统用户之间的隔离。请在可信工作站账号运行，公网和局域网不能访问。 / Direct loopback access trusts local users and processes. Host/Origin checks block other websites, rather than isolate OS users. Run under a trusted workstation account; public and LAN clients cannot access controls.
+- 后端内置页面与后端共用生命周期。独立 `console --data <相同目录>` 命令保留；若后端已启动内置页面，应选用不同端口，或先用 `--no-console` 关闭内置页面。多实例也需分别设置端口。 / Built-in controls share the backend lifecycle. The standalone console remains available with a different port, or with built-in controls disabled. Multiple instances also require distinct ports.
+- 校验 Host、Origin、Fetch Metadata，并设置 CSP、禁止嵌入、禁缓存。页面只允许关联状态、发起/取消关联、待配对列表、批准及解除关联；不代理设备 root、会话内容、shell 或通用 owner API。 / Host, Origin and Fetch Metadata checks, CSP, frame denial and no-store headers restrict access. Only association status/enrollment/cancellation and pairing list/approval plus self-unlink are exposed; device roots, sessions, shell execution and generic owner operations are excluded.
 
 ## 网关日志 / Gateway diagnostics
 

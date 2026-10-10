@@ -73,7 +73,7 @@ Go 到 Envoy 的 HTTP 上游仅限回环/受控私网；若跨不可信网络需
 
 ## S-LOCAL 飞书关联
 
-推荐使用[本机管理页面](WORKSTATION.md)：先以 `serve --relay` 启动（未关联也可启动），再运行 `agentdeck console --data <相同目录>`。在电脑网页里关联网关、查看实时状态、填写手机校验码并批准，无需停止后端。 / Recommended: start `serve --relay` even when unlinked, then run `agentdeck console --data <same-directory>`. Use local browser controls for enrollment, live status and pairing approval without stopping the backend.
+推荐使用[本机管理页面](WORKSTATION.md)：先以 `serve --relay` 启动（未关联也可启动），浏览器直接打开 `http://127.0.0.1:8787/`。在电脑网页里关联网关、查看实时状态、填写手机校验码并批准，无需停止后端。 / Recommended: start `serve --relay` even when unlinked, then open `http://127.0.0.1:8787/` in the browser. Use local browser controls for enrollment, live status and pairing approval without stopping the backend.
 
 以下保留终端关联流程 / Terminal alternative:
 
@@ -147,3 +147,9 @@ Local 撤销切断该工作站；grant 撤销只切断对应手机；account 撤
 `scripts/verify.sh` 包含真实 Go CLI S-LOCAL 主动隧道、TLS S-GATEWAY、Flutter 客户端、模拟飞书 token/user_info。测试完成 state/Cookie/PKCE、加密登录交付、SAS、跨租户/同租户他人越权拒绝、独立手机 root、网关无法用 enrollment/routing key 解密内容、实时 Codex/Claude 消息与 PNG 解码、2MiB 媒体背压、方向/篡改/重放、轮换、断线 cursor 续传与 grant/account 撤销。模拟身份/批准路由仅在 testsupport，不编入生产 CLI。
 
 未配置真实飞书应用和公网目标，因此不能把模拟回调通过称为真实飞书扫码成功；实际 Envoy、公网移动网络、iOS 真机安全存储/扫码和生产签名仍待目标环境验证。新版 APK 为开发测试签名，iOS 只生成 unsigned build。部署后应按真实流程完成两端飞书授权、校验、输出/图片、新消息、App 重开、Local 重启、撤销及换证续期验收。
+
+## 本机主动解除关联 / Workstation self-unlink
+
+新版本支持经过 Local 签名及重放校验的 `POST /v2/local/unlink`，只撤销调用者自身。网关在同一数据库事务中删除工作站与全部手机路由，再关闭隧道，返回与请求 proof 绑定的加密回执；日志事件为 `local_unlinked`。旧身份不能再校准时间或建立隧道。手机账号登录不受影响，但需重新选择新关联的工作站并配对。本地管理页的解除及重连操作见[本机管理指南](WORKSTATION.md)。
+
+Updated gateways support signed, replay-protected `POST /v2/local/unlink` for the calling workstation only. Identity and all phone grants are removed atomically before closing the tunnel and issuing a proof-bound encrypted receipt. Diagnostics emit `local_unlinked`. Revoked credentials cannot sync time or reconnect. Phone account sign-in remains, but phones must select and pair with the newly enrolled workstation.

@@ -61,7 +61,7 @@ import socket
 s=socket.socket();s.bind(('127.0.0.1',0));print(s.getsockname()[1]);s.close()
 PY
 )"
-"$project_dir/artifacts/agentdeck" serve --voice-command-file "$run_dir/voice-command.json" --project-roots "$run_dir/source" --data "$run_dir/state" --listen "127.0.0.1:$test_port" --public-url "https://127.0.0.1:$test_port" --rotation 1s --codex-sessions "$run_dir/source" --media-roots "$run_dir/source" > "$run_dir/backend.log" 2>&1 &
+"$project_dir/artifacts/agentdeck" serve --no-console --voice-command-file "$run_dir/voice-command.json" --project-roots "$run_dir/source" --data "$run_dir/state" --listen "127.0.0.1:$test_port" --public-url "https://127.0.0.1:$test_port" --rotation 1s --codex-sessions "$run_dir/source" --media-roots "$run_dir/source" > "$run_dir/backend.log" 2>&1 &
 backend_pid=$!
 for attempt in $(seq 1 100); do
   if [ -S "$run_dir/state/control.sock" ]; then break; fi
@@ -98,7 +98,7 @@ a.bind(('127.0.0.1',0));b.bind(('127.0.0.1',0))
 print(a.getsockname()[1],b.getsockname()[1]);a.close();b.close()
 PY
 )
-"$project_dir/artifacts/agentdeck" serve --voice-command-file "$run_dir/voice-command.json" --project-roots "$run_dir/proxy/source" --behind-proxy --data "$run_dir/proxy/state" --listen "127.0.0.1:$upstream_port" --public-url "https://localhost:$proxy_port" --rotation 1s --codex-sessions "$run_dir/proxy/source" --media-roots "$run_dir/proxy/source" > "$run_dir/proxy/backend.log" 2>&1 &
+"$project_dir/artifacts/agentdeck" serve --no-console --voice-command-file "$run_dir/voice-command.json" --project-roots "$run_dir/proxy/source" --behind-proxy --data "$run_dir/proxy/state" --listen "127.0.0.1:$upstream_port" --public-url "https://localhost:$proxy_port" --rotation 1s --codex-sessions "$run_dir/proxy/source" --media-roots "$run_dir/proxy/source" > "$run_dir/proxy/backend.log" 2>&1 &
 proxy_backend_pid=$!
 go build -o "$run_dir/tlsproxy" ./testsupport/proxy
 "$run_dir/tlsproxy" --dir "$run_dir/proxy" --listen "127.0.0.1:$proxy_port" --upstream "http://127.0.0.1:$upstream_port" > "$run_dir/proxy/proxy.log" 2>&1 &
@@ -140,7 +140,7 @@ for attempt in $(seq 1 200); do
   if ! kill -0 "$gateway_pid" 2>/dev/null; then cat "$run_dir/gateway/fixture.log"; exit 1; fi
   sleep 0.1
 done
-"$project_dir/artifacts/agentdeck" serve --voice-command-file "$run_dir/voice-command.json" --project-roots "$run_dir/gateway/source" --relay --data "$run_dir/gateway/local-state" --rotation 1s --codex-sessions "$run_dir/gateway/source" --media-roots "$run_dir/gateway/source" > "$run_dir/gateway/local.log" 2>&1 &
+"$project_dir/artifacts/agentdeck" serve --no-console --voice-command-file "$run_dir/voice-command.json" --project-roots "$run_dir/gateway/source" --relay --data "$run_dir/gateway/local-state" --rotation 1s --codex-sessions "$run_dir/gateway/source" --media-roots "$run_dir/gateway/source" > "$run_dir/gateway/local.log" 2>&1 &
 relay_local_pid=$!
 for attempt in $(seq 1 100); do
   if [ -S "$run_dir/gateway/local-state/control.sock" ] && rg -q "S-LOCAL linked" "$run_dir/gateway/local.log"; then break; fi

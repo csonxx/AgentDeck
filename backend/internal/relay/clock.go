@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+type ClockRejection struct{ Status int }
+
+func (e *ClockRejection) Error() string { return "gateway clock rejected" }
+
 func SyncClock(ctx context.Context, h *http.Client, origin, kind, id string, key []byte) (*secure.Clock, error) {
 	scope := kind + "/" + id
 	challenge := secure.ID()
@@ -31,7 +35,7 @@ func SyncClock(ctx context.Context, h *http.Client, origin, kind, id string, key
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		return nil, errors.New("gateway clock rejected")
+		return nil, &ClockRejection{Status: res.StatusCode}
 	}
 	if json.NewDecoder(io.LimitReader(res.Body, 8192)).Decode(&box) != nil {
 		return nil, errors.New("invalid clock response")

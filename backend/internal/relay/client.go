@@ -29,10 +29,11 @@ type Client struct {
 }
 
 type ConnectionStatus struct {
-	ConnectedAt    string `json:"connected_at,omitempty"`
-	DisconnectedAt string `json:"disconnected_at,omitempty"`
-	Attempts       uint64 `json:"attempts"`
-	LastError      string `json:"last_error,omitempty"`
+	WorkstationName string `json:"workstation_name,omitempty"`
+	ConnectedAt     string `json:"connected_at,omitempty"`
+	DisconnectedAt  string `json:"disconnected_at,omitempty"`
+	Attempts        uint64 `json:"attempts"`
+	LastError       string `json:"last_error,omitempty"`
 }
 
 func (c *Client) Status() ConnectionStatus { c.mu.Lock(); defer c.mu.Unlock(); return c.status }
@@ -138,6 +139,7 @@ func (c *Client) connect(ctx context.Context, handler http.Handler) error {
 		return errors.New("gateway tunnel welcome rejected")
 	}
 	var welcome struct {
+		Name      string `json:"workstation_name"`
 		Salt      string `json:"salt"`
 		Rotation  int64  `json:"rotation_ms"`
 		Challenge string `json:"challenge"`
@@ -159,6 +161,7 @@ func (c *Client) connect(ctx context.Context, handler http.Handler) error {
 	go func() { _ = srv.Serve(ln) }()
 	c.mu.Lock()
 	c.peer = peer
+	c.status.WorkstationName = welcome.Name
 	c.status.ConnectedAt = time.Now().UTC().Format(time.RFC3339)
 	c.status.LastError = ""
 	c.mu.Unlock()

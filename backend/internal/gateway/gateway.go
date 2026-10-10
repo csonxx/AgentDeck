@@ -118,14 +118,17 @@ func (g *Server) AddLocal(tenant, name string) (relay.Link, error) {
 }
 func (g *Server) RevokeLocal(id string) error {
 	g.mu.Lock()
+	if err := g.Store.RevokeGatewayLocal(id); err != nil {
+		g.mu.Unlock()
+		return err
+	}
 	p := g.peers[id]
 	delete(g.peers, id)
-	err := g.Store.Delete("gwnodes", id)
 	g.mu.Unlock()
 	if p != nil {
 		p.Close()
 	}
-	return err
+	return nil
 }
 func (g *Server) RevokeGrant(id string) error {
 	g.mu.Lock()
@@ -193,6 +196,7 @@ func (g *Server) Handler() http.Handler {
 	})
 	m.HandleFunc("GET /v2/local/tunnel", g.tunnel)
 	m.HandleFunc("POST /v2/local/grants", g.register)
+	m.HandleFunc("POST /v2/local/unlink", g.unlink)
 	m.HandleFunc("POST /v2/time-sync", g.timeSync)
 	m.HandleFunc("/v2/relay/", g.proxy)
 	g.authRoutes(m)
@@ -254,7 +258,7 @@ func (g *Server) tunnel(w http.ResponseWriter, r *http.Request) {
 	defer ws.Close()
 	key, _ := secure.B64.DecodeString(n.Key)
 	salt := secure.Random(32)
-	box, e := secure.SealJSON(key, "tunnel-welcome/"+n.ID, 0, 0, map[string]any{"salt": secure.B64.EncodeToString(salt), "rotation_ms": g.Rotation.Milliseconds(), "server_time_ms": g.Clock.Millis(), "challenge": relay.Hash([]byte(r.Header.Get("X-Relay-Auth")))})
+	box, e := secure.SealJSON(key, "tunnel-welcome/"+n.ID, 0, 0, map[string]any{"workstation_name": n.Name, "salt": secure.B64.EncodeToString(salt), "rotation_ms": g.Rotation.Milliseconds(), "server_time_ms": g.Clock.Millis(), "challenge": relay.Hash([]byte(r.Header.Get("X-Relay-Auth")))})
 	if e != nil {
 		return
 	}
@@ -304,6 +308,11 @@ func (g *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	var current Node
+	if g.Store.Get("gwnodes", n.ID, &current) != nil {
+		reject(w, r, 401, "local_authentication_rejected")
+		return
+	}
 	rows, e := g.Store.Values("gwgrants")
 	if e != nil {
 		fail(w, 500)
@@ -507,4 +516,34 @@ func (g *Server) proxy(w http.ResponseWriter, r *http.Request) {
 		return nil
 	}
 	proxy.ServeHTTP(w, r)
+}
+
+// An authenticated workstation may revoke itself, never another tenant or node.
+func (g *Server) unlink(w http.ResponseWriter, r *http.Request) {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1024))
+	if err != nil || len(raw) != 0 {
+		reject(w, r, 400, "unlink_body_rejected")
+		return
+	}
+	n, ok := g.localAuth(r, nil)
+	if !ok {
+		reject(w, r, 401, "local_authentication_rejected")
+		return
+	}
+	key, err := secure.B64.DecodeString(n.Key)
+	if err != nil {
+		fail(w, 500)
+		return
+	}
+	box, err := secure.SealJSON(key, "local-unlink-response/"+n.ID, 0, 0, map[string]any{"ok": true, "challenge": relay.Hash([]byte(r.Header.Get("X-Relay-Auth")))})
+	if err != nil {
+		fail(w, 500)
+		return
+	}
+	if err = g.RevokeLocal(n.ID); err != nil {
+		reject(w, r, 500, "local_unlink_storage_failed")
+		return
+	}
+	diagnostic(r, "local_unlinked", map[string]any{"local_ref": ref(n.ID), "tenant_ref": ref(n.Tenant)})
+	write(w, box)
 }

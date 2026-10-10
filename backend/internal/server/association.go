@@ -24,12 +24,15 @@ type Association struct {
 	phase, loginURL, problem, name string
 	cancel                         context.CancelFunc
 	wg                             sync.WaitGroup
+	clientCancel                   context.CancelFunc
+	clientDone                     chan struct{}
 	// Tests inject a client trusting their fixture CA; production always uses
 	// system roots and never disables certificate verification.
 	loginHTTP *http.Client
 }
 
 type AssociationStatus struct {
+	DataDir    string                  `json:"data_dir,omitempty"`
 	Mode       string                  `json:"mode"`
 	Linked     bool                    `json:"linked"`
 	Online     bool                    `json:"online"`
@@ -92,14 +95,19 @@ func (a *Association) attach(link relay.Link) error {
 		return e
 	}
 	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.attachLocked(c)
+}
+func (a *Association) attachLocked(c *relay.Client) error {
 	if a.client != nil {
-		a.mu.Unlock()
 		return errors.New("workstation already linked")
 	}
+	ctx, cancel := context.WithCancel(a.ctx)
+	done := make(chan struct{})
+	a.clientCancel, a.clientDone = cancel, done
 	a.client, a.phase, a.loginURL, a.problem = c, "connecting", "", ""
 	a.wg.Add(1)
-	a.mu.Unlock()
-	go func() { defer a.wg.Done(); c.Run(a.ctx, a.s.Handler()) }()
+	go func() { defer a.wg.Done(); defer close(done); c.Run(ctx, a.s.Handler()) }()
 	return nil
 }
 
@@ -111,7 +119,12 @@ func (a *Association) Status() AssociationStatus {
 		v.Linked, v.URL, v.Online = true, a.client.Link.URL, a.client.Online()
 		status := a.client.Status()
 		v.Connection = &status
-		if v.Online {
+		if status.WorkstationName != "" {
+			v.Name = status.WorkstationName
+		}
+		if a.phase == "unlinking" {
+			v.State = "unlinking"
+		} else if v.Online {
 			v.State = "online"
 		} else {
 			v.State = "reconnecting"
@@ -135,7 +148,7 @@ func (a *Association) Begin(url, name string) error {
 		a.mu.Unlock()
 		return errors.New("后端正在关闭")
 	}
-	if a.client != nil || a.cancel != nil {
+	if a.client != nil || a.cancel != nil || a.phase == "unlinking" {
 		a.mu.Unlock()
 		return errors.New("已关联或正在授权，请勿重复发起")
 	}
@@ -215,11 +228,20 @@ func (a *Association) login(ctx context.Context, url, name string) error {
 				return errors.New("invalid Feishu local enrollment")
 			}
 			v.Link.Pin, v.Link.TLSTrust = "", "system"
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			c, err := relay.NewClient(v.Link)
+			if err != nil {
+				return err
+			}
 			if a.s.Store.Put("relayconfig", "gateway", v.Link) != nil {
 				return errors.New("save enrollment failed")
 			}
 			_ = a.s.Store.Put("relayconfig", "name", name)
-			return a.attach(v.Link)
+			return a.attachLocked(c)
 		}
 		timer := time.NewTimer(2 * time.Second)
 		select {
@@ -246,7 +268,11 @@ func (s *Server) associationRoutes(m *http.ServeMux) {
 			write(w, AssociationStatus{Mode: "direct", State: "direct"})
 			return
 		}
-		write(w, s.Association.Status())
+		status := s.Association.Status()
+		if s.Manager != nil {
+			status.DataDir = s.Manager.ControlDir
+		}
+		write(w, status)
 	})
 	m.HandleFunc("POST /gateway/login", func(w http.ResponseWriter, r *http.Request) {
 		if s.Association == nil {
@@ -268,10 +294,64 @@ func (s *Server) associationRoutes(m *http.ServeMux) {
 		}
 		write(w, map[string]bool{"ok": true})
 	})
+	m.HandleFunc("POST /gateway/unlink", func(w http.ResponseWriter, r *http.Request) {
+		if s.Association == nil {
+			fail(w, 409)
+			return
+		}
+		if err := s.Association.Unlink(r.Context()); err != nil {
+			w.WriteHeader(409)
+			write(w, map[string]string{"error": err.Error()})
+			return
+		}
+		write(w, map[string]bool{"ok": true})
+	})
 	m.HandleFunc("POST /gateway/cancel", func(w http.ResponseWriter, r *http.Request) {
 		if s.Association != nil {
 			s.Association.Cancel()
 		}
 		write(w, map[string]bool{"ok": true})
 	})
+}
+
+// Unlink is serialized against enrollment and other unlink requests. Remote
+// revocation is confirmed before forgetting local credentials or stopping retries.
+func (a *Association) Unlink(ctx context.Context) error {
+	a.mu.Lock()
+	if a.ctx.Err() != nil || a.cancel != nil || a.phase == "unlinking" {
+		a.mu.Unlock()
+		return errors.New("正在处理关联，请稍后重试")
+	}
+	c := a.client
+	if c == nil {
+		a.mu.Unlock()
+		return nil
+	}
+	a.phase, a.problem = "unlinking", ""
+	a.wg.Add(1)
+	a.mu.Unlock()
+	defer a.wg.Done()
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := c.Unlink(ctx); err != nil {
+		a.mu.Lock()
+		a.phase, a.problem = "connecting", err.Error()
+		a.mu.Unlock()
+		return err
+	}
+	a.mu.Lock()
+	if err := a.s.Store.ForgetAssociation(); err != nil {
+		a.phase, a.problem = "connecting", "网关已解除，本机清理未完成，请重试"
+		a.mu.Unlock()
+		return errors.New("网关已解除，本机清理未完成，请重试")
+	}
+	a.clientCancel()
+	done := a.clientDone
+	a.mu.Unlock()
+	<-done
+	a.mu.Lock()
+	a.client, a.clientCancel, a.clientDone = nil, nil, nil
+	a.phase, a.problem, a.loginURL, a.name = "unlinked", "", "", ""
+	a.mu.Unlock()
+	return nil
 }

@@ -103,6 +103,43 @@ func TestOwnerPageAssociationFromUnlinkedToSaved(t *testing.T) {
 	if a.Status().LoginURL != "" || a.Status().Name != "Browser workstation" {
 		t.Fatal("completed flow not cleared")
 	}
+	waitAssociation(t, func() bool { a.mu.Lock(); defer a.mu.Unlock(); return a.cancel == nil })
+	// The fixture CA is intentionally not a system CA. Stop its reconnect loop
+	// before injecting the trusted fixture HTTP client for the owner unlink RPC.
+	a.clientCancel()
+	<-a.clientDone
+	a.client.HTTP = ts.Client()
+	if err := a.Unlink(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if a.Status().Linked || a.Status().State != "unlinked" {
+		t.Fatal("unlink status stale")
+	}
+	if err := a.Begin(g.URL, "Re-enrolled workstation"); err != nil {
+		t.Fatal(err)
+	}
+	waitAssociation(t, func() bool { return a.Status().LoginURL != "" })
+	again, _ := url.Parse(a.Status().LoginURL)
+	res, err := browser.Get(g.URL + "/v2/auth/authorize?flow=" + again.Query().Get("flow"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	next, _ := url.Parse(res.Header.Get("Location"))
+	res, err = browser.Get(g.URL + "/v2/auth/callback?state=" + next.Query().Get("state") + "&code=synthetic-reenroll")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 303 {
+		t.Fatal("reenrollment rejected")
+	}
+	waitAssociation(t, func() bool { return a.Status().Linked })
+	var nextLink relay.Link
+	if db.Get("relayconfig", "gateway", &nextLink) != nil || nextLink.Local == saved.Local || nextLink.Key == saved.Key || a.Status().Name != "Re-enrolled workstation" {
+		t.Fatal("reenrollment reused revoked identity")
+	}
+
 }
 
 func TestAssociationCancellationAndPublicRoutes(t *testing.T) {
@@ -118,7 +155,7 @@ func TestAssociationCancellationAndPublicRoutes(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer func() { cancel(); s.Association.Wait() }()
-	for _, path := range []string{"/gateway/status", "/gateway/login", "/pair-approve"} {
+	for _, path := range []string{"/gateway/status", "/gateway/login", "/gateway/unlink", "/pair-approve"} {
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		if w.Code == 200 {

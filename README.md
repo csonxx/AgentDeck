@@ -92,23 +92,29 @@ The testing gateway now has Feishu configured; real workstation sign-in and its 
 
 ### 电脑管理页面 / Workstation controls
 
-保持本地后端运行，另开终端执行（`--data` 必须与后端一致）：
+本地后端启动后，浏览器直接打开 **[http://127.0.0.1:8787/](http://127.0.0.1:8787/)**。可收藏此地址，刷新或重新打开都能使用；不需要额外命令、启动文件或手工复制访问凭据。
 
-Keep the local backend running and execute this in a second terminal, using the same `--data` directory:
+After starting S-LOCAL, open **[http://127.0.0.1:8787/](http://127.0.0.1:8787/)** in your browser. Bookmark, reload and reopen this address directly. No extra console command, launcher file or copied credential is needed.
 
-```sh
-artifacts/agentdeck console --data "$HOME/.agentdeck"
-# 本次电脑体验使用 / This workstation currently uses:
-# artifacts/agentdeck console --data "$HOME/.agentdeck-usb"
-```
+页面支持关联网关、飞书授权、实时查看在线/重连状态，以及填写手机 12 位校验码批准配对。首次关联不再需要停后端执行 `local-login`。后端尚未关联时，`serve --relay` 正常启动并等待网页关联；已有关联会自动重连。
 
-自动打开本机页面，支持关联网关、飞书授权、实时查看在线/重连状态，以及填写手机 12 位校验码来批准配对。首次关联不再需要停后端执行 `local-login`。后端尚未关联时，`serve --relay` 会正常启动并等待网页关联。已有 `local-login` 命令保留供终端使用。
+The page supports gateway enrollment, Feishu authorization, live connection status and approval using the phone's 12-character comparison code. An unlinked `serve --relay` waits for browser enrollment without stopping the backend; existing associations reconnect automatically.
 
-The browser opens local controls for gateway enrollment, Feishu authorization, live connection/reconnection status, and pairing approval with the phone's 12-character comparison code. First enrollment no longer requires stopping the backend. An unlinked `serve --relay` starts and waits for browser enrollment. `local-login` remains available for terminal workflows.
+默认固定监听 `127.0.0.1:8787`，只允许本机访问，并保留 Host、Origin、Fetch Metadata 校验和有限管理 API。浏览器自动获取仅存内存的访问凭据，不写 URL 或浏览器存储。此模式信任本机用户和进程，不用于共享、不可信的电脑账号。公网网关不会开放这个页面。端口被占用时会明确报错；部署人员可用 `--console-listen 127.0.0.1:其他端口` 修改端口，或用 `--no-console` 关闭页面。多实例必须使用不同管理端口。
 
-页面仅监听 `127.0.0.1`，使用独立随机访问凭据、同源校验及有限管理 API；不能通过公网网关或手机访问。终端关闭后页面服务结束。若浏览器未自动打开，打开命令打印的 `console-open-*.html` 私有启动文件；它只在本次页面服务运行期间有效，退出时删除。不要分享该文件或包含访问凭据的地址。详细步骤及日志排障见[本机管理指南](docs/WORKSTATION.md)。
+The default fixed listener is loopback-only at `127.0.0.1:8787`, with Host, Origin and Fetch Metadata checks and a restricted API. The browser bootstraps an in-memory capability without putting it in URLs or browser storage. This mode trusts local users and processes; use a trusted workstation account. The public gateway does not expose this page. An occupied port produces an explicit error. Administrators may choose another port with `--console-listen 127.0.0.1:PORT`, or disable controls with `--no-console`. Multiple instances need different control ports.
 
-Controls listen only on `127.0.0.1`, with a random access capability, origin checks and a restricted management API; the gateway and phones cannot access them. Keep the console process running. If the browser does not open, use the private `console-open-*.html` launcher printed by the command; it expires with the console process and is deleted on exit. Do not share the launcher or capability URL. See [workstation controls and diagnostics](docs/WORKSTATION.md).
+已关联时，页面提供「解除网关关联」：确认后撤销网关端这台工作站及其手机路由、关闭隧道，清除本机关联凭据和未完成配对；本机会话历史及 Agent 配置保留。随后在页面输入网关地址和工作站名称，点击「连接网关 · 飞书授权」即可重新关联，手机需重新配对。操作需要更新后的网关；网络故障或旧版网关不会被误报为解除成功。
+
+When linked, choose **Unlink gateway** and confirm to revoke this workstation and its phone routes remotely, close the tunnel, and clear local enrollment and unfinished pairings. Conversation history and agent settings remain. Enter a gateway URL and workstation name to link again through Feishu; phones need fresh pairing. This operation requires an updated gateway; network errors and old gateways are never reported as successful unlinking.
+
+本地状态统一保存在 `~/.agentdeck`（默认目录），包括加密数据库、密钥和 `agents.json`；Agent 工具保留在 `~/.agentdeck/tools`。网页显示当前数据目录，避免操作错误实例。
+
+Workstation state uses the default `~/.agentdeck` directory, including the encrypted database, wrapping key and `agents.json`. Agent tools remain under `~/.agentdeck/tools`. The page displays the effective state directory.
+
+`agentdeck console --data <相同目录>` 保留用于独立运行管理页面；使用它时应关闭后端内置页面，或指定不同端口。完整步骤及日志排障见[本机管理指南](docs/WORKSTATION.md)。
+
+The standalone `console` command remains available; disable the backend's built-in controls or use a different port when running it separately. See [workstation controls and diagnostics](docs/WORKSTATION.md).
 
 iOS/macOS 也使用原生客户端，需 Xcode 与对应签名配置；不支持 Flutter Web。仅部署后端时只需 Go。
 

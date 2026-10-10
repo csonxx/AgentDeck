@@ -27,10 +27,7 @@ type Console struct {
 func New(admin *http.Client, host string) *Console {
 	return &Console{Admin: admin, Host: host, Token: secure.B64.EncodeToString(secure.Random(32))}
 }
-func (c *Console) URL() string {
-	_, port, _ := net.SplitHostPort(c.Host)
-	return "http://localhost:" + port + "/#" + c.Token
-}
+func (c *Console) URL() string { return "http://" + c.Host + "/" }
 
 func (c *Console) allowedHost(host string) bool {
 	_, port, e := net.SplitHostPort(c.Host)
@@ -73,11 +70,23 @@ func (c *Console) Handler() http.Handler {
 			_, _ = w.Write(data)
 			return
 		}
+		// A same-origin script bootstraps an in-memory capability. The custom
+		// header prevents cross-origin forms/navigation; CORS preflights are
+		// never accepted. Host/Origin/Fetch Metadata checks also apply here.
+		if r.URL.Path == "/api/bootstrap" {
+			if r.Method != "POST" || r.Header.Get("X-AgentDeck-Console") != "1" {
+				http.Error(w, "Forbidden", 403)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": c.Token})
+			return
+		}
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+c.Token)) != 1 {
 			http.Error(w, "Unauthorized", 401)
 			return
 		}
-		allowed := map[string]string{"GET /api/status": "/gateway/status", "POST /api/login": "/gateway/login", "POST /api/cancel": "/gateway/cancel", "GET /api/pending": "/pair-pending", "POST /api/approve": "/pair-approve"}
+		allowed := map[string]string{"GET /api/status": "/gateway/status", "POST /api/login": "/gateway/login", "POST /api/cancel": "/gateway/cancel", "POST /api/unlink": "/gateway/unlink", "GET /api/pending": "/pair-pending", "POST /api/approve": "/pair-approve"}
 		path := allowed[r.Method+" "+r.URL.Path]
 		if path == "" {
 			http.NotFound(w, r)
