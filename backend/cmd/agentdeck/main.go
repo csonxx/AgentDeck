@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -32,7 +33,7 @@ import (
 
 func main() {
 	if e := run(); e != nil {
-		log.Print(e)
+		slog.New(slog.NewTextHandler(os.Stderr, nil)).Error("command_failed", "error", e)
 		os.Exit(1)
 	}
 }
@@ -68,6 +69,7 @@ func run() error {
 	out := f.String("out", "pairing", "pairing bundle/QR prefix")
 	device := f.String("device", "", "device ID to revoke")
 	role := f.String("role", "local", "serve role: local or gateway")
+	logLevel := f.String("log-level", os.Getenv("AGENTDECK_LOG_LEVEL"), "gateway text log level: debug, info (default), warn or error; overrides AGENTDECK_LOG_LEVEL")
 	relayMode := f.Bool("relay", false, "S-LOCAL outbound relay mode; no public TCP listener")
 	gatewayLink := f.String("gateway-link", "", "import owner-only Local/Gateway enrollment JSON")
 	gatewayURL := f.String("gateway-url", "", "HTTPS gateway origin for local-login")
@@ -277,7 +279,7 @@ func run() error {
 		if *codex != "" || *claude != "" || *media != "" || *agentsConfig != "" {
 			return errors.New("S-GATEWAY never imports agent content; configure sources only on S-LOCAL")
 		}
-		return serveGateway(db, *dir, *addr, *public, pin, trust, tlsCert, *behindProxy, *rotation)
+		return serveGateway(db, *dir, *addr, *public, pin, trust, *logLevel, tlsCert, *behindProxy, *rotation)
 	}
 	var link relay.Link
 	if *relayMode {

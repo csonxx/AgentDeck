@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -178,8 +178,11 @@ func configureGatewayFeishu(g *gateway.Server, public, id, secret string) error 
 	}
 	return nil
 }
-func serveGateway(db *store.Store, dir, addr, public, pin, trust string, cert tls.Certificate, behindProxy bool, rotation time.Duration) error {
+func serveGateway(db *store.Store, dir, addr, public, pin, trust, logLevel string, cert tls.Certificate, behindProxy bool, rotation time.Duration) error {
 	g := gateway.New(db, public, pin, trust, rotation)
+	if e := g.ConfigureLogging(os.Stderr, logLevel); e != nil {
+		return e
+	}
 	if e := configureGatewayFeishu(g, public, os.Getenv("FEISHU_APP_ID"), os.Getenv("FEISHU_APP_SECRET")); e != nil {
 		return e
 	}
@@ -187,14 +190,15 @@ func serveGateway(db *store.Store, dir, addr, public, pin, trust string, cert tl
 	defer stop()
 	defer g.Close()
 	srv := &http.Server{Addr: addr, Handler: g.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 90 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}}}
+	srv.ErrorLog = slog.NewLogLogger(g.Logger.Handler(), slog.LevelError)
 	go func() {
 		if e := g.Admin(ctx, dir); e != nil {
-			log.Print("gateway admin socket failed")
+			g.Logger.Error("admin_socket_failed")
 			stop()
 		}
 	}()
 	go func() { <-ctx.Done(); g.Close(); _ = srv.Close() }()
-	log.Printf("S-GATEWAY listening %s; external origin=%s; Feishu configured=%t", addr, public, g.Feishu != nil)
+	g.Logger.Info("gateway_listening", "listen", addr, "public_url", public, "feishu_configured", g.Feishu != nil)
 	var e error
 	if behindProxy {
 		e = srv.ListenAndServe()

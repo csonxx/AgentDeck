@@ -55,6 +55,7 @@ https://agent.example.com/v2/auth/callback
 - `FEISHU_APP_ID` / `FEISHU_APP_SECRET`：必须成对配置；未配置或两者均为 `TODO` 时登录 API 返回 503，不能用伪身份登录；TODO 占位后需成对替换并重新部署。
 - `FEISHU_OAUTH_SCOPE`：当前身份登录留空；只有未来增加其他 API 时才按需申请并填写 scope。请求应用尚未开通的 scope 会导致飞书授权报错 `20027`。
 - `FEISHU_ALLOWED_TENANTS`：可选，逗号分隔 tenant_key 白名单；为空允许该飞书应用授权成功的租户。
+- `AGENTDECK_LOG_LEVEL`：文本日志最低级别，默认 `info`；支持 `debug`、`info`、`warn`、`error`，可用 `--log-level` 覆盖。格式及排障示例见[网关日志](WORKSTATION.md#网关日志--gateway-diagnostics)。 / Minimum text log level, default `info`; the CLI flag overrides this environment variable. See the linked diagnostics guide for format and troubleshooting.
 
 ## 启动 S-GATEWAY（证书由 Envoy 持有）
 

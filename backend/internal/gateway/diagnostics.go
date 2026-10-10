@@ -3,11 +3,14 @@ package gateway
 import (
 	"bufio"
 	"context"
-	"encoding/json"
-	"log"
+	"errors"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,9 +19,33 @@ import (
 )
 
 type diagnosticKey struct{}
+
+var defaultDiagnosticLogger = slog.New(slog.NewTextHandler(os.Stderr, nil)).With("service", "agentdeck-gateway")
+
 type requestDiagnostic struct {
 	ID, Route, Reason string
 	Status            int
+	Logger            *slog.Logger
+}
+
+// ConfigureLogging must be called before serving requests. Diagnostics are text
+// even at DEBUG; raising verbosity never includes request/provider payloads.
+func (g *Server) ConfigureLogging(out io.Writer, level string) error {
+	var threshold slog.Level
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "", "info":
+		threshold = slog.LevelInfo
+	case "debug":
+		threshold = slog.LevelDebug
+	case "warn":
+		threshold = slog.LevelWarn
+	case "error":
+		threshold = slog.LevelError
+	default:
+		return errors.New("gateway log level must be debug, info, warn or error")
+	}
+	g.Logger = slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: threshold})).With("service", "agentdeck-gateway")
+	return nil
 }
 
 func gatewayPrefix(raw string) string {
@@ -49,15 +76,35 @@ func ref(id string) string {
 	return relay.Hash([]byte(id))[:12]
 }
 func diagnostic(r *http.Request, event string, fields map[string]any) {
-	v := map[string]any{"service": "agentdeck-gateway", "event": event}
+	level := slog.LevelInfo
+	if event == "feishu_identity_failed" {
+		level = slog.LevelWarn
+		status, _ := fields["provider_status"].(int)
+		if status == 0 || status >= 500 {
+			level = slog.LevelError
+		}
+	}
+	diagnosticAt(r, level, event, fields)
+}
+func diagnosticAt(r *http.Request, level slog.Level, event string, fields map[string]any) {
+	logger := defaultDiagnosticLogger
+	attrs := make([]any, 0, 4+2*len(fields))
 	if d, ok := r.Context().Value(diagnosticKey{}).(*requestDiagnostic); ok {
-		v["request_id"], v["route"] = d.ID, d.Route
+		if d.Logger != nil {
+			logger = d.Logger
+		}
+		attrs = append(attrs, "request_id", d.ID, "route", d.Route)
 	}
-	for k, value := range fields {
-		v[k] = value
+	// Stable field order makes related records easy to compare in plain logs.
+	keys := make([]string, 0, len(fields))
+	for k := range fields {
+		keys = append(keys, k)
 	}
-	raw, _ := json.Marshal(v)
-	log.Print(string(raw))
+	sort.Strings(keys)
+	for _, k := range keys {
+		attrs = append(attrs, k, fields[k])
+	}
+	logger.Log(r.Context(), level, event, attrs...)
 }
 func reject(w http.ResponseWriter, r *http.Request, status int, reason string) {
 	if d, ok := r.Context().Value(diagnosticKey{}).(*requestDiagnostic); ok {
@@ -107,7 +154,7 @@ func (g *Server) observe(next http.Handler) http.Handler {
 		if prefix := gatewayPrefix(g.URL); prefix != "" && strings.HasPrefix(path, prefix+"/") {
 			path = strings.TrimPrefix(path, prefix)
 		}
-		d := &requestDiagnostic{ID: secure.ID(), Route: diagnosticRoute(path)}
+		d := &requestDiagnostic{ID: secure.ID(), Route: diagnosticRoute(path), Logger: g.Logger}
 		r = r.WithContext(context.WithValue(r.Context(), diagnosticKey{}, d))
 		w.Header().Set("X-Request-ID", d.ID)
 		dw := &diagnosticWriter{ResponseWriter: w}
@@ -116,8 +163,14 @@ func (g *Server) observe(next http.Handler) http.Handler {
 		if status == 0 {
 			status = 200
 		}
-		if status < 400 && (d.Route == "/healthz" || d.Route == "/v2/auth/poll" || d.Route == "/v2/time-sync") {
-			return
+		level := slog.LevelInfo
+		switch {
+		case status >= 500:
+			level = slog.LevelError
+		case status >= 400:
+			level = slog.LevelWarn
+		case d.Route == "/healthz" || d.Route == "/v2/auth/poll" || d.Route == "/v2/time-sync":
+			level = slog.LevelDebug
 		}
 		reason := d.Reason
 		if reason == "" && status >= 400 {
@@ -129,6 +182,6 @@ func (g *Server) observe(next http.Handler) http.Handler {
 		default:
 			method = "OTHER"
 		}
-		diagnostic(r, "http_request", map[string]any{"method": method, "status": status, "duration_ms": time.Since(started).Milliseconds(), "reason": reason})
+		diagnosticAt(r, level, "http_request", map[string]any{"method": method, "status": status, "duration_ms": time.Since(started).Milliseconds(), "reason": reason})
 	})
 }

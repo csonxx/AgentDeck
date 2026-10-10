@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +44,7 @@ type Server struct {
 	window             time.Time
 	attempts           int
 	Feishu             *Feishu
+	Logger             *slog.Logger
 }
 
 func New(db *store.Store, url, pin, trust string, rotation time.Duration) *Server {
@@ -54,7 +57,9 @@ func NewWithClock(db *store.Store, url, pin, trust string, rotation time.Duratio
 	if clock == nil {
 		clock = secure.NewClock()
 	}
-	return &Server{Clock: clock, replay: relay.Replay{Clock: clock}, Store: db, URL: url, Pin: pin, TLSTrust: trust, Rotation: rotation, peers: map[string]*relay.Peer{}, active: map[string]int{}}
+	g := &Server{Clock: clock, replay: relay.Replay{Clock: clock}, Store: db, URL: url, Pin: pin, TLSTrust: trust, Rotation: rotation, peers: map[string]*relay.Peer{}, active: map[string]int{}}
+	_ = g.ConfigureLogging(os.Stderr, "info")
+	return g
 }
 func write(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")

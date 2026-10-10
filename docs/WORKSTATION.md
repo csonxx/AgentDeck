@@ -35,11 +35,27 @@
 
 ## 网关日志 / Gateway diagnostics
 
-新网关二进制默认向标准错误输出 JSON 诊断记录，无需 debug 开关。代理原有访问日志需自行禁用敏感查询串；AgentDeck 的脱敏不会修改 Envoy/Ingress 的配置。 / The updated gateway binary writes JSON diagnostics to stderr by default. Configure proxies separately to omit sensitive query strings; application redaction does not alter Envoy/Ingress access logging.
+网关默认向标准错误输出可读文本，每行只有一个时间戳，并明确标注 `DEBUG` / `INFO` / `WARN` / `ERROR`；不再是标准日志时间后拼接 JSON。默认最低级别为 `INFO`。 / The gateway writes readable text to stderr with one timestamp and an explicit severity; it no longer appends JSON after a standard logger timestamp. The default minimum level is `INFO`.
+
+```text
+time=2026-10-10T08:30:00.000Z level=INFO msg=gateway_listening service=agentdeck-gateway listen=0.0.0.0:8080 public_url=https://example.com/agentdeck feishu_configured=true
+time=2026-10-10T08:30:01.000Z level=WARN msg=http_request service=agentdeck-gateway request_id=example-request route=/v2/local/tunnel duration_ms=0 method=GET reason=local_authentication_rejected status=401
+```
+
+| 级别 / Level | 用途 / Usage |
+| --- | --- |
+| DEBUG | 成功的健康检查、时间校准、登录轮询。 / Successful health checks, clock synchronization and login polling. |
+| INFO | 启动、登录、工作站上下线、配对、中继、解除关联及普通成功请求。 / Startup, login, workstation connections, pairing, relay, unlinking and ordinary successful requests. |
+| WARN | HTTP 4xx 拒绝，包括认证、权限、冲突及限流；飞书拒绝授权或身份请求。 / HTTP 4xx rejections, including authentication, authorization, conflicts and rate limits; rejected Feishu identity requests. |
+| ERROR | HTTP 5xx、管理 socket 失败、飞书配置/网络错误及上游 5xx。 / HTTP 5xx, admin socket failures, Feishu configuration/network errors and provider 5xx. |
+
+启动时设置 `--log-level debug`，或环境变量 `AGENTDECK_LOG_LEVEL=debug`；支持 `debug`、`info`、`warn`、`error`，命令行优先。修改后需重启/重新部署；DEBUG 同样遵守脱敏规则。 / Set `--log-level debug` or `AGENTDECK_LOG_LEVEL=debug` at startup. Supported values are `debug`, `info`, `warn` and `error`; the CLI flag takes precedence. Restart/redeploy after changing it. DEBUG uses the same redaction rules.
+
+代理原有访问日志需自行禁用敏感查询串；AgentDeck 的脱敏不会修改 Envoy/Ingress 的配置。 / Configure proxies separately to omit sensitive query strings; application redaction does not alter Envoy/Ingress access logging.
 
 字段包括 `service`、`event`、`request_id`、固定模板 `route`、HTTP 状态、耗时及 `reason`。每次请求生成 `X-Request-ID` 响应头，可用它关联应用日志。工作站/租户/用户/流程/路由授权只记录不可逆短摘要 `*_ref`，用于关联事件。 / Fields include service, event, request ID, a fixed route template, HTTP status, duration and reason. The response `X-Request-ID` correlates logs. Stable short hashes correlate workstation, tenant, user, flow and grant identities without recording their original values.
 
-记录登录流创建、飞书授权成功、token/user_info 失败阶段及安全数值错误码、工作站上下线、中继开始/结束、认证拒绝、离线/容量/代理失败。成功的健康检查、时间校准与授权轮询不逐次写访问日志，失败仍记录。 / Events cover flow creation, successful authorization, token/user_info failure stages and safe numeric provider codes, workstation online/offline, relay start/end and authentication/offline/capacity/proxy failures. Successful health, clock and login polling requests are suppressed; failures remain visible.
+记录登录流创建、飞书授权成功、token/user_info 失败阶段及安全数值错误码、工作站上下线、中继开始/结束、认证拒绝、离线/容量/代理失败。成功的健康检查、时间校准与授权轮询仅在 DEBUG 显示，失败仍按 WARN/ERROR 记录。 / Events cover flow creation, successful authorization, token/user_info failure stages and safe numeric provider codes, workstation online/offline, relay start/end and authentication/offline/capacity/proxy failures. Successful health, clock and login polling requests appear only at DEBUG; failures retain WARN/ERROR severity.
 
 常见 `reason`：`feishu_not_configured`、`oauth_browser_cookie_mismatch`、`oauth_state_missing_expired_or_used`、`feishu_identity_resolution_failed`、`local_authentication_rejected`、`local_already_connected`、`local_offline`、`relay_proof_rejected`、`local_tunnel_proxy_failed`。 / These reason codes distinguish configuration, browser cookie/state, provider identity, workstation authentication/conflict/offline, relay authentication and tunnel failures.
 
