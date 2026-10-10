@@ -21,6 +21,7 @@ func TestRejectConflictingOrInsecureTransportConfiguration(t *testing.T) {
 		{"relay with certificate", []string{"--relay", "--cert", "cert.pem", "--key", "key.pem"}, "no public listener"},
 		{"gateway outbound mode", []string{"--role", "gateway", "--relay"}, "requires serve"},
 		{"unknown role", []string{"--role", "unknown"}, "local or gateway"},
+		{"negative connection log interval", []string{"--role", "gateway", "--behind-proxy", "--connection-log-interval", "-1s"}, "--connection-log-interval must be >= 0"},
 		{"public plaintext URL", []string{"--behind-proxy", "--public-url", "http://agent.example.com"}, "HTTPS origin"},
 		{"unprotected public listener", []string{"--listen", "0.0.0.0:8080"}, "public listeners require"},
 		{"local and proxy certificates", []string{"--behind-proxy", "--cert", "cert.pem", "--key", "key.pem"}, "cannot be combined"},

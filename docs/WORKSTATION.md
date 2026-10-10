@@ -51,6 +51,14 @@ time=2026-10-10T08:30:01.000Z level=WARN msg=http_request service=agentdeck-gate
 
 启动时设置 `--log-level debug`，或环境变量 `AGENTDECK_LOG_LEVEL=debug`；支持 `debug`、`info`、`warn`、`error`，命令行优先。修改后需重启/重新部署；DEBUG 同样遵守脱敏规则。 / Set `--log-level debug` or `AGENTDECK_LOG_LEVEL=debug` at startup. Supported values are `debug`, `info`, `warn` and `error`; the CLI flag takes precedence. Restart/redeploy after changing it. DEBUG uses the same redaction rules.
 
+连接成功/断开会立即记录 `INFO local_online` / `local_offline`（工作站）和 `INFO app_connected` / `app_disconnected`（手机实时连接）。启动时及之后每 **30 秒**记录一次 `INFO connection_stats`，包括零连接状态；用 `--connection-log-interval 10s` 修改间隔，`0` 禁用汇总。最低级别设为 WARN/ERROR 时，INFO 汇总同样被过滤。 / Workstation and app stream connections/disconnections emit these INFO events immediately. An INFO `connection_stats` snapshot is logged at startup and every **30 seconds**, including zero counts. Override with `--connection-log-interval 10s`; `0` disables summaries. A WARN/ERROR minimum also filters INFO summaries.
+
+```text
+time=2026-10-10T08:40:00.000Z level=INFO msg=connection_stats service=agentdeck-gateway active_connections=3 online_workstations=1 app_streams=2 relay_requests=0
+```
+
+`active_connections` 为当前网关进程内已认证的工作站隧道与手机实时流之和；`online_workstations` 不含尚未完成握手或已关闭的隧道；`app_streams` 为已返回 101 的手机实时流数量，并非去重用户数；`relay_requests` 为其他正在处理的手机中继 HTTP 请求。普通健康检查、登录轮询、HTTP 空闲 keep-alive、已注册但离线的工作站/手机均不算活跃连接。多副本网关各自记录本进程数量，汇总不包含租户、用户或设备身份。 / `active_connections` is the sum of authenticated workstation tunnels and established app streams in this gateway process. Pending/closed tunnels are excluded. `app_streams` counts upgraded realtime streams, rather than unique users; `relay_requests` counts other in-flight relayed HTTP requests. Health checks, login polling, idle keep-alives and offline registrations are excluded. Each gateway replica reports its own counts; summaries contain no tenant, user or device identities.
+
 代理原有访问日志需自行禁用敏感查询串；AgentDeck 的脱敏不会修改 Envoy/Ingress 的配置。 / Configure proxies separately to omit sensitive query strings; application redaction does not alter Envoy/Ingress access logging.
 
 字段包括 `service`、`event`、`request_id`、固定模板 `route`、HTTP 状态、耗时及 `reason`。每次请求生成 `X-Request-ID` 响应头，可用它关联应用日志。工作站/租户/用户/流程/路由授权只记录不可逆短摘要 `*_ref`，用于关联事件。 / Fields include service, event, request ID, a fixed route template, HTTP status, duration and reason. The response `X-Request-ID` correlates logs. Stable short hashes correlate workstation, tenant, user, flow and grant identities without recording their original values.

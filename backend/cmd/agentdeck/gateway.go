@@ -178,7 +178,7 @@ func configureGatewayFeishu(g *gateway.Server, public, id, secret string) error 
 	}
 	return nil
 }
-func serveGateway(db *store.Store, dir, addr, public, pin, trust, logLevel string, cert tls.Certificate, behindProxy bool, rotation time.Duration) error {
+func serveGateway(db *store.Store, dir, addr, public, pin, trust, logLevel string, cert tls.Certificate, behindProxy bool, rotation, connectionLogInterval time.Duration) error {
 	g := gateway.New(db, public, pin, trust, rotation)
 	if e := g.ConfigureLogging(os.Stderr, logLevel); e != nil {
 		return e
@@ -187,7 +187,12 @@ func serveGateway(db *store.Store, dir, addr, public, pin, trust, logLevel strin
 		return e
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	statsDone := make(chan struct{})
+	go func() {
+		defer close(statsDone)
+		g.LogConnectionStats(ctx, connectionLogInterval)
+	}()
+	defer func() { stop(); <-statsDone }()
 	defer g.Close()
 	srv := &http.Server{Addr: addr, Handler: g.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 90 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}}}
 	srv.ErrorLog = slog.NewLogLogger(g.Logger.Handler(), slog.LevelError)

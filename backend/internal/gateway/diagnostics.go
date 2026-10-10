@@ -48,6 +48,60 @@ func (g *Server) ConfigureLogging(out io.Writer, level string) error {
 	return nil
 }
 
+type connectionStats struct {
+	Workstations, AppStreams, RelayRequests int
+}
+
+// Count authenticated logical connections, not idle HTTP keep-alives, registered
+// accounts or persisted grants. A reserved/closed tunnel is not online.
+func (g *Server) connectionStats() connectionStats {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	stats := connectionStats{AppStreams: g.appStreams}
+	for _, p := range g.peers {
+		if p == nil {
+			continue
+		}
+		select {
+		case <-p.Done():
+		default:
+			stats.Workstations++
+		}
+	}
+	for _, n := range g.active {
+		stats.RelayRequests += n
+	}
+	stats.RelayRequests -= stats.AppStreams
+	return stats
+}
+
+// LogConnectionStats logs an initial snapshot and then one per interval,
+// including zero counts. It stops with the server context; zero disables it.
+func (g *Server) LogConnectionStats(ctx context.Context, interval time.Duration) {
+	if interval <= 0 || ctx.Err() != nil {
+		return
+	}
+	logStats := func() {
+		s := g.connectionStats()
+		g.Logger.Info("connection_stats", "active_connections", s.Workstations+s.AppStreams,
+			"online_workstations", s.Workstations, "app_streams", s.AppStreams, "relay_requests", s.RelayRequests)
+	}
+	logStats()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if ctx.Err() != nil {
+				return
+			}
+			logStats()
+		}
+	}
+}
+
 func gatewayPrefix(raw string) string {
 	u, e := url.Parse(raw)
 	if e != nil {

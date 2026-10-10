@@ -40,6 +40,7 @@ type Server struct {
 	mu                 sync.Mutex
 	peers              map[string]*relay.Peer
 	active             map[string]int
+	appStreams         int
 	replay             relay.Replay
 	window             time.Time
 	attempts           int
@@ -439,10 +440,21 @@ func (g *Server) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	g.active[grant.Tenant]++
 	g.mu.Unlock()
+	streamActive := false
 	if operation != "time-sync" {
 		diagnostic(r, "relay_started", map[string]any{"operation": operation, "local_ref": ref(grant.Local), "grant_ref": ref(grant.ID)})
 	}
-	defer func() { g.mu.Lock(); g.active[grant.Tenant]--; g.mu.Unlock() }()
+	defer func() {
+		g.mu.Lock()
+		g.active[grant.Tenant]--
+		if streamActive {
+			g.appStreams--
+		}
+		g.mu.Unlock()
+		if streamActive {
+			diagnostic(r, "app_disconnected", map[string]any{"local_ref": ref(grant.Local), "grant_ref": ref(grant.ID)})
+		}
+	}()
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	r.ContentLength = int64(len(raw))
 	r = r.WithContext(context.WithValue(r.Context(), routeContext{}, route{grant, p}))
@@ -475,6 +487,13 @@ func (g *Server) proxy(w http.ResponseWriter, r *http.Request) {
 	proxy.Transport = transport
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, e error) { reject(w, r, 502, "local_tunnel_proxy_failed") }
 	proxy.ModifyResponse = func(res *http.Response) error {
+		if operation == "stream" && res.StatusCode == http.StatusSwitchingProtocols {
+			g.mu.Lock()
+			g.appStreams++
+			streamActive = true
+			g.mu.Unlock()
+			diagnostic(r, "app_connected", map[string]any{"local_ref": ref(grant.Local), "grant_ref": ref(grant.ID)})
+		}
 		if operation == "offer" && res.StatusCode == 200 {
 			data, err := io.ReadAll(io.LimitReader(res.Body, 16<<10))
 			res.Body.Close()

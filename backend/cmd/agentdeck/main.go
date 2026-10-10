@@ -70,6 +70,7 @@ func run() error {
 	device := f.String("device", "", "device ID to revoke")
 	role := f.String("role", "local", "serve role: local or gateway")
 	logLevel := f.String("log-level", os.Getenv("AGENTDECK_LOG_LEVEL"), "gateway text log level: debug, info (default), warn or error; overrides AGENTDECK_LOG_LEVEL")
+	connectionLogInterval := f.Duration("connection-log-interval", 30*time.Second, "gateway active connection summary interval (0 disables)")
 	relayMode := f.Bool("relay", false, "S-LOCAL outbound relay mode; no public TCP listener")
 	gatewayLink := f.String("gateway-link", "", "import owner-only Local/Gateway enrollment JSON")
 	gatewayURL := f.String("gateway-url", "", "HTTPS gateway origin for local-login")
@@ -273,13 +274,16 @@ func run() error {
 		trust = "system"
 	}
 	if *role == "gateway" {
+		if *connectionLogInterval < 0 {
+			return errors.New("--connection-log-interval must be >= 0")
+		}
 		if *voiceFile != "" {
 			return errors.New("voice transcription belongs to S-LOCAL")
 		}
 		if *codex != "" || *claude != "" || *media != "" || *agentsConfig != "" {
 			return errors.New("S-GATEWAY never imports agent content; configure sources only on S-LOCAL")
 		}
-		return serveGateway(db, *dir, *addr, *public, pin, trust, *logLevel, tlsCert, *behindProxy, *rotation)
+		return serveGateway(db, *dir, *addr, *public, pin, trust, *logLevel, tlsCert, *behindProxy, *rotation, *connectionLogInterval)
 	}
 	var link relay.Link
 	if *relayMode {
