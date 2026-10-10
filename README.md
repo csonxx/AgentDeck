@@ -2,7 +2,7 @@
 
 在手机上查看和继续电脑上的 coding agent 会话。支持 Codex、Claude Code、OpenCode、Qoder、TRAE、WorkBuddy，电脑运行 Go 后端，手机使用 Flutter 原生 App。
 
-当前版本 **0.4.14** · [源码仓库](https://gitlab.ttyuyin.com/azeroth/agentdesk)
+当前版本 **0.4.15** · [源码仓库](https://gitlab.ttyuyin.com/azeroth/agentdesk)
 
 ## 能做什么
 
@@ -84,7 +84,11 @@ USB 断开或电脑休眠会中断连接；重接后再执行 `adb reverse`，�
 
 测试网关地址为 `https://web-test-omnivibe.ttyuyin.com/agentdeck`；电脑 `local-login --gateway-url` 和 App 网关登录都填完整地址。飞书回调为该地址加 `/v2/auth/callback`。CICD 构建、NAS 子目录和 VS 配置见[测试部署指南](docs/deploy/TESTING.md)。
 
+**TODO：测试配置中的 `FEISHU_APP_ID`、`FEISHU_APP_SECRET` 暂为 `TODO`。填写真实值并登记回调、发布飞书应用、重新部署后，才能使用飞书扫码关联。** 构建、部署和公网加密链路已验证，范围见[测试验收记录](docs/deploy/ACCEPTANCE-2026-10-10.md)。
+
 The testing gateway uses `https://web-test-omnivibe.ttyuyin.com/agentdeck`. Enter the full URL, including the prefix, in S-LOCAL and the app. Register this URL plus `/v2/auth/callback` in Feishu. See the [testing deployment guide](docs/deploy/TESTING.md).
+
+**TODO: replace both Feishu credential placeholders, register the callback, publish the Feishu application, and redeploy before using QR sign-in.** Build, deployment, and the public encrypted relay have been verified; see the [acceptance record](docs/deploy/ACCEPTANCE-2026-10-10.md) for scope.
 
 iOS/macOS 也使用原生客户端，需 Xcode 与对应签名配置；不支持 Flutter Web。仅部署后端时只需 Go。
 

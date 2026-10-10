@@ -11,7 +11,8 @@ spec:
       match:
         - uri:
             prefix: /agentdeck/
-      timeout: 0s
+      # Omit timeout: Istio disables the route timeout by default. This cluster's
+      # CRD rejects an explicit 0s even though long-lived WebSockets need no limit.
       route:
         - destination:
             host: agent-desk.ai-social.svc.cluster.local

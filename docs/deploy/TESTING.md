@@ -2,6 +2,8 @@
 
 本指南记录 AgentDeck 的测试部署配置；部署是否成功及真实飞书登录是否通过，以验收记录为准。
 
+当前验收：[2026-10-10 测试验收记录](ACCEPTANCE-2026-10-10.md)。
+
 This guide describes the testing deployment configuration. Deployment and real Feishu sign-in acceptance must be verified separately.
 
 | 项目 / Item | 配置 / Configuration |
@@ -40,6 +42,10 @@ Both `FEISHU_APP_ID` and `FEISHU_APP_SECRET` are initially `TODO`, with an empty
 VS 参考 [testing-vs.yaml](testing-vs.yaml)：仅匹配 `/agentdeck/`，保留前缀，不重写为 `/`；长连接不设总超时，HTTP/1.1 WebSocket Upgrade 需透传。现有域名证书由外层网关管理。公网健康检查地址为 `/agentdeck/healthz`；内部探针用 `/healthz`。无凭据的隧道/账号请求应返回 401，不能只以 200 健康检查代替登录、配对、实时会话和图片验收。
 
 The VS matches `/agentdeck/` and preserves the prefix. Forward WebSocket upgrades and disable the total route timeout. TLS remains at the existing ingress. Use `/agentdeck/healthz` publicly and `/healthz` for internal probes. Unauthenticated tunnel/account requests must return 401. Health alone does not prove sign-in, pairing, live sessions, or images work.
+
+模板省略 `timeout`，使用 Istio 默认禁用请求总超时的行为；本集群 CRD 拒绝显式 `0s`。[Istio 官方说明](https://istio.io/latest/docs/tasks/traffic-management/request-timeouts/)。
+
+The template omits `timeout`, using Istio's disabled-by-default request timeout. This cluster's CRD rejects an explicit `0s`.
 
 电脑与手机连接 / Connect workstation and app:
 
