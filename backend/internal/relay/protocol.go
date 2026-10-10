@@ -49,9 +49,8 @@ type Grant struct {
 }
 
 func (l Link) Validate() error {
-	u, e := url.Parse(l.URL)
 	k, ke := secure.B64.DecodeString(l.Key)
-	if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || l.Version != 1 || ke != nil || len(k) != 32 || !ValidID(l.Local) || !ValidID(l.Tenant) {
+	if !ValidGatewayURL(l.URL) || l.Version != 1 || ke != nil || len(k) != 32 || !ValidID(l.Local) || !ValidID(l.Tenant) {
 		return errors.New("invalid gateway link")
 	}
 	if l.TLSTrust == "system" && l.Pin == "" {
@@ -62,6 +61,24 @@ func (l Link) Validate() error {
 		return errors.New("invalid gateway TLS trust")
 	}
 	return nil
+}
+
+// ValidGatewayURL accepts an HTTPS origin with an optional canonical path prefix.
+// Restrict prefixes to unescaped segments so proxies and clients agree on paths.
+func ValidGatewayURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#") || u.RawPath != "" {
+		return false
+	}
+	if u.Path == "" {
+		return true
+	}
+	for _, segment := range strings.Split(strings.TrimPrefix(u.Path, "/"), "/") {
+		if !ValidID(segment) {
+			return false
+		}
+	}
+	return strings.HasPrefix(u.Path, "/")
 }
 func ValidID(s string) bool {
 	if len(s) < 1 || len(s) > 80 {

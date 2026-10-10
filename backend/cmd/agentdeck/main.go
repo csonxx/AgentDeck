@@ -14,7 +14,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -217,9 +216,8 @@ func run() error {
 	if *relayMode && (*behindProxy || *cert != "" || *key != "" || *publicPin != "") {
 		return errors.New("--relay has no public listener; cannot be combined with proxy or certificate flags")
 	}
-	u, e := url.Parse(*public)
-	if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
-		return errors.New("--public-url must be an HTTPS origin")
+	if !relay.ValidGatewayURL(*public) || (*role != "gateway" && strings.Contains(strings.TrimPrefix(*public, "https://"), "/")) {
+		return errors.New("--public-url must be an HTTPS origin; gateway mode also allows a canonical path prefix")
 	}
 	if *rotation < time.Second {
 		return errors.New("--rotation must be >= 1s")

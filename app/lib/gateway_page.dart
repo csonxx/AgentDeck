@@ -172,7 +172,7 @@ class _GatewayPageState extends State<GatewayPage> {
               enableSuggestions: false,
               decoration: InputDecoration(
                 labelText: context.tr('网关 HTTPS 域名'),
-                hintText: 'https://agent.example.com',
+                hintText: 'https://agent.example.com/agentdeck',
               ),
             ),
             const SizedBox(height: 16),

@@ -31,6 +31,9 @@ type fixture struct {
 }
 
 func setup(t *testing.T) *fixture {
+	return setupPrefix(t, "")
+}
+func setupPrefix(t *testing.T, prefix string) *fixture {
 	t.Helper()
 	db, e := store.New(t.TempDir())
 	if e != nil {
@@ -38,7 +41,7 @@ func setup(t *testing.T) *fixture {
 	}
 	g := New(db, "", "", "pin", time.Second)
 	ts := httptest.NewTLSServer(g.Handler())
-	g.URL = ts.URL
+	g.URL = ts.URL + prefix
 	g.Pin = relay.Hash(ts.Certificate().RawSubjectPublicKeyInfo)
 	link, e := g.AddLocal("tenant-a", "workstation")
 	if e != nil {
@@ -129,7 +132,7 @@ func pair(t *testing.T, f *fixture) *phone {
 	key, _ := secure.B64.DecodeString(g.Key)
 	p, _ := ecdh.X25519().GenerateKey(rand.Reader)
 	path := "/v2/relay/" + g.Local + "/offer"
-	data, _ := request(t, f.http.Client(), f.http.URL, path, "Relay "+g.ID, key, "grant/"+g.ID, map[string]string{"public": secure.B64.EncodeToString(p.PublicKey().Bytes())}, 200)
+	data, _ := request(t, f.http.Client(), f.g.URL, path, "Relay "+g.ID, key, "grant/"+g.ID, map[string]string{"public": secure.B64.EncodeToString(p.PublicKey().Bytes())}, 200)
 	var offer struct{ Public, Token, Invite string }
 	if json.Unmarshal(data, &offer) != nil {
 		t.Fatal("offer invalid")
@@ -146,16 +149,16 @@ func pair(t *testing.T, f *fixture) *phone {
 	// The gateway knows routing secrets/public DH material, but neither root nor
 	// the SAS. Pending approval cannot be bypassed with a valid gateway grant.
 	bad, _ := secure.SealJSON(key, "pair-request/"+offer.Invite, 0, 0, map[string]string{"token": offer.Token, "name": "wrong root"})
-	request(t, f.http.Client(), f.http.URL, path, "Relay "+g.ID, key, "grant/"+g.ID, map[string]any{"invite": offer.Invite, "public": req["public"], "box": bad}, 401)
+	request(t, f.http.Client(), f.g.URL, path, "Relay "+g.ID, key, "grant/"+g.ID, map[string]any{"invite": offer.Invite, "public": req["public"], "box": bad}, 401)
 	// An invalid encrypted proof cannot consume the owner's pending invitation.
-	request(t, f.http.Client(), f.http.URL, path, "Relay "+g.ID, key, "grant/"+g.ID, req, 202)
+	request(t, f.http.Client(), f.g.URL, path, "Relay "+g.ID, key, "grant/"+g.ID, req, 202)
 	if f.local.Approve(g.ID, strings.Repeat("0", 12)) == nil {
 		t.Fatal("wrong comparison code approved")
 	}
 	if f.local.Approve(g.ID, server.PairCode(root, offer.Invite)) != nil {
 		t.Fatal("valid comparison code rejected")
 	}
-	data, _ = request(t, f.http.Client(), f.http.URL, path, "Relay "+g.ID, key, "grant/"+g.ID, req, 200)
+	data, _ = request(t, f.http.Client(), f.g.URL, path, "Relay "+g.ID, key, "grant/"+g.ID, req, 200)
 	var box secure.Box
 	_ = json.Unmarshal(data, &box)
 	plain, e := secure.Open(root, "pair", box)
@@ -170,7 +173,7 @@ func pair(t *testing.T, f *fixture) *phone {
 	if reply.Grant != g.ID {
 		t.Fatal("peer binding mismatch")
 	}
-	request(t, f.http.Client(), f.http.URL, path, "Relay "+g.ID, key, "grant/"+g.ID, req, 401)
+	request(t, f.http.Client(), f.g.URL, path, "Relay "+g.ID, key, "grant/"+g.ID, req, 401)
 	return &phone{grant: g, root: root, device: reply.Device}
 }
 func (p *phone) connect(t *testing.T, f *fixture) {
@@ -178,7 +181,7 @@ func (p *phone) connect(t *testing.T, f *fixture) {
 	key, _ := secure.B64.DecodeString(p.grant.Key)
 	hello, _ := secure.SealJSON(p.root, "hello/"+p.device, 0, 0, map[string]any{"time": time.Now().Unix(), "challenge": secure.ID()})
 	path := "/v2/relay/" + p.grant.Local + "/session"
-	data, _ := request(t, f.http.Client(), f.http.URL, path, "Relay "+p.grant.ID, key, "grant/"+p.grant.ID, map[string]any{"device": p.device, "box": hello}, 200)
+	data, _ := request(t, f.http.Client(), f.g.URL, path, "Relay "+p.grant.ID, key, "grant/"+p.grant.ID, map[string]any{"device": p.device, "box": hello}, 200)
 	var box secure.Box
 	_ = json.Unmarshal(data, &box)
 	plain, e := secure.Open(p.root, "welcome/"+p.device, box)
@@ -193,7 +196,7 @@ func (p *phone) connect(t *testing.T, f *fixture) {
 	proof, _ := relay.Auth(key, "grant/"+p.grant.ID, "GET", path, nil, "Bearer "+p.ticket)
 	cfg, _ := relay.TLSConfig("pin", f.g.Pin)
 	d := websocket.Dialer{TLSClientConfig: cfg}
-	ws, _, e := d.Dial(strings.Replace(f.http.URL, "https://", "wss://", 1)+path, http.Header{"Authorization": []string{"Relay " + p.grant.ID}, "X-Relay-Auth": []string{proof}, "X-Local-Authorization": []string{"Bearer " + p.ticket}})
+	ws, _, e := d.Dial(strings.Replace(f.g.URL, "https://", "wss://", 1)+path, http.Header{"Authorization": []string{"Relay " + p.grant.ID}, "X-Relay-Auth": []string{proof}, "X-Local-Authorization": []string{"Bearer " + p.ticket}})
 	if e != nil {
 		t.Fatal("relay websocket upgrade failed", e)
 	}
@@ -237,7 +240,12 @@ func (p *phone) read(t *testing.T, kind string) (map[string]any, secure.Box) {
 	return nil, secure.Box{}
 }
 func TestRelayEncryptedPairLiveMediaReconnectionAndRevocation(t *testing.T) {
-	f := setup(t)
+	for _, prefix := range []string{"", "/agentdeck"} {
+		t.Run("prefix="+prefix, func(t *testing.T) { testRelayEncryptedPairLiveMediaReconnectionAndRevocation(t, prefix) })
+	}
+}
+func testRelayEncryptedPairLiveMediaReconnectionAndRevocation(t *testing.T, prefix string) {
+	f := setupPrefix(t, prefix)
 	p := pair(t, f)
 	p.connect(t, f)
 	p.read(t, "sessions")
@@ -328,9 +336,9 @@ func TestTenantOwnerIsolationAndProofReplay(t *testing.T) {
 		}
 		_ = f.g.Store.Put("gwnodes", n.ID, n)
 		box, _ := secure.SealJSON(key, "account-request/"+a.ID, 0, 0, map[string]string{"local": n.ID})
-		request(t, f.http.Client(), f.http.URL, "/v2/account/bind", "Account "+a.ID, key, "account/"+a.ID, box, 403)
+		request(t, f.http.Client(), f.g.URL, "/v2/account/bind", "Account "+a.ID, key, "account/"+a.ID, box, 403)
 	}
-	data, _ := request(t, f.http.Client(), f.http.URL, "/v2/account/locals", "Account "+a.ID, key, "account/"+a.ID, nil, 200)
+	data, _ := request(t, f.http.Client(), f.g.URL, "/v2/account/locals", "Account "+a.ID, key, "account/"+a.ID, nil, 200)
 	var box secure.Box
 	_ = json.Unmarshal(data, &box)
 	plain, _ := secure.Open(key, "account-response/"+a.ID, box)
@@ -342,10 +350,10 @@ func TestTenantOwnerIsolationAndProofReplay(t *testing.T) {
 	g := grantFor(t, f)
 	gkey, _ := secure.B64.DecodeString(g.Key)
 	path := "/v2/relay/" + otherTenant.Local + "/offer"
-	request(t, f.http.Client(), f.http.URL, path, "Relay "+g.ID, gkey, "grant/"+g.ID, map[string]string{"public": secure.B64.EncodeToString(secure.Random(32))}, 401)
+	request(t, f.http.Client(), f.g.URL, path, "Relay "+g.ID, gkey, "grant/"+g.ID, map[string]string{"public": secure.B64.EncodeToString(secure.Random(32))}, 401)
 	proof, _ := relay.Auth(key, "account/"+a.ID, "POST", "/v2/account/locals", nil, "")
 	for i, want := range []int{200, 401} {
-		req, _ := http.NewRequest("POST", f.http.URL+"/v2/account/locals", nil)
+		req, _ := http.NewRequest("POST", f.g.URL+"/v2/account/locals", nil)
 		req.Header.Set("Authorization", "Account "+a.ID)
 		req.Header.Set("X-Relay-Auth", proof)
 		res, e := f.http.Client().Do(req)
@@ -359,13 +367,18 @@ func TestTenantOwnerIsolationAndProofReplay(t *testing.T) {
 	}
 }
 func TestFeishuPKCECookieStateAndEncryptedEnrollment(t *testing.T) {
-	f := setup(t)
+	for _, prefix := range []string{"", "/agentdeck"} {
+		t.Run("prefix="+prefix, func(t *testing.T) { testFeishuPKCECookieStateAndEncryptedEnrollment(t, prefix) })
+	}
+}
+func testFeishuPKCECookieStateAndEncryptedEnrollment(t *testing.T, prefix string) {
+	f := setupPrefix(t, prefix)
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/token":
 			var req map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&req)
-			if req["client_id"] != "synthetic-app" || req["client_secret"] != "synthetic-secret" || req["code_verifier"] == "" || req["redirect_uri"] != f.http.URL+"/v2/auth/callback" {
+			if req["client_id"] != "synthetic-app" || req["client_secret"] != "synthetic-secret" || req["code_verifier"] == "" || req["redirect_uri"] != f.g.URL+"/v2/auth/callback" {
 				t.Error("OAuth exchange fields missing")
 				fail(w, 401)
 				return
@@ -382,12 +395,12 @@ func TestFeishuPKCECookieStateAndEncryptedEnrollment(t *testing.T) {
 		}
 	}))
 	defer fake.Close()
-	provider := NewFeishu("synthetic-app", "synthetic-secret", f.http.URL+"/v2/auth/callback")
+	provider := NewFeishu("synthetic-app", "synthetic-secret", f.g.URL+"/v2/auth/callback")
 	provider.AuthorizeURL = fake.URL + "/authorize"
 	provider.TokenURL = fake.URL + "/token"
 	provider.UserURL = fake.URL + "/user"
 	f.g.Feishu = provider
-	flow, e := relay.BeginLogin(context.Background(), f.http.Client(), f.http.URL, "local", "SSO workstation")
+	flow, e := relay.BeginLogin(context.Background(), f.http.Client(), f.g.URL, "local", "SSO workstation")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -402,7 +415,7 @@ func TestFeishuPKCECookieStateAndEncryptedEnrollment(t *testing.T) {
 	}
 	jar, _ := cookiejar.New(nil)
 	browser := &http.Client{Transport: f.http.Client().Transport, Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	res, e := browser.Get(f.http.URL + "/v2/auth/authorize?flow=" + flow.ID)
+	res, e := browser.Get(f.g.URL + "/v2/auth/authorize?flow=" + flow.ID)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -411,7 +424,7 @@ func TestFeishuPKCECookieStateAndEncryptedEnrollment(t *testing.T) {
 	if authURL.Query().Get("code_challenge") == "" || authURL.Query().Get("code_challenge_method") != "S256" {
 		t.Fatal("PKCE missing")
 	}
-	callback := f.http.URL + "/v2/auth/callback?state=" + authURL.Query().Get("state") + "&code=synthetic-code"
+	callback := f.g.URL + "/v2/auth/callback?state=" + authURL.Query().Get("state") + "&code=synthetic-code"
 	// Knowing the QR flow/state alone is insufficient to complete the callback.
 	attack, e := f.http.Client().Get(callback)
 	if e != nil {
@@ -477,7 +490,7 @@ func TestAccountRevocationClosesIssuedGrantsAndPreservesOtherPhone(t *testing.T)
 	}
 	key, _ := secure.B64.DecodeString(a.Key)
 	bind, _ := secure.SealJSON(key, "account-request/"+a.ID, 0, 0, map[string]string{"local": f.link.Local})
-	data, _ := request(t, f.http.Client(), f.http.URL, "/v2/account/bind", "Account "+a.ID, key, "account/"+a.ID, bind, 200)
+	data, _ := request(t, f.http.Client(), f.g.URL, "/v2/account/bind", "Account "+a.ID, key, "account/"+a.ID, bind, 200)
 	var box secure.Box
 	_ = json.Unmarshal(data, &box)
 	plain, _ := secure.Open(key, "account-response/"+a.ID, box)
@@ -501,7 +514,7 @@ func TestAccountRevocationClosesIssuedGrantsAndPreservesOtherPhone(t *testing.T)
 	if e := f.g.RevokeAccount(a.ID); e != nil {
 		t.Fatal(e)
 	}
-	request(t, f.http.Client(), f.http.URL, "/v2/account/locals", "Account "+a.ID, key, "account/"+a.ID, nil, 401)
+	request(t, f.http.Client(), f.g.URL, "/v2/account/locals", "Account "+a.ID, key, "account/"+a.ID, nil, 401)
 	var grant relay.Grant
 	if f.g.Store.Get("gwgrants", result.Result.ID, &grant) == nil || f.g.Store.Get("gwgrants", p.grant.ID, &grant) == nil {
 		t.Fatal("revoked account retained grants")

@@ -190,7 +190,7 @@ func (g *Server) Close() {
 func (g *Server) Handler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		write(w, map[string]any{"service": "agentdeck-gateway", "version": 2})
+		write(w, map[string]any{"service": "agentdeck-gateway", "version": 2, "feishu_configured": g.Feishu != nil})
 	})
 	m.HandleFunc("GET /v2/local/tunnel", g.tunnel)
 	m.HandleFunc("POST /v2/local/grants", g.register)
@@ -206,6 +206,17 @@ func (g *Server) Handler() http.Handler {
 		}
 		if !g.limit() {
 			fail(w, 429)
+			return
+		}
+		// VS preserves the external prefix. Authenticate logical /v2 paths after
+		// stripping it; only bare healthz remains available to cluster probes.
+		base, _ := url.Parse(g.URL)
+		if base != nil && base.Path != "" && r.URL.Path != "/healthz" {
+			if !strings.HasPrefix(r.URL.Path, base.Path+"/") {
+				http.NotFound(w, r)
+				return
+			}
+			http.StripPrefix(base.Path, m).ServeHTTP(w, r)
 			return
 		}
 		m.ServeHTTP(w, r)

@@ -31,3 +31,6 @@ agentdeck-pair*.png
 # Public offline ASR weights are fetched with scripts/setup_client_voice.py
 app/assets/asr/*.onnx
 app/assets/asr/*.part
+
+# CICD Linux executable
+/main

@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:cryptography/cryptography.dart';
 
+bool validGatewayPrefix(String path) =>
+    path.isEmpty || RegExp(r'^(/[a-zA-Z0-9_-]{1,80})+$').hasMatch(path);
+
 class WireCrypto {
   static final aes = AesGcm.with256bits();
   static final hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
@@ -109,7 +112,9 @@ class PairBundle {
         u.userInfo.isNotEmpty ||
         u.hasQuery ||
         u.hasFragment ||
-        u.path.isNotEmpty ||
+        (relay != null && u.toString() != m['url']) ||
+        (relay == null ? u.path.isNotEmpty : !validGatewayPrefix(u.path)) ||
+        u.toString().contains('%') ||
         !validTrust ||
         base64Decode(m['token'] as String).length != 32 ||
         base64Decode(m['public'] as String).length != 32) {

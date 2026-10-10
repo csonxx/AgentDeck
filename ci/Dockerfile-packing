@@ -1,0 +1,6 @@
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates && mkdir -p /data/agentdeck
+WORKDIR /app
+COPY main /app/agentdeck
+EXPOSE 8080
+ENTRYPOINT ["/app/agentdeck"]

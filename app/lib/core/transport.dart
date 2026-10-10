@@ -25,14 +25,17 @@ HttpClient createTransport(String trust, String pin, {SecurityContext? roots}) {
 }
 
 String validateGatewayOrigin(String origin) {
-  final u = Uri.parse(origin.trim());
+  final raw = origin.trim();
+  final u = Uri.parse(raw);
   if (u.scheme != 'https' ||
       u.host.isEmpty ||
       u.userInfo.isNotEmpty ||
       u.hasQuery ||
       u.hasFragment ||
-      u.path.isNotEmpty) {
-    throw const FormatException('请输入 HTTPS 网关域名，不含路径');
+      u.toString() != raw ||
+      !validGatewayPrefix(u.path) ||
+      u.toString().contains('%')) {
+    throw const FormatException('请输入 HTTPS 网关地址，可含 /agentdeck 前缀，不含末尾斜杠');
   }
   return u.toString();
 }

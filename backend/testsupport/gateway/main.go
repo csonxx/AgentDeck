@@ -58,7 +58,7 @@ func run(dir, listen string) error {
 	if e != nil {
 		return e
 	}
-	origin := "https://localhost:" + strings.Split(listen, ":")[1]
+	origin := "https://localhost:" + strings.Split(listen, ":")[1] + "/agentdeck"
 	g := gateway.NewWithClock(db, origin, "", "system", time.Second, secure.NewClockAt(time.Now().Add(24*time.Hour).UnixMilli()))
 	var mu sync.Mutex
 	codes := map[string]identityCode{}
@@ -138,7 +138,7 @@ func run(dir, listen string) error {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/", g.Handler())
-	mux.HandleFunc("POST /fixture/complete", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /agentdeck/fixture/complete", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Flow string `json:"flow"`
 			User string `json:"user"`
@@ -149,7 +149,7 @@ func run(dir, listen string) error {
 		}
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	})
-	mux.HandleFunc("POST /fixture/approve", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /agentdeck/fixture/approve", func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4<<10))
 		res, e := server.AdminClient(filepath.Join(dir, "local-state")).Post("http://unix/pair-approve", "application/json", bytes.NewReader(raw))
 		if e != nil {
@@ -160,11 +160,11 @@ func run(dir, listen string) error {
 		w.WriteHeader(res.StatusCode)
 		io.Copy(w, res.Body)
 	})
-	mux.HandleFunc("POST /fixture/disconnect", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /agentdeck/fixture/disconnect", func(w http.ResponseWriter, r *http.Request) {
 		g.Close()
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	})
-	mux.HandleFunc("POST /fixture/revoke", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /agentdeck/fixture/revoke", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Grant string `json:"grant"`
 		}
@@ -172,7 +172,7 @@ func run(dir, listen string) error {
 		_ = g.RevokeGrant(req.Grant)
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	})
-	mux.HandleFunc("GET /fixture/audit", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /agentdeck/fixture/audit", func(w http.ResponseWriter, r *http.Request) {
 		empty := true
 		for _, b := range []string{"events", "sessions", "media", "devices"} {
 			rows, e := db.Values(b)

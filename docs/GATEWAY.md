@@ -42,14 +42,18 @@ sequenceDiagram
 https://agent.example.com/v2/auth/callback
 ```
 
-回调域名必须与 Go 的 `--public-url` 完全一致，不支持子路径部署。按应用要求开通登录及获取用户身份的权限并发布/设定可用范围。浏览器打开 AgentDeck 登录页，二维码指向本网关授权入口；飞书扫码后在同一浏览器完成授权回调。同一手机也可以点“在飞书授权”，不必用相机扫描自己的屏幕。真实手机的飞书浏览器 Cookie/跳转兼容性待目标应用验收。
+在应用的“安全设置 → 重定向 URL”登记完整回调地址，即 `--public-url` 加 `/v2/auth/callback`。网关支持路径前缀，例如 `https://web-test-omnivibe.ttyuyin.com/agentdeck`；前缀各段只允许字母、数字、下划线和连字符，无末尾斜杠。VS 必须保留前缀转发，由网关剥离后处理协议路径。将使用者加入应用可用范围，并按应用类型完成版本发布/审核。
+
+**当前登录无需额外 API 权限，`FEISHU_OAUTH_SCOPE` 留空即可。** 官方“获取授权码”和“获取用户信息”接口均标注“权限要求：无”；AgentDeck 只读取 `tenant_key`、`open_id`、`name`。无需开通 `contact:user.base:readonly`、`contact:user.id:readonly`、手机号/邮箱/完整通讯录或消息/机器人权限，也无需 `offline_access`。后者用于获取 refresh token，当前实现不需要。无需配置事件订阅、Verification Token 或 Encrypt Key；Local/App 的端到端加密使用 AgentDeck 自己的密钥协议。
+
+浏览器打开 AgentDeck 登录页，二维码指向本网关授权入口；飞书扫码后在同一浏览器完成授权回调。同一手机也可以点“在飞书授权”，不必用相机扫描自己的屏幕。真实手机的飞书浏览器 Cookie/跳转兼容性待目标应用验收。
 
 参考官方 [扫码登录介绍](https://open.feishu.cn/document/qr-code-scanning-login-for-web-app/introduction)、[OAuth 授权码](https://open.feishu.cn/document/authentication-management/access-token/obtain-oauth-code)、[获取用户身份](https://open.feishu.cn/document/server-docs/authentication-management/login-state-management/get)。当前使用 OAuth2 v2 token 交换和 v1 user_info；不获取或长期保存飞书 refresh token。
 
 网关运行环境注入以下变量，App Secret 不写入仓库、不传给 App/Local、不发聊天。示例模板见 [gateway.env.example](deploy/gateway.env.example)。
 
-- `FEISHU_APP_ID` / `FEISHU_APP_SECRET`：必须成对配置；未配置时登录 API 返回 503，不能用伪身份登录。
-- `FEISHU_OAUTH_SCOPE`：可选，按已批准的应用范围配置；默认不额外请求 scope。
+- `FEISHU_APP_ID` / `FEISHU_APP_SECRET`：必须成对配置；未配置或两者均为 `TODO` 时登录 API 返回 503，不能用伪身份登录；TODO 占位后需成对替换并重新部署。
+- `FEISHU_OAUTH_SCOPE`：当前身份登录留空；只有未来增加其他 API 时才按需申请并填写 scope。请求应用尚未开通的 scope 会导致飞书授权报错 `20027`。
 - `FEISHU_ALLOWED_TENANTS`：可选，逗号分隔 tenant_key 白名单；为空允许该飞书应用授权成功的租户。
 
 ## 启动 S-GATEWAY（证书由 Envoy 持有）
@@ -94,7 +98,7 @@ agentdeck serve --relay --data "$HOME/.agentdeck" \
 
 ## C-APP 飞书关联与首次配对
 
-在 App“连接工作站”选择“通过网关 · 飞书登录”，输入同一公网 HTTPS origin，用**同一个飞书账号**授权。网关只列出同租户且同 open_id 归属的工作站，选择在线项。
+在 App“连接工作站”选择“通过网关 · 飞书登录”，输入同一公网 HTTPS 网关地址（如有前缀必须一并输入），用**同一个飞书账号**授权。网关只列出同租户且同 open_id 归属的工作站，选择在线项。
 
 App 显示 12 位十六进制校验码。工作站查看待处理请求：
 

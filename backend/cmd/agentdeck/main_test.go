@@ -1,6 +1,7 @@
 package main
 
 import (
+	"agentdeck/internal/gateway"
 	"agentdeck/internal/relay"
 	"agentdeck/internal/store"
 	"os"
@@ -57,5 +58,27 @@ func TestLocalLoginPreservesExistingEncryptedAssociation(t *testing.T) {
 	var saved relay.Link
 	if e := db.Get("relayconfig", "gateway", &saved); e != nil || saved != original {
 		t.Fatal("existing association changed")
+	}
+}
+
+func TestGatewayFeishuTODOStaysDisabled(t *testing.T) {
+	for _, tc := range []struct {
+		id, secret          string
+		configured, invalid bool
+	}{
+		{"", "", false, false}, {"TODO", "TODO", false, false},
+		{"synthetic-app", "synthetic-secret", true, false},
+		{"TODO", "synthetic-secret", false, true},
+		{"synthetic-app", "TODO", false, true},
+		{"synthetic-app", "", false, true},
+	} {
+		g := &gateway.Server{}
+		err := configureGatewayFeishu(g, "https://example.com/agentdeck", tc.id, tc.secret)
+		if (err != nil) != tc.invalid || (g.Feishu != nil) != tc.configured {
+			t.Fatal("invalid Feishu placeholder handling")
+		}
+		if g.Feishu != nil && g.Feishu.Redirect != "https://example.com/agentdeck/v2/auth/callback" {
+			t.Fatal("callback prefix lost")
+		}
 	}
 }

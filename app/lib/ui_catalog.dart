@@ -801,10 +801,10 @@ const uiCatalog = <String, List<String>>{
     'Не удалось записать зашифрованный кэш',
   ],
   '界面示例': ['UI preview', '介面示例', 'Предпросмотр интерфейса'],
-  '请输入 HTTPS 网关域名，不含路径': [
-    'Enter an HTTPS gateway domain without a path',
-    '請輸入 HTTPS 閘道網域，不含路徑',
-    'Введите HTTPS-домен шлюза без пути',
+  '请输入 HTTPS 网关地址，可含 /agentdeck 前缀，不含末尾斜杠': [
+    'Enter an HTTPS gateway URL, optionally with /agentdeck, without a trailing slash',
+    '請輸入 HTTPS 閘道位址，可含 /agentdeck 前綴，不含結尾斜線',
+    'Введите HTTPS-адрес шлюза, при необходимости с /agentdeck, без завершающего слеша',
   ],
   '网关登录地址不一致': [
     'Gateway sign-in URL mismatch',

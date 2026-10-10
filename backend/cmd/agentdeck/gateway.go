@@ -102,7 +102,7 @@ func localLogin(dir, url, pin, name string, noOpen bool) error {
 	// Validate public origin without needing an already-enrolled Local ID/key.
 	dummy := relay.Link{Version: 1, URL: url, Pin: pin, TLSTrust: trust, Tenant: "pending", Local: "pending", Key: strings.Repeat("A", 43) + "="}
 	if dummy.Validate() != nil {
-		return errors.New("--gateway-url must be an HTTPS origin with valid trust configuration")
+		return errors.New("--gateway-url must be an HTTPS URL with an optional canonical path prefix and valid trust configuration")
 	}
 	h := &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig}, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -156,10 +156,13 @@ func localLogin(dir, url, pin, name string, noOpen bool) error {
 	}
 	return ctx.Err()
 }
-func serveGateway(db *store.Store, dir, addr, public, pin, trust string, cert tls.Certificate, behindProxy bool, rotation time.Duration) error {
-	g := gateway.New(db, public, pin, trust, rotation)
-	if id, secret := os.Getenv("FEISHU_APP_ID"), os.Getenv("FEISHU_APP_SECRET"); id != "" || secret != "" {
-		if id == "" || secret == "" {
+func configureGatewayFeishu(g *gateway.Server, public, id, secret string) error {
+	// Explicit deployment placeholders must never create a usable OAuth flow.
+	if id == "TODO" && secret == "TODO" {
+		return nil
+	}
+	if id != "" || secret != "" {
+		if id == "" || secret == "" || id == "TODO" || secret == "TODO" {
 			return errors.New("FEISHU_APP_ID and FEISHU_APP_SECRET must be configured together")
 		}
 		g.Feishu = gateway.NewFeishu(id, secret, public+"/v2/auth/callback")
@@ -171,6 +174,13 @@ func serveGateway(db *store.Store, dir, addr, public, pin, trust string, cert tl
 				g.Feishu.AllowedTenants[strings.TrimSpace(t)] = true
 			}
 		}
+	}
+	return nil
+}
+func serveGateway(db *store.Store, dir, addr, public, pin, trust string, cert tls.Certificate, behindProxy bool, rotation time.Duration) error {
+	g := gateway.New(db, public, pin, trust, rotation)
+	if e := configureGatewayFeishu(g, public, os.Getenv("FEISHU_APP_ID"), os.Getenv("FEISHU_APP_SECRET")); e != nil {
+		return e
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

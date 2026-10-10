@@ -1,0 +1,19 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: agentdeck-testing
+  namespace: ai-social
+spec:
+  hosts: [web-test-omnivibe.ttyuyin.com]
+  gateways: [istio-ingress/unified-external]
+  http:
+    - name: agentdeck
+      match:
+        - uri:
+            prefix: /agentdeck/
+      timeout: 0s
+      route:
+        - destination:
+            host: agent-desk.ai-social.svc.cluster.local
+            port:
+              number: 8080
