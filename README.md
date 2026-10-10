@@ -84,11 +84,31 @@ USB 断开或电脑休眠会中断连接；重接后再执行 `adb reverse`，�
 
 测试网关地址为 `https://web-test-omnivibe.ttyuyin.com/agentdeck`；电脑 `local-login --gateway-url` 和 App 网关登录都填完整地址。飞书回调为该地址加 `/v2/auth/callback`。CICD 构建、NAS 子目录和 VS 配置见[测试部署指南](docs/deploy/TESTING.md)。
 
-**TODO：测试配置中的 `FEISHU_APP_ID`、`FEISHU_APP_SECRET` 暂为 `TODO`。填写真实值并登记回调、发布飞书应用、重新部署后，才能使用飞书扫码关联。** 构建、部署和公网加密链路已验证，范围见[测试验收记录](docs/deploy/ACCEPTANCE-2026-10-10.md)。
+测试网关已配置飞书应用，真实电脑端登录及工作站在线已验证。电脑以 `serve --relay` 启动，再打开下面的本机管理页面；首次在页面中关联网关，已有绑定会自动沿用。App 用同一飞书账号登录、选择工作站，在电脑页面输入手机的校验码并批准。App 重置后需要重新配对。完整步骤见[网关指南](docs/GATEWAY.md)，验收范围见[测试验收记录](docs/deploy/ACCEPTANCE-2026-10-10.md)。
 
 The testing gateway uses `https://web-test-omnivibe.ttyuyin.com/agentdeck`. Enter the full URL, including the prefix, in S-LOCAL and the app. Register this URL plus `/v2/auth/callback` in Feishu. See the [testing deployment guide](docs/deploy/TESTING.md).
 
-**TODO: replace both Feishu credential placeholders, register the callback, publish the Feishu application, and redeploy before using QR sign-in.** Build, deployment, and the public encrypted relay have been verified; see the [acceptance record](docs/deploy/ACCEPTANCE-2026-10-10.md) for scope.
+The testing gateway now has Feishu configured; real workstation sign-in and its online tunnel have been verified. Start `serve --relay`, then open workstation controls below to link through Feishu; saved associations reconnect automatically. Sign in to the app with the same Feishu account, select the workstation, and enter the phone comparison code on the computer to approve pairing. Resetting the app requires a new pairing. See the [gateway guide](docs/GATEWAY.md) and [acceptance record](docs/deploy/ACCEPTANCE-2026-10-10.md).
+
+### 电脑管理页面 / Workstation controls
+
+保持本地后端运行，另开终端执行（`--data` 必须与后端一致）：
+
+Keep the local backend running and execute this in a second terminal, using the same `--data` directory:
+
+```sh
+artifacts/agentdeck console --data "$HOME/.agentdeck"
+# 本次电脑体验使用 / This workstation currently uses:
+# artifacts/agentdeck console --data "$HOME/.agentdeck-usb"
+```
+
+自动打开本机页面，支持关联网关、飞书授权、实时查看在线/重连状态，以及填写手机 12 位校验码来批准配对。首次关联不再需要停后端执行 `local-login`。后端尚未关联时，`serve --relay` 会正常启动并等待网页关联。已有 `local-login` 命令保留供终端使用。
+
+The browser opens local controls for gateway enrollment, Feishu authorization, live connection/reconnection status, and pairing approval with the phone's 12-character comparison code. First enrollment no longer requires stopping the backend. An unlinked `serve --relay` starts and waits for browser enrollment. `local-login` remains available for terminal workflows.
+
+页面仅监听 `127.0.0.1`，使用独立随机访问凭据、同源校验及有限管理 API；不能通过公网网关或手机访问。终端关闭后页面服务结束。若浏览器未自动打开，打开命令打印的 `console-open-*.html` 私有启动文件；它只在本次页面服务运行期间有效，退出时删除。不要分享该文件或包含访问凭据的地址。详细步骤及日志排障见[本机管理指南](docs/WORKSTATION.md)。
+
+Controls listen only on `127.0.0.1`, with a random access capability, origin checks and a restricted management API; the gateway and phones cannot access them. Keep the console process running. If the browser does not open, use the private `console-open-*.html` launcher printed by the command; it expires with the console process and is deleted on exit. Do not share the launcher or capability URL. See [workstation controls and diagnostics](docs/WORKSTATION.md).
 
 iOS/macOS 也使用原生客户端，需 Xcode 与对应签名配置；不支持 Flutter Web。仅部署后端时只需 Go。
 

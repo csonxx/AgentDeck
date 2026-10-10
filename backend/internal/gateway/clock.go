@@ -10,7 +10,7 @@ import (
 func (g *Server) timeSync(w http.ResponseWriter, r *http.Request) {
 	var req secure.ClockRequest
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&req) != nil || !relay.ValidID(req.ID) {
-		fail(w, 400)
+		reject(w, r, 400, "clock_request_invalid")
 		return
 	}
 	var key string
@@ -56,7 +56,7 @@ func (g *Server) timeSync(w http.ResponseWriter, r *http.Request) {
 	scope := req.Kind + "/" + req.ID
 	challenge, err := secure.ClockChallenge(secret, scope, req.Box)
 	if err != nil || !g.replay.Accept("clock/"+scope+":"+req.Box.Nonce) {
-		fail(w, 401)
+		reject(w, r, 401, "clock_challenge_or_replay_rejected")
 		return
 	}
 	box, err := secure.ClockReply(secret, scope, challenge, g.Clock)

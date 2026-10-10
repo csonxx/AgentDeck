@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -24,7 +25,17 @@ type Client struct {
 	mu     sync.Mutex
 	timeMu sync.Mutex
 	peer   *Peer
+	status ConnectionStatus
 }
+
+type ConnectionStatus struct {
+	ConnectedAt    string `json:"connected_at,omitempty"`
+	DisconnectedAt string `json:"disconnected_at,omitempty"`
+	Attempts       uint64 `json:"attempts"`
+	LastError      string `json:"last_error,omitempty"`
+}
+
+func (c *Client) Status() ConnectionStatus { c.mu.Lock(); defer c.mu.Unlock(); return c.status }
 
 func NewClient(link Link) (*Client, error) {
 	if e := link.Validate(); e != nil {
@@ -111,6 +122,7 @@ func (c *Client) connect(ctx context.Context, handler http.Handler) error {
 	if e != nil {
 		if res != nil {
 			res.Body.Close()
+			return fmt.Errorf("gateway tunnel handshake HTTP %d", res.StatusCode)
 		}
 		return errors.New("gateway tunnel handshake failed")
 	}
@@ -147,6 +159,8 @@ func (c *Client) connect(ctx context.Context, handler http.Handler) error {
 	go func() { _ = srv.Serve(ln) }()
 	c.mu.Lock()
 	c.peer = peer
+	c.status.ConnectedAt = time.Now().UTC().Format(time.RFC3339)
+	c.status.LastError = ""
 	c.mu.Unlock()
 	log.Printf("S-LOCAL linked tenant=%s local=%s", c.Link.Tenant, c.Link.Local)
 	defer func() {
@@ -172,11 +186,18 @@ func (c *Client) Run(ctx context.Context, handler http.Handler) {
 	delay := time.Second
 	for ctx.Err() == nil {
 		started := time.Now()
-		_ = c.connect(ctx, handler)
+		c.mu.Lock()
+		c.status.Attempts++
+		c.mu.Unlock()
+		err := c.connect(ctx, handler)
 		if ctx.Err() != nil {
 			return
 		}
-		log.Printf("S-LOCAL tunnel disconnected local=%s; reconnecting", c.Link.Local)
+		reason := connectionReason(err)
+		c.mu.Lock()
+		c.status.DisconnectedAt, c.status.LastError = time.Now().UTC().Format(time.RFC3339), reason
+		c.mu.Unlock()
+		log.Printf("S-LOCAL tunnel disconnected local=%s reason=%s retry_ms=%d; reconnecting", c.Link.Local, reason, delay.Milliseconds())
 		if time.Since(started) > time.Minute {
 			delay = time.Second
 		}
@@ -193,6 +214,32 @@ func (c *Client) Run(ctx context.Context, handler http.Handler) {
 				delay = 30 * time.Second
 			}
 		}
+	}
+}
+
+func connectionReason(err error) string {
+	if err == nil {
+		return "tunnel_closed"
+	}
+	switch err.Error() {
+	case "gateway clock unavailable":
+		return "clock_unavailable"
+	case "gateway clock rejected":
+		return "clock_authentication_rejected"
+	case "gateway tunnel handshake HTTP 401":
+		return "tunnel_authentication_rejected"
+	case "gateway tunnel handshake HTTP 409":
+		return "workstation_already_connected"
+	case "gateway tunnel handshake HTTP 503":
+		return "gateway_unavailable"
+	case "gateway tunnel handshake failed":
+		return "tunnel_network_or_tls_failed"
+	case "gateway tunnel welcome unavailable":
+		return "tunnel_welcome_unavailable"
+	case "gateway tunnel welcome rejected", "gateway tunnel identity mismatch":
+		return "tunnel_identity_rejected"
+	default:
+		return "tunnel_disconnected"
 	}
 }
 

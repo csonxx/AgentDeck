@@ -38,7 +38,7 @@ func main() {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return errors.New("usage: agentdeck serve | local-login | pair | pair-pending | pair-approve | devices | revoke | bridge | gateway-locals | gateway-accounts | gateway-add-local | gateway-revoke")
+		return errors.New("usage: agentdeck serve | console | local-login | pair | pair-pending | pair-approve | devices | revoke | bridge | gateway-locals | gateway-accounts | gateway-add-local | gateway-revoke")
 	}
 	home, _ := os.UserHomeDir()
 	cmd := os.Args[1]
@@ -77,6 +77,7 @@ func run() error {
 	revokeKind := f.String("kind", "local", "gateway revoke: local, grant, account")
 	pairCode := f.String("code", "", "Local/App comparison code to approve")
 	noOpen := f.Bool("no-open", false, "print login page without opening browser")
+	consoleListen := f.String("console-listen", "127.0.0.1:0", "owner console: IPv4 loopback address; port 0 selects a free port")
 	kind := f.String("agent", "codex", "bridge agent: codex or claude")
 	if e := f.Parse(os.Args[2:]); e != nil {
 		return e
@@ -86,6 +87,9 @@ func run() error {
 	}
 	if cmd == "local-login" {
 		return localLogin(*dir, *gatewayURL, *publicPin, *name, *noOpen)
+	}
+	if cmd == "console" {
+		return runConsole(*dir, *consoleListen, *noOpen)
 	}
 	if strings.HasPrefix(cmd, "gateway-") || cmd == "pair-pending" || cmd == "pair-approve" {
 		return gatewayManagement(cmd, *dir, *tenant, *name, *out, *requestID, *revokeKind, *pairCode)
@@ -287,38 +291,18 @@ func run() error {
 			if e = db.Put("relayconfig", "gateway", link); e != nil {
 				return e
 			}
-		} else if db.Get("relayconfig", "gateway", &link) != nil || link.Validate() != nil {
-			return errors.New("run local-login first or provide --gateway-link")
+		} else if err := db.Get("relayconfig", "gateway", &link); err != nil && !os.IsNotExist(err) {
+			return err
 		}
-		pin = link.Pin
-		*public = link.URL
-		trust = link.TLSTrust
+		if link.URL != "" {
+			if err := link.Validate(); err != nil {
+				return err
+			}
+			pin, *public, trust = link.Pin, link.URL, link.TLSTrust
+		}
 	}
 	s := server.New(db, pin, *public, *rotation)
 	s.TLSTrust = trust
-	var relayClient *relay.Client
-	if *relayMode {
-		relayClient, e = relay.NewClient(link)
-		if e != nil {
-			return e
-		}
-		s.RelayClock = relayClient.CurrentClock
-		s.RelayBundle = func(b server.Bundle) (server.Bundle, error) {
-			token, e := secure.B64.DecodeString(b.Token)
-			if e != nil {
-				return b, e
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			grant, e := relayClient.Register(ctx, relay.Hash(token), b.Expires)
-			if e != nil {
-				return b, e
-			}
-			b.Expires = grant.Expires
-			b.Relay = &relay.Binding{Tenant: link.Tenant, Local: link.Local, Grant: grant.ID, Key: grant.Key}
-			return b, nil
-		}
-	}
 	if *behindProxy && pin == "" {
 		s.TLSTrust = "system"
 	}
@@ -373,6 +357,12 @@ func run() error {
 		}
 	}
 	defer s.Manager.Close()
+	if *relayMode {
+		if err := s.EnableRelay(ctx); err != nil {
+			return err
+		}
+		defer func() { stop(); s.Association.Wait() }()
+	}
 	s.Manager.RunDeliveries(ctx)
 	s.Manager.RunConnectors(ctx)
 	index := ""
@@ -399,7 +389,9 @@ func run() error {
 		}
 	}()
 	if *relayMode {
-		relayClient.Run(ctx, s.Handler())
+		log.Print("AgentDeck relay mode; open workstation controls with: agentdeck console --data <same-directory>")
+		<-ctx.Done()
+		s.Association.Wait()
 		stop()
 		<-followDone
 		return nil

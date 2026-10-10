@@ -1,6 +1,7 @@
 // Export app-visible backend errors/statuses for localization coverage checks.
 // Agent message bodies, tool output, CLI prompts and external browser pages are
 // deliberately outside this contract; they are not interface translations.
+// The owner-only workstation console has its own UI and is never sent to phones.
 package main
 
 import (
@@ -76,6 +77,12 @@ func main() {
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if d.IsDir() && d.Name() == "console" {
+			return filepath.SkipDir
+		}
+		if strings.HasSuffix(filepath.ToSlash(path), "/server/association.go") {
+			return nil
 		}
 		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil

@@ -1,8 +1,8 @@
 # 测试部署验收 / Testing deployment acceptance
 
-验收日期：2026-10-10，Asia/Shanghai。测试网关已发布；真实飞书扫码尚未验收，凭据按要求保留 `TODO`。
+首次验收日期：2026-10-10，Asia/Shanghai。以下为初次部署时的验收记录：当时飞书凭据按要求保留 `TODO`。当天后续真实登录验证见文末补充记录。
 
-Verified on 2026-10-10, Asia/Shanghai. The testing gateway is deployed. Real Feishu QR sign-in remains unverified; credentials intentionally remain `TODO`.
+Initial acceptance on 2026-10-10, Asia/Shanghai. The following records the first deployment, which intentionally used `TODO` credentials. See the addendum below for subsequent real sign-in verification.
 
 | 项目 / Item | 证据 / Evidence |
 | --- | --- |
@@ -40,3 +40,11 @@ The full local verification suite passed, including Go race/vet, Flutter analysi
 4. GM1900 已升级带前缀支持的客户端；真实飞书流程仍需在该手机上验收。
 
 Securely replace both Feishu placeholders, register the full callback, publish the application, set its availability range, and redeploy. Then verify real workstation/mobile sign-in and comparison-code pairing on the upgraded GM1900.
+
+## 当天补充：真实工作站关联 / Addendum: actual workstation enrollment
+
+2026-10-10 12:45（Asia/Shanghai）：网关已配置真实飞书应用。首次授权返回飞书错误 `20029`，原因为未登记重定向 URL；在飞书应用安全设置补齐完整 `/agentdeck/v2/auth/callback` 地址后，通过现有飞书登录态完成真实身份授权及加密关联凭据交付。
+
+本地后端已从 USB 直连切换为 `serve --relay`，沿用原加密数据目录、项目与媒体范围、所有 Agent 连接配置、Codex desktop socket 和语音配置。原后端正常停止后，已对数据库及存储密钥做私有 APFS 克隆备份。新进程不再监听 8443；网关 owner 管理接口独立确认该工作站在线。手机已重置，当前仍待同一飞书账号登录和双方校验码配对，不能据此声称手机完整链路已完成。
+
+At 12:45 Asia/Shanghai, the gateway had real Feishu credentials. An initial authorization failed with error 20029 because the redirect URL was missing. Registering the complete callback resolved it; the existing browser sign-in completed actual identity authorization and encrypted workstation enrollment. S-LOCAL now runs with `serve --relay`, preserving its encrypted state, project/media scopes, agent settings, desktop socket and voice configuration. A private APFS snapshot of the database and machine key was taken after graceful shutdown. Port 8443 is no longer listening, and gateway owner inspection confirms the workstation online. The reset phone still requires same-account login and comparison-code pairing; mobile acceptance remains pending.

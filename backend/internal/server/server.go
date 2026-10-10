@@ -69,6 +69,7 @@ type Server struct {
 	ingestMu    sync.Mutex
 	pairMu      sync.Mutex
 	RelayBundle func(Bundle) (Bundle, error)
+	Association *Association
 }
 
 func New(s *store.Store, pin, url string, rotation time.Duration) *Server {
@@ -874,6 +875,7 @@ func (s *Server) Admin(ctx context.Context, dir string) error {
 		}
 		write(w, b)
 	})
+	s.associationRoutes(m)
 	m.HandleFunc("GET /pair-pending", func(w http.ResponseWriter, r *http.Request) {
 		clock := s.protocolClock(nil)
 		if clock == nil {

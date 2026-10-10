@@ -143,6 +143,7 @@ func localLogin(dir, url, pin, name string, noOpen bool) error {
 			if e = db.Put("relayconfig", "gateway", v.Link); e != nil {
 				return e
 			}
+			_ = db.Put("relayconfig", "name", name)
 			fmt.Printf("S-LOCAL linked to gateway; tenant=%s local=%s. Start with serve --relay.\n", v.Link.Tenant, v.Link.Local)
 			return nil
 		}

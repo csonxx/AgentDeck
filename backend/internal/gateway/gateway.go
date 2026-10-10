@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -197,15 +196,15 @@ func (g *Server) Handler() http.Handler {
 	m.HandleFunc("POST /v2/time-sync", g.timeSync)
 	m.HandleFunc("/v2/relay/", g.proxy)
 	g.authRoutes(m)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return g.observe(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if r.Header.Get("Origin") != "" {
-			fail(w, 403)
+			reject(w, r, 403, "browser_origin_rejected")
 			return
 		}
 		if !g.limit() {
-			fail(w, 429)
+			reject(w, r, 429, "request_rate_limited")
 			return
 		}
 		// VS preserves the external prefix. Authenticate logical /v2 paths after
@@ -220,7 +219,7 @@ func (g *Server) Handler() http.Handler {
 			return
 		}
 		m.ServeHTTP(w, r)
-	})
+	}))
 }
 func (g *Server) localAuth(r *http.Request, body []byte) (Node, bool) {
 	id := strings.TrimPrefix(r.Header.Get("Authorization"), "Local ")
@@ -234,13 +233,13 @@ func (g *Server) localAuth(r *http.Request, body []byte) (Node, bool) {
 func (g *Server) tunnel(w http.ResponseWriter, r *http.Request) {
 	n, ok := g.localAuth(r, nil)
 	if !ok {
-		fail(w, 401)
+		reject(w, r, 401, "local_authentication_rejected")
 		return
 	}
 	g.mu.Lock()
 	if _, busy := g.peers[n.ID]; busy {
 		g.mu.Unlock()
-		fail(w, 409)
+		reject(w, r, 409, "local_already_connected")
 		return
 	}
 	// Reserve this Local identity before upgrade to reject concurrent sessions.
@@ -273,9 +272,9 @@ func (g *Server) tunnel(w http.ResponseWriter, r *http.Request) {
 	}
 	g.peers[n.ID] = p
 	g.mu.Unlock()
-	log.Printf("S-GATEWAY local online tenant=%s local=%s", n.Tenant, n.ID)
+	diagnostic(r, "local_online", map[string]any{"tenant_ref": ref(n.Tenant), "local_ref": ref(n.ID)})
 	_ = p.Run()
-	log.Printf("S-GATEWAY local offline tenant=%s local=%s", n.Tenant, n.ID)
+	diagnostic(r, "local_offline", map[string]any{"tenant_ref": ref(n.Tenant), "local_ref": ref(n.ID)})
 }
 func (g *Server) register(w http.ResponseWriter, r *http.Request) {
 	raw, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<10))
@@ -368,7 +367,7 @@ func (g *Server) proxy(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.Header.Get("Authorization"), "Relay ")
 	var grant relay.Grant
 	if !relay.ValidID(id) || g.Store.Get("gwgrants", id, &grant) != nil || grant.Local != parts[2] {
-		fail(w, 401)
+		reject(w, r, 401, "relay_grant_missing_or_mismatched")
 		return
 	}
 	var node Node
@@ -379,7 +378,7 @@ func (g *Server) proxy(w http.ResponseWriter, r *http.Request) {
 	key, e := secure.B64.DecodeString(grant.Key)
 	localAuth := r.Header.Get("X-Local-Authorization")
 	if e != nil || !g.replay.Verify(key, "grant/"+id, r, raw, localAuth) {
-		fail(w, 401)
+		reject(w, r, 401, "relay_proof_rejected")
 		return
 	}
 	if operation == "pair" || operation == "offer" {
@@ -417,11 +416,18 @@ func (g *Server) proxy(w http.ResponseWriter, r *http.Request) {
 	p := g.peers[grant.Local]
 	if p == nil || g.active[grant.Tenant] >= 64 {
 		g.mu.Unlock()
-		fail(w, 503)
+		reason := "tenant_connection_capacity"
+		if p == nil {
+			reason = "local_offline"
+		}
+		reject(w, r, 503, reason)
 		return
 	}
 	g.active[grant.Tenant]++
 	g.mu.Unlock()
+	if operation != "time-sync" {
+		diagnostic(r, "relay_started", map[string]any{"operation": operation, "local_ref": ref(grant.Local), "grant_ref": ref(grant.ID)})
+	}
 	defer func() { g.mu.Lock(); g.active[grant.Tenant]--; g.mu.Unlock() }()
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	r.ContentLength = int64(len(raw))
@@ -453,7 +459,7 @@ func (g *Server) proxy(w http.ResponseWriter, r *http.Request) {
 	}}
 	defer transport.CloseIdleConnections()
 	proxy.Transport = transport
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, e error) { fail(w, 502) }
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, e error) { reject(w, r, 502, "local_tunnel_proxy_failed") }
 	proxy.ModifyResponse = func(res *http.Response) error {
 		if operation == "offer" && res.StatusCode == 200 {
 			data, err := io.ReadAll(io.LimitReader(res.Body, 16<<10))
@@ -495,6 +501,7 @@ func (g *Server) proxy(w http.ResponseWriter, r *http.Request) {
 			if g.Store.Put("gwgrants", grant.ID, saved) != nil {
 				return errors.New("binding persistence failed")
 			}
+			diagnostic(r, "phone_paired", map[string]any{"local_ref": ref(grant.Local), "grant_ref": ref(grant.ID), "device_ref": ref(device)})
 		}
 		res.Header.Del("X-AgentDeck-Bound-Device")
 		return nil

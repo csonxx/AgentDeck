@@ -18,6 +18,34 @@ type Identity struct {
 	Name   string `json:"name"`
 }
 
+type providerError struct {
+	stage, reason string
+	status        int
+	code          string
+}
+
+func (e *providerError) Error() string { return "Feishu " + e.stage + " " + e.reason }
+func providerFailure(stage, reason string, status int, code json.RawMessage) error {
+	value := strings.Trim(string(code), "\"")
+	if len(value) > 10 {
+		value = ""
+	}
+	for _, c := range value {
+		if c < '0' || c > '9' {
+			value = ""
+			break
+		}
+	}
+	return &providerError{stage, reason, status, value}
+}
+func providerDiagnostic(err error) map[string]any {
+	var p *providerError
+	if errors.As(err, &p) {
+		return map[string]any{"stage": p.stage, "reason": p.reason, "provider_status": p.status, "provider_code": p.code}
+	}
+	return map[string]any{"stage": "identity", "reason": "configuration_invalid"}
+}
+
 // Feishu tokens are used only to resolve verified identity, then discarded.
 // Provider responses and credentials never appear in errors or logs.
 type Feishu struct {
@@ -55,7 +83,7 @@ func (f *Feishu) Resolve(ctx context.Context, code, verifier string) (Identity, 
 	req.Header.Set("Content-Type", "application/json")
 	res, e := f.HTTP.Do(req)
 	if e != nil {
-		return identity, errors.New("identity provider unavailable")
+		return identity, providerFailure("token", "unavailable", 0, nil)
 	}
 	defer res.Body.Close()
 	var token struct {
@@ -64,7 +92,7 @@ func (f *Feishu) Resolve(ctx context.Context, code, verifier string) (Identity, 
 		Access string          `json:"access_token"`
 	}
 	if res.StatusCode != 200 || json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&token) != nil || token.Error != "" || !successCode(token.Code) || token.Access == "" {
-		return identity, errors.New("Feishu authorization rejected")
+		return identity, providerFailure("token", "rejected", res.StatusCode, token.Code)
 	}
 	user, e := http.NewRequestWithContext(ctx, "GET", f.UserURL, nil)
 	if e != nil {
@@ -73,7 +101,7 @@ func (f *Feishu) Resolve(ctx context.Context, code, verifier string) (Identity, 
 	user.Header.Set("Authorization", "Bearer "+token.Access)
 	result, e := f.HTTP.Do(user)
 	if e != nil {
-		return identity, errors.New("identity provider unavailable")
+		return identity, providerFailure("user_info", "unavailable", 0, nil)
 	}
 	defer result.Body.Close()
 	var info struct {
@@ -85,10 +113,10 @@ func (f *Feishu) Resolve(ctx context.Context, code, verifier string) (Identity, 
 		} `json:"data"`
 	}
 	if result.StatusCode != 200 || json.NewDecoder(io.LimitReader(result.Body, 64<<10)).Decode(&info) != nil || (len(info.Code) == 0 || !successCode(info.Code)) || info.Data.Tenant == "" || info.Data.OpenID == "" {
-		return identity, errors.New("Feishu identity missing tenant or user")
+		return identity, providerFailure("user_info", "identity_missing", result.StatusCode, info.Code)
 	}
 	if len(f.AllowedTenants) > 0 && !f.AllowedTenants[info.Data.Tenant] {
-		return identity, errors.New("Feishu tenant not permitted")
+		return identity, providerFailure("user_info", "tenant_not_permitted", result.StatusCode, nil)
 	}
 	return Identity{info.Data.Tenant, info.Data.OpenID, info.Data.Name}, nil
 }

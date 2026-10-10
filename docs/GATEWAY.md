@@ -73,6 +73,10 @@ Go 到 Envoy 的 HTTP 上游仅限回环/受控私网；若跨不可信网络需
 
 ## S-LOCAL 飞书关联
 
+推荐使用[本机管理页面](WORKSTATION.md)：先以 `serve --relay` 启动（未关联也可启动），再运行 `agentdeck console --data <相同目录>`。在电脑网页里关联网关、查看实时状态、填写手机校验码并批准，无需停止后端。 / Recommended: start `serve --relay` even when unlinked, then run `agentdeck console --data <same-directory>`. Use local browser controls for enrollment, live status and pairing approval without stopping the backend.
+
+以下保留终端关联流程 / Terminal alternative:
+
 先停止该数据目录的后端服务，在同一受信任操作系统用户下运行：
 
 ```sh
@@ -101,6 +105,8 @@ agentdeck serve --relay --data "$HOME/.agentdeck" \
 在 App“连接工作站”选择“通过网关 · 飞书登录”，输入同一公网 HTTPS 网关地址（如有前缀必须一并输入），用**同一个飞书账号**授权。网关只列出同租户且同 open_id 归属的工作站，选择在线项。
 
 App 显示 12 位十六进制校验码。工作站查看待处理请求：
+
+推荐在本机管理页输入手机校验码并批准，再点击 App 的一致确认按钮；下面命令供终端用户使用。 / Enter the phone code in workstation controls and approve, then confirm the match in the app. The commands below remain available as a terminal alternative.
 
 ```sh
 agentdeck pair-pending --data "$HOME/.agentdeck"

@@ -35,9 +35,9 @@ PVC 仅保存网关加密数据库、本机密钥和账号/工作站/路由关�
 
 The PVC holds the encrypted gateway database, its machine key, and account/workstation/routing associations. Agent content, images, and Local/App root keys are not stored by the gateway. Mount only the isolated subdirectory. Keep one replica with no HPA; verify NAS file locking, permissions, and restart persistence. Back up the database and machine key together under access control.
 
-当前按要求将 `FEISHU_APP_ID`、`FEISHU_APP_SECRET` 设为 `TODO`，`FEISHU_OAUTH_SCOPE` 留空。TODO：在 CICD 测试环境安全替换为真实值，并在飞书登记完整回调、发布应用；替换后重新部署。两个值均为 `TODO` 时登录接口返回 503，健康检查报告 `feishu_configured: false`，不会向飞书发起无效授权。不要在仓库、构建命令或日志中放入 Secret。飞书网页应用需登记上表完整回调并发布，使用者需在可用范围内；真实扫码必须使用目标应用验收。
+初次部署使用 `FEISHU_APP_ID=TODO`、`FEISHU_APP_SECRET=TODO`，随后已配置真实应用；完整回调已登记，电脑端真实飞书登录已通过，健康检查现报告 `feishu_configured: true`。`FEISHU_OAUTH_SCOPE` 保持为空。后续部署新网关时，凭据必须安全注入、成对配置；两个值均为 `TODO` 时登录接口返回 503，健康检查报告 false。不要在仓库、构建命令或日志中放入 Secret。飞书网页应用需登记上表完整回调并发布，使用者需在可用范围内；手机登录与首次配对仍需独立验收。
 
-Both `FEISHU_APP_ID` and `FEISHU_APP_SECRET` are initially `TODO`, with an empty scope. TODO: securely replace them, register the callback, publish the Feishu application, and redeploy. While both are `TODO`, login returns 503 and health reports `feishu_configured: false`. Never place secrets in the repository, build commands, or logs. Register the full callback, publish the web application, and include intended users in its availability range. Verify sign-in with the actual Feishu application.
+The initial deployment used `TODO` placeholders. Real application credentials are now configured, the full callback is registered, and actual workstation sign-in has passed; health reports `feishu_configured: true`. Keep the OAuth scope empty. For a new gateway, inject both credentials securely; two `TODO` values disable login with 503. Never place secrets in the repository, build commands, or logs. Register the full callback, publish the application, and include intended users in its availability range. Mobile sign-in and first pairing require separate acceptance.
 
 VS 参考 [testing-vs.yaml](testing-vs.yaml)：仅匹配 `/agentdeck/`，保留前缀，不重写为 `/`；长连接不设总超时，HTTP/1.1 WebSocket Upgrade 需透传。现有域名证书由外层网关管理。公网健康检查地址为 `/agentdeck/healthz`；内部探针用 `/healthz`。无凭据的隧道/账号请求应返回 401，不能只以 200 健康检查代替登录、配对、实时会话和图片验收。
 

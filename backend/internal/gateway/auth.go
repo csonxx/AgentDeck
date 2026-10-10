@@ -52,7 +52,7 @@ func (g *Server) authRoutes(m *http.ServeMux) {
 }
 func (g *Server) beginFlow(w http.ResponseWriter, r *http.Request) {
 	if g.Feishu == nil {
-		fail(w, 503)
+		reject(w, r, 503, "feishu_not_configured")
 		return
 	}
 	var req struct {
@@ -115,6 +115,7 @@ func (g *Server) beginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	write(w, map[string]any{"flow": id, "public": secure.B64.EncodeToString(p.PublicKey().Bytes()), "salt": secure.B64.EncodeToString(salt), "url": g.URL + "/v2/auth/login?flow=" + id, "expires": flow.Expires})
+	diagnostic(r, "login_flow_created", map[string]any{"kind": flow.Kind, "flow_ref": ref(id)})
 }
 func (g *Server) pollFlow(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.Header.Get("Authorization"), "Flow ")
@@ -125,12 +126,12 @@ func (g *Server) pollFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !relay.ValidID(id) || g.Store.Get("gwflows", id, &flow) != nil || flow.Expires < g.Clock.Unix() {
-		fail(w, 401)
+		reject(w, r, 401, "login_flow_missing_or_expired")
 		return
 	}
 	key, _ := secure.B64.DecodeString(flow.Key)
 	if !g.replay.Verify(key, "flow/"+id, r, raw, "") {
-		fail(w, 401)
+		reject(w, r, 401, "login_proof_rejected")
 		return
 	}
 	box, e := secure.SealJSON(key, "flow-result/"+id, 0, 0, map[string]any{"status": flow.Status, "result": flow.Result, "challenge": relay.Hash([]byte(r.Header.Get("X-Relay-Auth")))})
@@ -210,13 +211,13 @@ func (g *Server) callback(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	if !relay.ValidID(state) || g.Store.Get("gwoauth", state, &id) != nil || g.Store.Get("gwflows", id, &flow) != nil || flow.Used || flow.Expires < g.Clock.Unix() {
 		g.mu.Unlock()
-		fail(w, 401)
+		reject(w, r, 401, "oauth_state_missing_expired_or_used")
 		return
 	}
 	cookie, e := r.Cookie("__Host-agentdeck-oauth-" + flow.ID)
 	if e != nil || flow.CookieHash == "" || relay.Hash([]byte(cookie.Value)) != flow.CookieHash {
 		g.mu.Unlock()
-		fail(w, 401)
+		reject(w, r, 401, "oauth_browser_cookie_mismatch")
 		return
 	}
 	flow.Used = true
@@ -230,16 +231,17 @@ func (g *Server) callback(w http.ResponseWriter, r *http.Request) {
 	g.mu.Unlock()
 	code := r.URL.Query().Get("code")
 	if code == "" || len(code) > 4096 || r.URL.Query().Get("error") != "" {
-		fail(w, 401)
+		reject(w, r, 401, "oauth_denied_or_code_missing")
 		return
 	}
 	identity, e := g.Feishu.Resolve(r.Context(), code, flow.Verifier)
 	if e != nil {
-		fail(w, 401)
+		diagnostic(r, "feishu_identity_failed", providerDiagnostic(e))
+		reject(w, r, 401, "feishu_identity_resolution_failed")
 		return
 	}
 	if !relay.ValidID(identity.Tenant) || identity.Owner == "" {
-		fail(w, 401)
+		reject(w, r, 401, "feishu_identity_invalid")
 		return
 	}
 	var result any
@@ -294,6 +296,7 @@ func (g *Server) callback(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500)
 		return
 	}
+	diagnostic(r, "login_authorized", map[string]any{"kind": flow.Kind, "flow_ref": ref(flow.ID), "tenant_ref": ref(identity.Tenant), "owner_ref": ref(identity.Owner)})
 	http.SetCookie(w, &http.Cookie{Name: "__Host-agentdeck-oauth-" + flow.ID, Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	http.Redirect(w, r, g.URL+"/v2/auth/done", http.StatusSeeOther)
 }
@@ -371,11 +374,11 @@ func (g *Server) accountBind(w http.ResponseWriter, r *http.Request) {
 	}
 	var n Node
 	if g.Store.Get("gwnodes", req.Local, &n) != nil || n.Tenant != a.Identity.Tenant || n.Owner != a.Identity.Owner {
-		fail(w, 403)
+		reject(w, r, 403, "workstation_ownership_mismatch")
 		return
 	}
 	if g.peers[n.ID] == nil {
-		fail(w, 503)
+		reject(w, r, 503, "local_offline")
 		return
 	}
 	rows, e := g.Store.Values("gwgrants")
@@ -403,4 +406,5 @@ func (g *Server) accountBind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g.accountWrite(w, a, r, grant)
+	diagnostic(r, "phone_binding_requested", map[string]any{"local_ref": ref(n.ID), "grant_ref": ref(grant.ID), "owner_ref": ref(a.Identity.Owner)})
 }
