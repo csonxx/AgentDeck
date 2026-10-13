@@ -4,7 +4,7 @@
 
 当前版本 **0.4.34** · [源码仓库](https://gitlab.ttyuyin.com/azeroth/agentdesk)
 
-[下载 Android APK / Download APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.34/c5d6b55ac994e3179e6681c15ffab726f416f6dd47d797eafcf0deff109faf47/agentdeck-0.4.34-arm64-v8a.apk) · 0.4.34 · arm64-v8a · 272.9 MB
+[下载最新 Android APK / Download latest APK](https://web-test-omnivibe.ttyuyin.com/agentdeck/v2/app/releases/android/apk) · [0.4.34 存档 / Archive](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.34/c5d6b55ac994e3179e6681c15ffab726f416f6dd47d797eafcf0deff109faf47/agentdeck-0.4.34-arm64-v8a.apk) · 0.4.34 · arm64-v8a · 272.9 MB
 已通过 infras 上传并完成匿名公网下载 SHA-256 校验。 / Uploaded through infras; anonymous public download SHA-256 verified.
 
 
