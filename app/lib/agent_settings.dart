@@ -1,4 +1,7 @@
 import 'language.dart';
+import 'app_update_page.dart';
+import 'device_name_setting.dart';
+import 'app_lock.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'core/client.dart';
@@ -113,6 +116,8 @@ class _AgentSettingsPageState extends State<AgentSettingsPage> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          AppUpdateSetting(updater: widget.client.updates),
+          DeviceNameSetting(client: widget.client),
           ListTile(
             key: const ValueKey('language-setting'),
             contentPadding: EdgeInsets.zero,
@@ -175,6 +180,8 @@ class _AgentSettingsPageState extends State<AgentSettingsPage> {
               ),
             const Divider(height: 16),
           ],
+          const Divider(height: 24),
+          AppLockSettings(controller: widget.client.appLock),
           const SizedBox(height: 12),
           Text(
             context.tr(

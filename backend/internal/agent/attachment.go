@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -87,29 +89,31 @@ func (n *Normalizer) openAllowed(path string) (*os.File, error) {
 
 type Attachment struct {
 	Truncated bool   `json:"truncated,omitempty"`
+	Size      int64  `json:"size"`
+	Download  bool   `json:"download_required,omitempty"`
 	Name      string `json:"name"`
 	MIME      string `json:"mime"`
 	Data      []byte `json:"bytes"`
 	Line      int    `json:"line,omitempty"`
 }
 
-// ReadAttachment only reads an exact link already present in this session, inside
-// configured roots. Local paths never become public HTTP URLs or gateway files.
-func (n *Normalizer) ReadAttachment(session, href string) (Attachment, error) {
+// OpenAttachment authorizes an exact session link and opens it inside configured
+// roots. Both bounded previews and streaming downloads use this same check.
+func (n *Normalizer) OpenAttachment(session, href string) (*os.File, int, error) {
 	var ss store.Session
 	if len(href) > 4096 || n.Store.Get("sessions", session, &ss) != nil {
-		return Attachment{}, errors.New("会话附件不可用")
+		return nil, 0, errors.New("会话附件不可用")
 	}
 	p, line, e := localTarget(href, ss.Project)
 	if e != nil {
-		return Attachment{}, errors.New("不支持此附件链接")
+		return nil, 0, errors.New("不支持此附件链接")
 	}
 	matched := false
 	cursor := uint64(0)
 	for {
 		events, e := n.Store.Events(session, cursor, 100)
 		if e != nil {
-			return Attachment{}, e
+			return nil, 0, e
 		}
 		if len(events) == 0 {
 			break
@@ -132,26 +136,75 @@ func (n *Normalizer) ReadAttachment(session, href string) (Attachment, error) {
 		}
 	}
 	if !matched {
-		return Attachment{}, errors.New("此文件未在当前会话中引用")
+		return nil, 0, errors.New("此文件未在当前会话中引用")
 	}
-	base := strings.ToLower(filepath.Base(p))
-	if base == ".env" || strings.HasPrefix(base, ".env.") || base == "storage.key" || base == "auth.json" || strings.HasSuffix(base, ".key") || strings.Contains(p, string(os.PathSeparator)+".ssh"+string(os.PathSeparator)) {
-		return Attachment{}, errors.New("不提供凭据文件预览")
+	// Apply credential exclusions to the resolved target as well as its link name.
+	resolved, resolveErr := filepath.EvalSymlinks(p)
+	if resolveErr != nil {
+		return nil, 0, errors.New("文件已不存在或无法读取")
 	}
-	f, e := n.openAllowed(p)
+	for _, target := range []string{p, resolved} {
+		base := strings.ToLower(filepath.Base(target))
+		if base == ".env" || strings.HasPrefix(base, ".env.") || base == "storage.key" || base == "auth.json" || strings.HasSuffix(base, ".key") || strings.Contains(target, string(os.PathSeparator)+".ssh"+string(os.PathSeparator)) {
+			return nil, 0, errors.New("不提供凭据文件预览")
+		}
+	}
+
+	f, e := n.openAllowed(resolved)
+	if e != nil {
+		return nil, 0, e
+	}
+	info, e := f.Stat()
+	if e != nil || !info.Mode().IsRegular() {
+		f.Close()
+		return nil, 0, errors.New("附件不是普通文件")
+	}
+	return f, line, nil
+}
+
+// AttachmentInfo reads only a signature, independent of file size. Original
+// bytes are read on demand by an encrypted connection-scoped download.
+func AttachmentInfo(f *os.File, line int) (Attachment, error) {
+	info, e := f.Stat()
+	if e != nil {
+		return Attachment{}, errors.New("文件已不存在或无法读取")
+	}
+	prefix := make([]byte, 512)
+	count, e := f.ReadAt(prefix, 0)
+	if e != nil && e != io.EOF {
+		return Attachment{}, errors.New("附件读取失败")
+	}
+	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(info.Name())))
+	if contentType == "" {
+		contentType = http.DetectContentType(prefix[:count])
+	}
+	return Attachment{Name: info.Name(), MIME: contentType, Size: info.Size(), Line: line, Download: true}, nil
+}
+
+func (n *Normalizer) ReadAttachment(session, href string) (Attachment, error) {
+	f, line, e := n.OpenAttachment(session, href)
 	if e != nil {
 		return Attachment{}, e
 	}
 	defer f.Close()
-	info, e := f.Stat()
-	if e != nil || !info.Mode().IsRegular() || info.Size() > 8<<20 {
-		return Attachment{}, errors.New("附件不是普通文件或超过 8 MiB")
+	info, e := AttachmentInfo(f, line)
+	if e != nil || info.Size > 8<<20 {
+		return info, e
 	}
 	data, e := io.ReadAll(io.LimitReader(f, (8<<20)+1))
-	if e != nil || len(data) > 8<<20 {
-		return Attachment{}, errors.New("附件读取失败或过大")
+	if e != nil {
+		return Attachment{}, errors.New("附件读取失败")
 	}
-	return PreviewAttachment(filepath.Base(p), data, line)
+	if len(data) > 8<<20 {
+		return AttachmentInfo(f, line)
+	}
+	preview, e := PreviewAttachment(info.Name, data, line)
+	// Unsupported/large/locked documents remain downloadable as originals.
+	if e != nil {
+		return info, nil
+	}
+	preview.Size = info.Size
+	return preview, nil
 }
 
 func (n *Normalizer) imageSource(src, cwd string) (string, error) {

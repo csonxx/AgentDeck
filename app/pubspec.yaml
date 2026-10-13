@@ -1,7 +1,7 @@
 name: agentdeck
 description: Encrypted live coding-agent companion.
 publish_to: none
-version: 0.4.15+5032
+version: 0.4.34+5051
 environment:
   sdk: ^3.10.0
 dependencies:

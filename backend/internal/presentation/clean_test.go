@@ -20,3 +20,13 @@ func TestControlFiltering(t *testing.T) {
 		t.Fatal("answer hidden")
 	}
 }
+
+func TestInternalMemoryCitationIsNotReplyText(t *testing.T) {
+	body := "Completed.\n\n<oai-mem-citation>\n<citation_entries>private metadata</citation_entries>\n<rollout_ids>private-id</rollout_ids>\n</oai-mem-citation>"
+	if Clean(body) != "Completed." {
+		t.Fatal("internal citation remained visible")
+	}
+	if Clean("Completed.\n<oai-mem-citation>partial") != "Completed." {
+		t.Fatal("partial internal citation remained visible")
+	}
+}

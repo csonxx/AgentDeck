@@ -36,22 +36,24 @@ type Event struct {
 	Source  string `json:"source"`
 }
 type Session struct {
-	Project string `json:"project,omitempty"`
-	Managed bool   `json:"managed,omitempty"`
-	Parent  string `json:"parent,omitempty"`
-	ID      string `json:"id"`
-	Agent   string `json:"agent"`
-	Title   string `json:"title"`
-	Source  string `json:"source"`
-	Updated string `json:"updated"`
-	Status  string `json:"status"`
+	CatalogHidden bool   `json:"catalog_hidden,omitempty"`
+	Project       string `json:"project,omitempty"`
+	Managed       bool   `json:"managed,omitempty"`
+	Parent        string `json:"parent,omitempty"`
+	ID            string `json:"id"`
+	Agent         string `json:"agent"`
+	Title         string `json:"title"`
+	Source        string `json:"source"`
+	Updated       string `json:"updated"`
+	Status        string `json:"status"`
 }
 type Device struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Root       []byte `json:"root"`
-	Created    string `json:"created"`
-	RelayGrant string `json:"relay_grant,omitempty"`
+	LastConnected string `json:"last_connected,omitempty"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Root          []byte `json:"root"`
+	Created       string `json:"created"`
+	RelayGrant    string `json:"relay_grant,omitempty"`
 }
 type Media struct {
 	MIME string `json:"mime"`
@@ -62,7 +64,7 @@ type Store struct {
 	key []byte
 }
 
-var buckets = []string{"deliveries", "deliverypayloads", "events", "sessionevents", "transcript", "itemkeys", "outline", "sessions", "seen", "devices", "media", "checkpoints", "invites", "gwtenants", "gwnodes", "gwgrants", "relayconfig", "gwflows", "gwoauth", "gwaccounts", "relaypending", "commands", "agentconfig", "generation", "uploads", "uploadchunks", "mediaowners"}
+var buckets = []string{"deliveries", "deliverypayloads", "events", "sessionevents", "transcript", "itemkeys", "outline", "sessions", "seen", "devices", "media", "checkpoints", "invites", "gwtenants", "gwnodes", "gwgrants", "relayconfig", "gwflows", "gwoauth", "gwaccounts", "relaypending", "commands", "agentconfig", "generation", "native_settings", "uploads", "uploadchunks", "mediaowners", "goals"}
 
 func New(dir string) (*Store, error) {
 	if e := os.MkdirAll(dir, 0700); e != nil {
@@ -118,15 +120,17 @@ func New(dir string) (*Store, error) {
 			}
 		}
 		if rebuildOutline && !rebuildItems {
-			return t.Bucket([]byte("transcript")).ForEach(func(k, _ []byte) error {
+			if err := t.Bucket([]byte("transcript")).ForEach(func(k, _ []byte) error {
 				var ev Event
 				if err := s.get(t, "transcript", string(k), &ev); err != nil {
 					return err
 				}
 				return s.indexOutline(t, ev)
-			})
+			}); err != nil {
+				return err
+			}
 		}
-		return nil
+		return s.repairDesktopCitations(t)
 	})
 	if e != nil {
 		db.Close()
@@ -201,7 +205,22 @@ func (s *Store) Devices() ([]Device, error) {
 	})
 	return out, e
 }
+
+func (s *Store) RecordDeviceConnection(id string, at time.Time) error {
+	return s.db.Update(func(t *bolt.Tx) error {
+		var d Device
+		if err := s.get(t, "devices", id, &d); err != nil {
+			return err
+		}
+		d.LastConnected = at.UTC().Format(time.RFC3339Nano)
+		return s.put(t, "devices", id, d)
+	})
+}
 func (s *Store) Append(ev Event) (Event, bool, error) { return s.append(ev, false) }
+
+// Imported desktop history must not replace the desktop catalog's title,
+// original project or activity timestamp with a historical log record.
+func (s *Store) AppendCatalogHistory(ev Event) (Event, bool, error) { return s.append(ev, true) }
 
 // Recovered image records advance the stream without changing chat metadata.
 func (s *Store) AppendRecoveredImage(ev Event) (Event, bool, error) {
@@ -214,8 +233,40 @@ func (s *Store) append(ev Event, preserveSession bool) (Event, bool, error) {
 	return s.appendMode(ev, preserveSession, false, "")
 }
 func (s *Store) appendMode(ev Event, preserveSession, desktop bool, expectedUpdated string) (Event, bool, error) {
+	var added bool
+	err := s.db.Update(func(t *bolt.Tx) error {
+		var err error
+		ev, added, err = s.appendInTx(t, ev, preserveSession, desktop, expectedUpdated)
+		return err
+	})
+	return ev, added, err
+}
+
+// Bounded importer transactions avoid a durable fsync for every tool record.
+// Deduplication, aliases, transcript and session status commit together.
+func (s *Store) AppendImported(events []Event, catalog bool) ([]Event, error) {
+	out := []Event{}
+	err := s.db.Update(func(t *bolt.Tx) error {
+		for _, ev := range events {
+			stored, added, err := s.appendInTx(t, ev, catalog, ev.Agent == "codex", "")
+			if err != nil {
+				return err
+			}
+			if added {
+				out = append(out, stored)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+func (s *Store) appendInTx(t *bolt.Tx, ev Event, preserveSession, desktop bool, expectedUpdated string) (Event, bool, error) {
 	added := false
-	e := s.db.Update(func(t *bolt.Tx) error {
+	sourceTime := ev.Time
+	e := func() error {
 		seen := t.Bucket([]byte("seen"))
 		if seen.Get([]byte(ev.ID)) != nil {
 			return nil
@@ -261,6 +312,14 @@ func (s *Store) appendMode(ev Event, preserveSession, desktop bool, expectedUpda
 			return e
 		}
 		if preserveSession {
+			if ev.Agent == "claude" && ev.Source == "log" && ev.Status != "" && ev.Kind != "approval" {
+				var ss Session
+				if err := s.get(t, "sessions", ev.Session, &ss); err == nil && ss.Source == "claude-desktop" {
+					if err = s.applyClaudeStatus(t, &ss, ev.Status, sourceTime, false); err != nil {
+						return err
+					}
+				}
+			}
 			added = true
 			return nil
 		}
@@ -290,14 +349,20 @@ func (s *Store) appendMode(ev Event, preserveSession, desktop bool, expectedUpda
 			ss.Updated = ev.Time
 		}
 		if !stale && ev.Status != "" && ev.Kind != "approval" {
-			ss.Status = ev.Status
+			if ev.Agent == "claude" {
+				if err := s.applyClaudeStatus(t, &ss, ev.Status, ev.Time, true); err != nil {
+					return err
+				}
+			} else {
+				ss.Status = ev.Status
+			}
 		}
 		if e = s.put(t, "sessions", ss.ID, ss); e != nil {
 			return e
 		}
 		added = true
 		return nil
-	})
+	}()
 	return ev, added, e
 }
 func seqKey(v uint64) string {
@@ -358,7 +423,9 @@ func (s *Store) Sessions() ([]Session, error) {
 			if e := s.get(t, "sessions", string(k), &ss); e != nil {
 				return e
 			}
-			out = append(out, ss)
+			if !ss.CatalogHidden {
+				out = append(out, ss)
+			}
 			return nil
 		})
 	})
@@ -386,6 +453,12 @@ func (s *Store) Take(b, k string, v any) error {
 }
 
 func (s *Store) SetProject(id, project string) error {
+	var current Session
+	if err := s.Get("sessions", id, &current); err != nil {
+		return err
+	} else if current.Project == project {
+		return nil
+	}
 	return s.db.Update(func(t *bolt.Tx) error {
 		var ss Session
 		if err := s.get(t, "sessions", id, &ss); err != nil {

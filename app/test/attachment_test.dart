@@ -37,6 +37,49 @@ class BrowserLauncher extends UrlLauncherPlatform {
 }
 
 void main() {
+  testWidgets('large inline HTTPS image opens download confirmation in app', (
+    tester,
+  ) async {
+    final c = AttachmentClient();
+    addTearDown(c.dispose);
+    c.output = SessionAttachment(
+      name: 'large.png',
+      mime: 'image/png',
+      bytes: Uint8List(0),
+      size: 12 << 20,
+      downloadRequired: true,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: UiStrings.delegates,
+        supportedLocales: UiStrings.supportedLocales,
+        locale: AppLanguage.simplifiedChinese.locale,
+        home: Scaffold(
+          body: TranscriptTile(
+            client: c,
+            session: 's',
+            block: TranscriptBlock(
+              key: 'image',
+              kind: 'message',
+              role: 'assistant',
+              text: '![large](https://example.com/large.png)',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('下载原文件'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AttachmentPage), findsOneWidget);
+    expect(find.text('12.0 MB'), findsOneWidget);
+    await tester.tap(find.text('下载原文件'));
+    await tester.pumpAndSettle();
+    expect(find.text('下载附件？'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('uploaded binary file opens a safe details view', (tester) async {
     final c = AttachmentClient();
     addTearDown(c.dispose);
@@ -189,6 +232,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('网页'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('应用内打开'));
       await tester.pumpAndSettle();
       expect(browser.opened, 'https://example.com/docs');
       expect(browser.mode, PreferredLaunchMode.inAppBrowserView);

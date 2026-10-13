@@ -34,8 +34,20 @@ func (m *Manager) Options(id string) TurnOptions {
 	return o
 }
 func (m *Manager) setOptions(ss store.Session, o TurnOptions) (TurnOptions, error) {
-	if o.Model == "" && o.Effort == "" {
+	if o.Model == "" && o.Effort == "" && o.Speed == "" {
 		return m.Options(ss.ID), nil
+	}
+	if ss.Agent == "claude" {
+		_, native, err := m.claudeInbox(ss)
+		if err != nil {
+			return o, err
+		}
+		if native {
+			if (o.Model != "" && o.Model != "default") || o.Effort != "" {
+				return o, errors.New(claudeInboxOptions)
+			}
+			return TurnOptions{}, nil
+		}
 	}
 	if o.Model != "" && o.Effort == "" && ss.Agent == "codex" {
 		choices, e := m.Models(ss.Agent, ss.ID)
@@ -58,8 +70,11 @@ func (m *Manager) setOptions(ss store.Session, o TurnOptions) (TurnOptions, erro
 		r.mu.Lock()
 		busy := r.busy
 		r.mu.Unlock()
+		if busy && ss.Agent == "claude" && r.options == o {
+			return o, nil
+		}
 		if busy {
-			return o, errors.New("正在执行，模型选择将在下一次发送时生效")
+			return o, &InputNotSentError{Err: errors.New("当前任务正在执行，完成后可修改模型参数")}
 		}
 		if ss.Agent == "claude" && r.options != o {
 			r.close()

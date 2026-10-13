@@ -86,7 +86,7 @@ func (c *Console) Handler() http.Handler {
 			http.Error(w, "Unauthorized", 401)
 			return
 		}
-		allowed := map[string]string{"GET /api/status": "/gateway/status", "POST /api/login": "/gateway/login", "POST /api/cancel": "/gateway/cancel", "POST /api/unlink": "/gateway/unlink", "GET /api/pending": "/pair-pending", "POST /api/approve": "/pair-approve"}
+		allowed := map[string]string{"GET /api/status": "/gateway/status", "GET /api/apps": "/app-connections", "POST /api/apps/name": "/device-name", "POST /api/apps/revoke": "/revoke", "POST /api/login": "/gateway/login", "POST /api/cancel": "/gateway/cancel", "POST /api/unlink": "/gateway/unlink", "GET /api/pending": "/pair-pending", "POST /api/approve": "/pair-approve"}
 		path := allowed[r.Method+" "+r.URL.Path]
 		if path == "" {
 			http.NotFound(w, r)

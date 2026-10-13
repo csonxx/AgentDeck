@@ -1,6 +1,7 @@
 package main
 
 import (
+	"agentdeck/internal/gateway"
 	"bufio"
 	"bytes"
 	"context"
@@ -19,11 +20,14 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"agentdeck/internal/agent"
+	"agentdeck/internal/claudedesktop"
+	"agentdeck/internal/claudestdio"
 	"agentdeck/internal/relay"
 	"agentdeck/internal/secure"
 	"agentdeck/internal/server"
@@ -43,6 +47,17 @@ func run() error {
 	}
 	home, _ := os.UserHomeDir()
 	cmd := os.Args[1]
+	if cmd == "claude-stdio" {
+		f := flag.NewFlagSet(cmd, flag.ContinueOnError)
+		binary := f.String("binary", "", "native Claude executable")
+		root := f.String("root", filepath.Join(home, ".agentdeck", "cs"), "private native stdin bridge registry")
+		if err := f.Parse(os.Args[2:]); err != nil {
+			return err
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return claudestdio.Run(ctx, *binary, *root, f.Args(), os.Stdin, os.Stdout, os.Stderr)
+	}
 	f := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	voiceFile := f.String("voice-command-file", "", "private JSON argv for workstation offline voice transcription")
 	inputSession := f.String("session", "", "session owning the uploaded attachment")
@@ -59,7 +74,11 @@ func run() error {
 	publicPin := f.String("public-tls-pin", "", "optional external proxy SPKI SHA-256 hex pin (proxy mode only; default system CA trust)")
 	rotation := f.Duration("rotation", 15*time.Minute, "traffic key rotation interval")
 	codex := f.String("codex-sessions", "", "opt-in Codex session root (empty = disabled)")
+	codexGoals := f.String("codex-goals", "", "native Codex goals SQLite file (default: beside --codex-sessions)")
 	claude := f.String("claude-sessions", "", "opt-in Claude project log root (empty = disabled)")
+	claudeDesktop := f.String("claude-desktop-sessions", "auto", "Claude desktop catalog directory (auto on macOS, empty disables)")
+	claudeDebugger := f.Bool("claude-desktop-debugger", false, "opt in to owner-enabled loopback Claude Desktop debugger for original-session user input (macOS)")
+	claudeDebuggerClose := f.Bool("claude-desktop-close-debugger", false, "close the verified owner-enabled Claude debugger when this Local exits")
 	lookback := f.Duration("lookback", 72*time.Hour, "only import logs modified within this window (0 = all)")
 	historyBytes := f.Int64("history-bytes", 8<<20, "recent bytes on first import (0 = full log)")
 	projects := f.String("project-roots", "", "comma-separated directories allowed for mobile agent sessions")
@@ -82,6 +101,7 @@ func run() error {
 	noOpen := f.Bool("no-open", false, "print login page without opening browser")
 	consoleListen := f.String("console-listen", "127.0.0.1:8787", "local workstation controls: IPv4 loopback address")
 	noConsole := f.Bool("no-console", false, "disable local workstation web controls (S-LOCAL only)")
+	androidManifest := f.String("android-manifest", "", "owner-only Android release manifest JSON path")
 	kind := f.String("agent", "codex", "bridge agent: codex or claude")
 	if e := f.Parse(os.Args[2:]); e != nil {
 		return e
@@ -94,6 +114,22 @@ func run() error {
 	}
 	if cmd == "console" {
 		return runConsole(*dir, *consoleListen, *noOpen)
+	}
+	if cmd == "gateway-publish-release" {
+		file, err := os.Open(*androidManifest)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		var release gateway.AndroidRelease
+		if err := json.NewDecoder(io.LimitReader(file, 16<<10)).Decode(&release); err != nil {
+			return err
+		}
+		if err := release.Validate(); err != nil {
+			return err
+		}
+		_, err = adminRequest(*dir, "POST", "/releases/android", release)
+		return err
 	}
 	if strings.HasPrefix(cmd, "gateway-") || cmd == "pair-pending" || cmd == "pair-approve" {
 		return gatewayManagement(cmd, *dir, *tenant, *name, *out, *requestID, *revokeKind, *pairCode)
@@ -280,7 +316,7 @@ func run() error {
 		if *voiceFile != "" {
 			return errors.New("voice transcription belongs to S-LOCAL")
 		}
-		if *codex != "" || *claude != "" || *media != "" || *agentsConfig != "" {
+		if *codex != "" || *claude != "" || (*claudeDesktop != "" && *claudeDesktop != "auto") || *media != "" || *agentsConfig != "" {
 			return errors.New("S-GATEWAY never imports agent content; configure sources only on S-LOCAL")
 		}
 		return serveGateway(db, *dir, *addr, *public, pin, trust, *logLevel, tlsCert, *behindProxy, *rotation, *connectionLogInterval)
@@ -331,6 +367,35 @@ func run() error {
 	if *claude != "" {
 		roots = append(roots, agent.Root{Agent: "claude", Path: *claude, Source: "log"})
 	}
+	claudeIndex := *claudeDesktop
+	if claudeIndex == "auto" {
+		claudeIndex = ""
+		claudeRoot, _ := filepath.Abs(*claude)
+		if *claude != "" && runtime.GOOS == "darwin" && claudeRoot == filepath.Join(home, ".claude", "projects") {
+			candidate := filepath.Join(home, "Library", "Application Support", "Claude", "claude-code-sessions")
+			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+				claudeIndex = candidate
+			}
+		}
+	}
+	if claudeIndex != "" && *claude == "" {
+		return errors.New("--claude-desktop-sessions requires --claude-sessions")
+	}
+	index := ""
+	if *codex != "" {
+		p, err := filepath.Abs(*codex)
+		if err != nil {
+			return err
+		}
+		for p != filepath.Dir(p) {
+			if filepath.Base(p) == "sessions" {
+				index = filepath.Join(filepath.Dir(p), "session_index.jsonl")
+				break
+			}
+			p = filepath.Dir(p)
+		}
+	}
+	follower := &agent.Follower{Normalizer: normal, Roots: roots, Lookback: *lookback, HistoryBytes: *historyBytes, Index: index, ClaudeIndex: claudeIndex}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	voiceArgs, voiceErr := loadVoiceCommand(*voiceFile)
@@ -340,6 +405,18 @@ func run() error {
 	executable, _ := os.Executable()
 	controlDir, _ := filepath.Abs(*dir)
 	s.Manager = &agent.Manager{Store: db, Normalizer: normal, Context: ctx, VoiceCommand: voiceArgs, Binary: executable, ControlDir: controlDir}
+	s.Manager.LoadHistory = follower.LoadClaudeHistory
+	s.Manager.ReadSettings = follower.Settings
+	s.Manager.ClaudeDesktopDebugger = *claudeDebugger
+	s.Manager.ClaudeDesktopSessions = claudeIndex
+	s.Manager.ClaudeGoalRoot = *claude
+	s.Manager.CodexGoalPath = *codexGoals
+	if s.Manager.CodexGoalPath == "" && *codex != "" {
+		s.Manager.CodexGoalPath = filepath.Join(filepath.Dir(*codex), "goals_1.sqlite")
+	}
+	if claudeIndex != "" {
+		s.Manager.ClaudeUsageFile = filepath.Join(filepath.Dir(claudeIndex), "plan-usage-history.json")
+	}
 	go func() {
 		if e := s.Manager.WarmVoice(); e != nil {
 			log.Printf("Local voice warmup unavailable; first recording can retry")
@@ -362,6 +439,22 @@ func run() error {
 		if p != "" {
 			s.Manager.Roots = append(s.Manager.Roots, p)
 		}
+	}
+	if *claudeDebugger && *claudeDebuggerClose {
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			b, err := claudedesktop.Open(ctx)
+			if err != nil {
+				return
+			}
+			defer b.Close()
+			if err = b.ShutdownDebugger(ctx); err != nil {
+				log.Print("Claude local debugger shutdown could not be confirmed")
+			} else {
+				log.Print("Claude local debugger shutdown requested")
+			}
+		}()
 	}
 	defer s.Manager.Close()
 	if !*noConsole {
@@ -390,21 +483,6 @@ func run() error {
 	}
 	s.Manager.RunDeliveries(ctx)
 	s.Manager.RunConnectors(ctx)
-	index := ""
-	if *codex != "" {
-		p, e := filepath.Abs(*codex)
-		if e != nil {
-			return e
-		}
-		for p != filepath.Dir(p) {
-			if filepath.Base(p) == "sessions" {
-				index = filepath.Join(filepath.Dir(p), "session_index.jsonl")
-				break
-			}
-			p = filepath.Dir(p)
-		}
-	}
-	follower := &agent.Follower{Normalizer: normal, Roots: roots, Lookback: *lookback, HistoryBytes: *historyBytes, Index: index}
 	followDone := make(chan struct{})
 	go func() { defer close(followDone); follower.Run(ctx) }()
 	go func() {

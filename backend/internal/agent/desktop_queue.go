@@ -269,6 +269,11 @@ func (b *DesktopBridge) EnqueueNative(ctx context.Context, id, text, request, pr
 		collaboration["settings"] = settings
 		message["submissionOptions"] = map[string]any{"executionHostId": "local", "collaborationMode": collaboration}
 	}
+	if o.Speed != "" {
+		submission := obj(message["submissionOptions"])
+		applySpeed(submission, o)
+		message["submissionOptions"] = submission
+	}
 	return b.nativeQueueSet(c, id, append(queue, message))
 }
 

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -33,6 +34,7 @@ type Node struct {
 	Owner   string `json:"owner,omitempty"`
 }
 type Server struct {
+	TrustedProxies     []netip.Prefix
 	Store              *store.Store
 	URL, Pin, TLSTrust string
 	Rotation           time.Duration
@@ -206,6 +208,7 @@ func (g *Server) Handler() http.Handler {
 	m.HandleFunc("POST /v2/time-sync", g.timeSync)
 	m.HandleFunc("/v2/relay/", g.proxy)
 	g.authRoutes(m)
+	g.releaseRoutes(m)
 	return g.observe(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -471,6 +474,7 @@ func (g *Server) proxy(w http.ResponseWriter, r *http.Request) {
 		req.Header.Del("X-Forwarded-For")
 		req.Header.Del("X-Forwarded-Host")
 		req.Header.Del("X-Forwarded-Proto")
+		req.Header.Set("X-AgentDeck-Client-IP", g.clientIP(r))
 		req.Header.Set("Authorization", localAuth)
 	}
 	transport := &http.Transport{DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {

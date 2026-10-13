@@ -1,4 +1,7 @@
 import 'language.dart';
+import 'download_page.dart';
+import 'core/download.dart' show DownloadDestination;
+import 'core/download_manager.dart';
 import 'media_preview.dart';
 import 'office_preview.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -43,7 +46,7 @@ Future<void> openSessionLink(
   if ((web.scheme == 'https' || web.scheme == 'http') && !mediaHref(web.path)) {
     try {
       if (web.host.isEmpty ||
-          !await launchUrl(web, mode: LaunchMode.inAppBrowserView)) {
+          !await launchUrl(web, mode: await chooseLinkMode(context))) {
         throw StateError('Browser unavailable');
       }
     } catch (_) {
@@ -103,6 +106,77 @@ class _AttachmentPageState extends State<AttachmentPage> {
     widget.session,
     widget.href,
   );
+  DownloadTask? get task =>
+      widget.client.downloads.forLink(widget.session, widget.href);
+  bool get busy => task?.running == true;
+  DownloadDestination? get saved =>
+      task?.complete == true ? DownloadDestination(task!.id) : null;
+  String get downloadError => task?.error ?? '';
+  @override
+  void initState() {
+    super.initState();
+    widget.client.downloads.addListener(_changed);
+    widget.client.downloads.restore();
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    widget.client.downloads.removeListener(_changed);
+    super.dispose(); // The task belongs to the app, not this page.
+  }
+
+  Future<void> download(SessionAttachment attachment) async {
+    if (busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(context.tr('下载附件？')),
+        content: Text(
+          context.tr('将下载 {0}（{1}）到你选择的位置。', [
+            attachment.name,
+            attachmentSize(
+              attachment.size != 0 ? attachment.size : attachment.bytes.length,
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(context.tr('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(context.tr('确认下载')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await widget.client.downloads.start(
+        widget.session,
+        widget.href,
+        attachment.name,
+        attachment.mime,
+        attachment.size,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.tr('无法创建下载任务，请检查保存位置'))));
+      }
+    }
+  }
+
+  Widget downloadStatus() => task == null
+      ? const SizedBox.shrink()
+      : DownloadTaskView(client: widget.client, task: task!);
+
   @override
   Widget build(BuildContext context) => FutureBuilder<SessionAttachment>(
     future: data,
@@ -110,6 +184,33 @@ class _AttachmentPageState extends State<AttachmentPage> {
       final attachment = snap.data;
       return Scaffold(
         appBar: AppBar(
+          actions: [
+            IconButton(
+              tooltip: context.tr('下载列表'),
+              icon: const Icon(Icons.downloading_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => DownloadPage(client: widget.client),
+                ),
+              ),
+            ),
+            if (Uri.tryParse(widget.href)?.scheme == 'https')
+              IconButton(
+                tooltip: context.tr('浏览器或其他应用打开'),
+                icon: const Icon(Icons.open_in_new),
+                onPressed: () => launchUrl(
+                  Uri.parse(widget.href),
+                  mode: LaunchMode.externalApplication,
+                ),
+              ),
+            if (attachment != null && !attachment.downloadRequired)
+              IconButton(
+                tooltip: context.tr('下载原文件'),
+                onPressed: busy ? null : () => download(attachment),
+                icon: const Icon(Icons.download_outlined),
+              ),
+          ],
           title: Text(
             attachment == null
                 ? context.tr('会话附件')
@@ -120,6 +221,16 @@ class _AttachmentPageState extends State<AttachmentPage> {
             overflow: TextOverflow.ellipsis,
           ),
         ),
+        bottomNavigationBar:
+            !attachmentDownloadActive(busy, saved, downloadError) ||
+                attachment?.downloadRequired == true
+            ? null
+            : SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: downloadStatus(),
+                ),
+              ),
         body: snap.hasError
             ? Center(
                 child: Column(
@@ -146,6 +257,35 @@ class _AttachmentPageState extends State<AttachmentPage> {
               )
             : attachment == null
             ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+            : attachment.downloadRequired
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.insert_drive_file_outlined, size: 48),
+                      const SizedBox(height: 16),
+                      Text(attachment.name, textAlign: TextAlign.center),
+                      const SizedBox(height: 8),
+                      Text(attachmentSize(attachment.size)),
+                      const SizedBox(height: 16),
+                      Text(
+                        context.tr('此附件可下载原文件，确认后选择保存位置。'),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: busy ? null : () => download(attachment),
+                        icon: const Icon(Icons.download_outlined),
+                        label: Text(context.tr('下载原文件')),
+                      ),
+                      const SizedBox(height: 16),
+                      downloadStatus(),
+                    ],
+                  ),
+                ),
+              )
             : attachment.mime.startsWith('audio/')
             ? VideoAttachment(
                 bytes: attachment.bytes,
@@ -246,7 +386,7 @@ String attachmentError(Object? error) {
     '文件不在工作站允许的附件目录内',
     '此文件未在当前会话中引用',
     '不提供凭据文件预览',
-    '附件不是普通文件或超过 8 MiB',
+    '附件不是普通文件',
     '暂不支持此文件格式，请在工作站打开',
     '文档无法预览，文件可能损坏或格式不支持',
     '加密的 Office 文件需要先在工作站解密',
@@ -516,3 +656,41 @@ class _SessionAttachmentsPageState extends State<SessionAttachmentsPage> {
     },
   );
 }
+
+String attachmentSize(int bytes) {
+  if (bytes < 0) return '—';
+  if (bytes >= 1 << 30) return '${(bytes / (1 << 30)).toStringAsFixed(2)} GB';
+  if (bytes >= 1 << 20) return '${(bytes / (1 << 20)).toStringAsFixed(1)} MB';
+  if (bytes >= 1 << 10) return '${(bytes / (1 << 10)).toStringAsFixed(1)} KB';
+  return '$bytes B';
+}
+
+bool attachmentDownloadActive(
+  bool busy,
+  DownloadDestination? saved,
+  String error,
+) => busy || saved != null || error.isNotEmpty;
+
+Future<LaunchMode> chooseLinkMode(BuildContext context) async =>
+    await showModalBottomSheet<LaunchMode>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.language),
+              title: Text(context.tr('应用内打开')),
+              onTap: () => Navigator.pop(context, LaunchMode.inAppBrowserView),
+            ),
+            ListTile(
+              leading: const Icon(Icons.open_in_new),
+              title: Text(context.tr('浏览器或其他应用打开')),
+              onTap: () =>
+                  Navigator.pop(context, LaunchMode.externalApplication),
+            ),
+          ],
+        ),
+      ),
+    ) ??
+    LaunchMode.inAppBrowserView;

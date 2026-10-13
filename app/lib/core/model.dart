@@ -178,26 +178,53 @@ class TranscriptBlock {
 }
 
 class Transcript {
+  static const maxBlocks = 200;
+  static const maxTextUnits = 1024 * 1024;
+  bool _loadingPage = false;
+  int _textUnits = 0;
   final List<TranscriptBlock> blocks = [];
   final Map<String, TranscriptBlock> _items = {};
   final Set<String> _seen = {};
   int cursor = 0, before = 0;
-  bool hasMore = false, loadingOlder = false, detached = false;
+  bool hasMore = false,
+      loadingOlder = false,
+      loadingNewer = false,
+      detached = false;
+  int latestLiveCursor = 0;
   int revision = 0;
-  void history(Map<String, dynamic> page, {bool replace = false}) {
+  void history(
+    Map<String, dynamic> page, {
+    bool replace = false,
+    bool newer = false,
+  }) {
     if (replace) {
       blocks.clear();
+      _textUnits = 0;
       _items.clear();
       _seen.clear();
       cursor = (page['cursor'] as num).toInt();
       detached = page['has_newer'] == true;
     }
-    for (final e in page['events'] as List) {
-      add(Map<String, dynamic>.from(e as Map));
+    _loadingPage = true;
+    try {
+      for (final e in page['events'] as List) {
+        final event = Map<String, dynamic>.from(e as Map);
+        if (!containsEvent(event)) _seen.remove(event['id']);
+        add(event);
+      }
+    } finally {
+      _loadingPage = false;
     }
     blocks.sort((a, b) => a.first.compareTo(b.first));
-    before = (page['before'] as num).toInt();
-    hasMore = page['has_more'] == true;
+    if (newer) {
+      detached =
+          page['has_newer'] == true ||
+          latestLiveCursor > (page['cursor'] as num).toInt();
+    } else {
+      before = (page['before'] as num).toInt();
+      hasMore = page['has_more'] == true;
+    }
+    _trimWindow(keepOlder: !replace && !newer);
     revision++;
   }
 
@@ -237,8 +264,30 @@ class Transcript {
     if (kind == 'queued_message') b.role = e['role'] as String? ?? b.role;
     revision++;
     final text = cleaned;
+    _textUnits -= b.text.length;
     b.text = e['mode'] == 'delta' ? b.text + text : text;
+    _textUnits += b.text.length;
+    if (!_loadingPage) _trimWindow();
     b.status = e['status'] as String? ?? '';
+  }
+
+  void _trimWindow({bool keepOlder = false}) {
+    var trimmed = false;
+    while (blocks.length > 1 &&
+        (blocks.length > maxBlocks || _textUnits > maxTextUnits)) {
+      final removed = keepOlder ? blocks.removeLast() : blocks.removeAt(0);
+      _items.remove(removed.key);
+      _textUnits -= removed.text.length;
+      trimmed = true;
+    }
+    if (trimmed) {
+      if (keepOlder) {
+        detached = true;
+      } else {
+        hasMore = true;
+      }
+    }
+    if (blocks.isNotEmpty) before = blocks.first.first;
   }
 }
 
@@ -270,6 +319,7 @@ String cleanMessage(String value) {
     'command-message',
     'command-args',
     'task-notification',
+    'oai-mem-citation',
   ]) {
     value = value.replaceAll(
       RegExp(
@@ -284,7 +334,8 @@ String cleanMessage(String value) {
 }
 
 class SessionAttachment {
-  final bool generatedName, truncated;
+  final bool generatedName, truncated, downloadRequired;
+  final int size;
   final String name, mime;
   final Uint8List bytes;
   final int line;
@@ -295,6 +346,8 @@ class SessionAttachment {
     this.line = 0,
     this.generatedName = false,
     this.truncated = false,
+    this.downloadRequired = false,
+    this.size = 0,
   });
   bool get isImage => mime.startsWith('image/');
 }

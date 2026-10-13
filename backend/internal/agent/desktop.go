@@ -31,9 +31,70 @@ type DesktopThread struct {
 type DesktopBridge struct {
 	Socket         string
 	QueueStatePath string
+	OpenThread     func(context.Context, string) error
+	wakeLocks      sync.Map
 	queueMu        sync.Mutex
 	queues         map[string]nativeQueueCache
 	queueSerial    uint64
+}
+
+var errDesktopNoOwner = errors.New("电脑 Codex 尚未加载原会话")
+
+// Explicit input may wake the saved native chat. Passive reads/follows never
+// navigate the user's desktop, and a sent turn is never retried here.
+func (b *DesktopBridge) connectForInput(ctx context.Context, id string) (*desktopConnection, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	guard, _ := b.wakeLocks.LoadOrStore(id, &sync.Mutex{})
+	lock := guard.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+	c, err := b.connect(ctx, id)
+	if !errors.Is(err, errDesktopNoOwner) {
+		return c, err
+	}
+	if !claudeNativeID.MatchString(id) {
+		return nil, errors.New("Codex 原会话 ID 无效，无法自动唤起")
+	}
+	open := b.OpenThread
+	if open == nil {
+		open = openCodexThread
+	}
+	if err = open(ctx, id); err != nil {
+		return nil, errors.New("无法自动唤起电脑 Codex 原会话，请检查桌面端是否正常运行")
+	}
+	life, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for life.Err() == nil {
+		c, err = b.connect(life, id)
+		if !errors.Is(err, errDesktopNoOwner) {
+			return c, err
+		}
+		select {
+		case <-life.Done():
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	return nil, errors.New("电脑 Codex 已尝试加载原会话，但执行端尚未就绪；消息未发送，请稍后重试")
+}
+
+func (b *DesktopBridge) ReadForInput(ctx context.Context, id string) (DesktopThread, error) {
+	c, err := b.connectForInput(ctx, id)
+	if err != nil {
+		return DesktopThread{}, err
+	}
+	c.conn.Close()
+	return DesktopThread{ID: id, Kind: "codex", Host: "local"}, nil
+}
+
+func readDesktopForInput(d DesktopController, ctx context.Context, id string) (DesktopThread, error) {
+	if reader, ok := d.(interface {
+		ReadForInput(context.Context, string) (DesktopThread, error)
+	}); ok {
+		return reader.ReadForInput(ctx, id)
+	}
+	return d.Read(ctx, id)
 }
 
 func (b *DesktopBridge) Validate() error {
@@ -89,7 +150,7 @@ func (b *DesktopBridge) connect(ctx context.Context, id string) (*desktopConnect
 	v, err = c.request("thread-owner-discovery", 1, map[string]any{"hostId": "local", "conversationId": id}, "")
 	if err != nil {
 		conn.Close()
-		return nil, errors.New("原会话未在电脑 Codex 中打开，请先在电脑打开该会话")
+		return nil, err
 	}
 	c.owner = str(v["handledByClientId"])
 	if c.owner == "" {
@@ -137,6 +198,9 @@ func (c *desktopConnection) request(method string, version int, params any, targ
 			continue
 		}
 		if out["resultType"] != "success" {
+			if method == "thread-owner-discovery" && out["error"] == "no-client-found" {
+				return nil, errDesktopNoOwner
+			}
 			return nil, errors.New("电脑 Codex 拒绝了操作；请检查原会话状态")
 		}
 		if target != "" && out["handledByClientId"] != target {
@@ -160,7 +224,7 @@ func (b *DesktopBridge) Send(ctx context.Context, id, text, request, project str
 	return b.SendInput(ctx, id, text, request, project, TurnOptions{}, []any{map[string]any{"type": "text", "text": text}})
 }
 func (b *DesktopBridge) SendInput(ctx context.Context, id, text, request, project string, o TurnOptions, inputs []any) error {
-	c, err := b.connect(ctx, id)
+	c, err := b.connectForInput(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -186,6 +250,7 @@ func (b *DesktopBridge) SendInput(ctx context.Context, id, text, request, projec
 	if o.Effort != "" {
 		req["effort"] = o.Effort
 	}
+	applySpeed(req, o)
 	_, err = c.request("thread-follower-start-turn", 2, map[string]any{"conversationId": id, "turnStart": map[string]any{"request": req, "context": map[string]any{"inheritThreadSettings": true}}}, c.owner)
 	return err
 }
@@ -258,4 +323,32 @@ func (b *DesktopBridge) SteerInput(ctx context.Context, id, text, request, proje
 	restore := map[string]any{"id": request, "text": text, "images": []any{}, "context": map[string]any{"commentAttachments": []any{}}}
 	_, e = c.request("thread-follower-steer-turn", 1, map[string]any{"conversationId": id, "input": inputs, "clientUserMessageId": request, "restoreMessage": restore, "attachments": []any{}}, c.owner)
 	return e
+}
+
+// PauseGoal pauses the owner's scheduler before interrupting its original turn.
+func (b *DesktopBridge) PauseGoal(ctx context.Context, id, project string) error {
+	c, e := b.connect(ctx, id)
+	if e != nil {
+		return e
+	}
+	defer c.conn.Close()
+	if ctx != nil {
+		stop := context.AfterFunc(ctx, func() { c.conn.Close() })
+		defer stop()
+	}
+	if _, e = c.snapshot(id, project); e != nil {
+		return e
+	}
+	v, e := c.request("thread-follower-interrupt-turn", 3, map[string]any{"conversationId": id, "mode": "user-stop"}, c.owner)
+	if e != nil {
+		return e
+	}
+	r := obj(obj(v["result"])["result"])
+	if str(r["goalPauseError"]) != "" {
+		return errors.New("电脑目标暂停失败，请检查电脑会话")
+	}
+	if r["ok"] != true {
+		return errors.New("电脑未确认暂停目标")
+	}
+	return nil
 }

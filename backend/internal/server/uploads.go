@@ -288,6 +288,12 @@ func (s *Server) inputRequest(owner string, req Request) (any, error) {
 		return nil, errors.New("工作站未启用会话输入")
 	}
 	switch req.Method {
+	case "goal_list":
+		return s.Manager.Goals()
+	case "usage":
+		return s.Manager.AccountUsage(req.Agent)
+	case "session_settings":
+		return s.Manager.SessionSettings(req.Session)
 	case "models":
 		choices, e := s.Manager.Models(req.Agent, req.Session)
 		if e != nil {
@@ -298,6 +304,7 @@ func (s *Server) inputRequest(owner string, req Request) (any, error) {
 			return nil, e
 		}
 		caps["models"] = choices
+
 		return caps, nil
 	case "input_capabilities":
 		return s.Manager.InputCapabilities(req.Agent, req.Session, req.Kind != "voice")
@@ -319,7 +326,11 @@ func (s *Server) inputRequest(owner string, req Request) (any, error) {
 		}
 		return preview, nil
 	case "upload_read":
-		r, data, end, e := s.rangeUpload(owner, req.Upload, req.Session, req.Offset, uploadChunkSize)
+		limit := req.Limit
+		if limit == 0 {
+			limit = uploadChunkSize
+		}
+		r, data, end, e := s.rangeUpload(owner, req.Upload, req.Session, req.Offset, limit)
 		if e != nil {
 			return nil, e
 		}
@@ -372,7 +383,7 @@ func (s *Server) rangeUpload(owner, id, session string, offset, limit int) (uplo
 	if e != nil {
 		return r, nil, 0, e
 	}
-	if r.Offset != r.Size || offset < 0 || offset > r.Size || limit < 1 || limit > uploadChunkSize {
+	if r.Offset != r.Size || offset < 0 || offset > r.Size || limit < 1 || limit > downloadChunkSize {
 		return r, nil, 0, errors.New("无效附件读取范围")
 	}
 	end := offset + limit

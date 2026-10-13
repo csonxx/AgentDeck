@@ -92,6 +92,11 @@ void main() {
         ),
       ),
     );
+    await tester.scrollUntilVisible(
+      find.text('Codex'),
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Codex'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('授权 WorkBuddy 本地助理'),

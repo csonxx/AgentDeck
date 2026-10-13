@@ -39,7 +39,7 @@ class DesktopClient extends AgentClient {
   }
 
   @override
-  Future<void> sendPrompt(String session, String text) {
+  Future<void> sendPrompt(String session, String text, {String? requestId}) {
     sent = session;
     return ack.future;
   }
@@ -219,12 +219,12 @@ void main() {
       await tester.pumpAndSettle();
       c.status('pending');
       await tester.pump();
-      expect(find.text('等待电脑响应…'), findsWidgets);
+      expect(find.text('已送达，等待 Agent 响应…'), findsWidgets);
       expect(find.byType(RunningIndicator), findsWidgets);
       c.status('running');
       await tester.pump();
       expect(find.text('执行中'), findsOneWidget);
-      expect(find.text('等待电脑响应…'), findsNothing);
+      expect(find.text('已送达，等待 Agent 响应…'), findsNothing);
       c.status('completed');
       await tester.pump();
       expect(find.byType(RunningIndicator), findsNothing);

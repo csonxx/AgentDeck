@@ -1,6 +1,7 @@
 package store
 
 import (
+	"agentdeck/internal/presentation"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -30,6 +31,9 @@ func (s *Store) reconcileDesktop(t *bolt.Tx, ev *Event) (bool, error) {
 	if ev.Mode != "snapshot" || ev.Kind == "status" || ev.Kind == "notice" || ev.Kind == "approval" {
 		return false, nil
 	}
+	if ev.Kind == "message" {
+		ev.Text = presentation.Clean(ev.Text)
+	}
 	native := ev.Source == "desktop-live"
 	original := ev.Item
 	if original == "" {
@@ -37,7 +41,11 @@ func (s *Store) reconcileDesktop(t *bolt.Tx, ev *Event) (bool, error) {
 		ev.Item = original
 	}
 	a := desktopAlias{}
-	if err := s.get(t, "agentconfig", desktopKey("native", *ev, original), &a); err != nil && !errors.Is(err, os.ErrNotExist) {
+	aliasKind := "log"
+	if native {
+		aliasKind = "native"
+	}
+	if err := s.get(t, "agentconfig", desktopKey(aliasKind, *ev, original), &a); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
 	if a.Item == "" {
@@ -67,6 +75,11 @@ func (s *Store) reconcileDesktop(t *bolt.Tx, ev *Event) (bool, error) {
 	}
 	if a.Native != "" {
 		if err := s.put(t, "agentconfig", desktopKey("native", *ev, a.Native), a); err != nil {
+			return false, err
+		}
+	}
+	if a.Log != "" {
+		if err := s.put(t, "agentconfig", desktopKey("log", *ev, a.Log), a); err != nil {
 			return false, err
 		}
 	}

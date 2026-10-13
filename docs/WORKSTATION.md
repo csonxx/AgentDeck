@@ -68,3 +68,15 @@ time=2026-10-10T08:40:00.000Z level=INFO msg=connection_stats service=agentdeck-
 常见 `reason`：`feishu_not_configured`、`oauth_browser_cookie_mismatch`、`oauth_state_missing_expired_or_used`、`feishu_identity_resolution_failed`、`local_authentication_rejected`、`local_already_connected`、`local_offline`、`relay_proof_rejected`、`local_tunnel_proxy_failed`。 / These reason codes distinguish configuration, browser cookie/state, provider identity, workstation authentication/conflict/offline, relay authentication and tunnel failures.
 
 日志不输出请求/响应正文、原始查询串/未知路径、认证 Header、Cookie、OAuth code/state、token、校验码、密钥或用户会话。网关诊断只有部署新二进制后才生效；本地源码通过测试不代表远端已发布。 / Request/response bodies, raw query strings/unknown paths, authorization headers, cookies, OAuth code/state, tokens, comparison codes, keys and user sessions are excluded. New diagnostics take effect only after deploying the updated gateway binary; local tests do not prove remote rollout.
+
+
+## Claude App 原会话发送 / Original Claude chats in the app
+
+Desktop 原会话支持显式选择的本机调试器输入：S-LOCAL 增加 `--claude-desktop-debugger`，电脑开启原生开发模式与主进程调试器。调试器仅允许回环 `127.0.0.1:9229`，禁止接入公网代理。原生 `human` 输入、原 UUID/PID、幂等与额度错误同步已通过后端实测；2026-10-12 额度恢复后，原执行进程两次实际回复已验证；OnePlus 7 原生 App 经现有公网网关发送并收到实际模型回复，普通文字手机往返已通过。默认不开启，不改登录和隐私，不走 peer 或替换 CLI。详细步骤、安全边界和当前限制见 [README](../README.md#claude-桌面会话同步--claude-desktop-conversations)。
+
+Original Desktop chats have an opt-in local-debugger input path: add `--claude-desktop-debugger` to S-LOCAL and enable Desktop's built-in developer mode/main-process debugger. Only loopback `127.0.0.1:9229` is allowed; never publish/proxy this port. Backend live tests verify human provenance, original UUID/PID, idempotency and quota-error synchronization. After quota renewal on 2026-10-12, two real model replies from the original owner passed; a real OnePlus 7 native-app plain-text round trip through the existing public gateway also passed. The path defaults off, preserves login/privacy and never falls back to peer input or a replacement CLI. See [README](../README.md) for setup, security boundaries and remaining limitations.
+
+
+2026-10-12 最终 ADB 验收：GM1900 0.4.29 普通文字原会话收发、执行状态、草稿清空和无未确认残留均通过。按用户要求，测试后已关闭本机调试端口和开发设置；Claude 手机直发当前停用，网关及会话查看同步继续运行。详细证据与全套检查的剩余限制见 [ACCEPTANCE](ACCEPTANCE.md)。
+
+Final ADB acceptance on 2026-10-12 passed original-session plain text, running state, cleared draft and no uncertain-delivery residue on GM1900 0.4.29. The owner requested debugger/developer-setting closure after testing; Claude phone input is currently disabled while gateway and conversation viewing synchronization remain active. See [ACCEPTANCE](ACCEPTANCE.md) for evidence and remaining suite limitations.

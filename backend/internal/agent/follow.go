@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,20 +24,26 @@ type Root struct {
 	Source string
 }
 type Follower struct {
-	Normalizer   *Normalizer
-	Roots        []Root
-	Notify       func(store.Event)
-	Lookback     time.Duration
-	HistoryBytes int64
-	Index        string
-	indexStamp   string
-	states       map[string]*State
-	stamps       map[string]string
+	mu                    sync.Mutex
+	ClaudeIndex           string
+	ClaudeProcesses       string
+	ClaudeProcessSnapshot func() (map[int]string, error)
+	claude                *claudeCatalog
+	requested             map[string]bool
+	Normalizer            *Normalizer
+	Roots                 []Root
+	Notify                func(store.Event)
+	Lookback              time.Duration
+	HistoryBytes          int64
+	Index                 string
+	indexStamp            string
+	codexStamp            string
+	codexChecked          time.Time
+	states                map[string]*State
+	stamps                map[string]string
 }
 
 func (f *Follower) Run(ctx context.Context) {
-	f.states = map[string]*State{}
-	f.stamps = map[string]string{}
 	f.Scan()
 	t := time.NewTicker(500 * time.Millisecond)
 	defer t.Stop()
@@ -50,10 +57,25 @@ func (f *Follower) Run(ctx context.Context) {
 	}
 }
 func (f *Follower) Scan() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.init()
+	f.refreshCodexCatalog()
+	f.refreshClaudeCatalog()
+	f.refreshClaudeStatuses()
+	f.refreshClaudeProcessStatuses()
+	f.scan()
+}
+
+func (f *Follower) init() {
 	if f.states == nil {
 		f.states = map[string]*State{}
 		f.stamps = map[string]string{}
+		f.requested = map[string]bool{}
 	}
+}
+
+func (f *Follower) scan() {
 	for _, r := range f.Roots {
 		type entry struct {
 			path     string
@@ -61,6 +83,9 @@ func (f *Follower) Scan() {
 		}
 		files := []entry{}
 		_ = filepath.WalkDir(r.Path, func(path string, d os.DirEntry, e error) error {
+			if e == nil && d.IsDir() && r.Agent == "claude" && path != filepath.Clean(r.Path) && filepath.Dir(path) != filepath.Clean(r.Path) {
+				return filepath.SkipDir // Tool subagents are not sidebar sessions.
+			}
 			if e != nil || d.IsDir() || d.Type()&os.ModeSymlink != 0 {
 				return nil
 			}
@@ -71,7 +96,13 @@ func (f *Follower) Scan() {
 			if e != nil {
 				return nil
 			}
-			if f.Lookback > 0 && time.Since(info.ModTime()) > f.Lookback {
+			if r.Agent == "claude" && f.claude != nil && f.claude.ready {
+				id := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
+				if entry, exists := f.claude.entries[id]; !exists || entry.CatalogHidden {
+					return nil
+				}
+			}
+			if !f.requested[path] && f.Lookback > 0 && time.Since(info.ModTime()) > f.Lookback {
 				return nil
 			}
 			files = append(files, entry{path, info.ModTime()})
@@ -79,6 +110,9 @@ func (f *Follower) Scan() {
 		})
 		sort.Slice(files, func(i, j int) bool { return files[i].modified.After(files[j].modified) })
 		for _, file := range files {
+			if r.Agent == "claude" && f.claude != nil && f.claude.ready && !f.requested[file.path] {
+				continue
+			}
 			if e := f.read(file.path, r); e != nil {
 				log.Printf("source read failed agent=%s file_id=%s err=%v", r.Agent, digest(file.path)[:12], e)
 			}
@@ -97,10 +131,44 @@ func (f *Follower) read(path string, r Root) error {
 	st := f.states[path]
 	if st == nil {
 		st = &State{Session: k[:24]}
+		if r.Agent == "claude" && f.claude != nil && f.claude.ready {
+			if entry, exists := f.claude.entries[strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))]; exists {
+				st.Session, st.CWD = entry.ID, entry.Project
+			}
+		}
 		if e = f.Normalizer.Store.Get("checkpoints", k, st); e != nil && !os.IsNotExist(e) {
 			return e
 		}
 		f.states[path] = st
+	}
+	if r.Agent == "codex" && st.SourceVersion < 1 {
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		line, _, oversized, err := readRecord(bufio.NewReader(file))
+		file.Close()
+		if err != nil && err != io.EOF {
+			return err
+		}
+		var header map[string]any
+		if !oversized && json.Unmarshal(line, &header) == nil && str(header["type"]) == "session_meta" {
+			_, _ = f.Normalizer.Parse(line, r.Agent, r.Source, st)
+			st.SourceVersion = 1
+		}
+	}
+	if r.Agent == "codex" && st.Excluded {
+		if f.stamps[path] == stamp {
+			return nil
+		}
+		if err := f.Normalizer.Store.SyncCodexVisibility(map[string]bool{st.Session: false}, false); err != nil {
+			return err
+		}
+		if err := f.Normalizer.Store.Put("checkpoints", k, st); err != nil {
+			return err
+		}
+		f.stamps[path] = stamp
+		return nil
 	}
 	var tracked store.Session
 	desktop := f.Normalizer.Store.Get("sessions", st.Session, &tracked) == nil && tracked.Managed && tracked.Source == "desktop"
@@ -126,7 +194,7 @@ func (f *Follower) read(path string, r Root) error {
 	if info.Size() < st.Offset {
 		*st = State{Session: k[:24]}
 	}
-	if st.CWD != "" {
+	if st.CWD != "" && tracked.Source != "claude-desktop" {
 		_ = f.Normalizer.Store.SetProject(st.Session, st.CWD)
 	}
 	file, e := os.Open(path)
@@ -159,6 +227,30 @@ func (f *Follower) read(path string, r Root) error {
 			return e
 		}
 	}
+	var batch []store.Event
+	batchBytes := 0
+	batchStart := st.Offset
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		var catalogSession store.Session
+		catalog := r.Agent == "claude" && f.Normalizer.Store.Get("sessions", st.Session, &catalogSession) == nil && catalogSession.Source == "claude-desktop"
+		stored, err := f.Normalizer.Store.AppendImported(batch, catalog)
+		if err != nil {
+			st.Offset = batchStart
+			return err
+		}
+		if f.Notify != nil {
+			for _, ev := range stored {
+				f.Notify(ev)
+			}
+		}
+		batch = nil
+		batchBytes = 0
+		batchStart = st.Offset
+		return nil
+	}
 	reader := bufio.NewReader(file)
 	for count := 0; count < 1000; count++ {
 		start := st.Offset
@@ -179,11 +271,8 @@ func (f *Follower) read(path string, r Root) error {
 			log.Printf("malformed source record agent=%s offset=%d", r.Agent, start)
 			continue
 		}
-		if st.CWD != "" {
-			_ = f.Normalizer.Store.SetProject(st.Session, st.CWD)
-		}
 		var existing store.Session
-		if f.Normalizer.Store.Get("sessions", st.Session, &existing) == nil && existing.Managed && existing.Source != "desktop" {
+		if f.Normalizer.Store.Get("sessions", st.Session, &existing) == nil && existing.Managed && existing.Source != "desktop" && existing.Source != "claude-desktop" {
 			continue
 		}
 		sum := sha256.Sum256(line)
@@ -192,22 +281,17 @@ func (f *Follower) read(path string, r Root) error {
 				ev.Session = k[:24]
 			}
 			ev.ID = digest(k + fmt.Sprint(start) + hex.EncodeToString(sum[:]) + fmt.Sprint(i))
-			var stored store.Event
-			var added bool
-			var e error
-			if r.Agent == "codex" {
-				stored, added, e = f.Normalizer.Store.AppendDesktop(ev, false)
-			} else {
-				stored, added, e = f.Normalizer.Store.Append(ev)
-			}
-			if e != nil {
-				st.Offset = start
-				return e
-			}
-			if added && f.Notify != nil {
-				f.Notify(stored)
+			batch = append(batch, ev)
+			batchBytes += len(ev.Text) + len(ev.Media)
+		}
+		if len(batch) >= 128 || batchBytes >= 512<<10 {
+			if err := flush(); err != nil {
+				return err
 			}
 		}
+	}
+	if e = flush(); e != nil {
+		return e
 	}
 	if e = f.Normalizer.Store.Put("checkpoints", k, st); e != nil {
 		return e

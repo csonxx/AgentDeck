@@ -22,6 +22,7 @@ class InputVault extends DeviceVault {
 
 class InputClient extends AgentClient {
   final calls = <Map<String, dynamic>>[];
+  Map<String, dynamic>? nativeSettings;
   int previews = 0;
   Completer<String>? previewGate;
   Completer<Map<String, dynamic>>? capabilitiesGate;
@@ -29,9 +30,14 @@ class InputClient extends AgentClient {
     connected = true;
   }
   @override
-  Future<dynamic> request(Map<String, dynamic> data) async {
+  Future<dynamic> request(
+    Map<String, dynamic> data, {
+    Duration timeout = const Duration(seconds: 70),
+  }) async {
     calls.add(data);
     switch (data['method']) {
+      case 'session_settings':
+        return nativeSettings;
       case 'input_capabilities':
         if (capabilitiesGate != null) return capabilitiesGate!.future;
         return {
@@ -58,6 +64,7 @@ class InputClient extends AgentClient {
               'efforts': ['low', 'high'],
               'default_effort': 'low',
               'images': true,
+              'fast_tier': 'priority',
             },
             {'id': 'small', 'name': 'Small', 'efforts': [], 'images': false},
           ],
@@ -247,7 +254,7 @@ void main() {
       await t.pumpAndSettle();
       expect(find.text('pixel.png'), findsOneWidget);
       expect(controller.text, 'draft');
-      expect(c.calls, isEmpty);
+      expect(c.calls.where((v) => v['method'] != 'session_settings'), isEmpty);
       expect(native.starts, 0);
     },
   );
@@ -267,7 +274,7 @@ void main() {
         Uint8List.fromList([1]),
       );
       await c.validateAttachments('opencode', 'chat', [text]);
-      expect(c.calls, isEmpty);
+      expect(c.calls.where((v) => v['method'] != 'session_settings'), isEmpty);
       await expectLater(
         c.validateAttachments('workbuddy', 'chat', [image]),
         throwsFormatException,
@@ -429,6 +436,71 @@ void main() {
     c.device = {'device': 'fixture-pair-a'};
     expect((await c.loadTurnOptions('same-chat')).effort, 'high');
   });
+  testWidgets('existing native model and effort appear when a chat opens', (
+    t,
+  ) async {
+    final c = InputClient()
+      ..nativeSettings = {
+        'model': 'claude-sonnet-native',
+        'effort': 'max',
+        'source': 'last_turn',
+      };
+    final native = FakeInputs(), controller = TextEditingController();
+    addTearDown(c.dispose);
+    addTearDown(controller.dispose);
+    await mount(t, c, native, controller, agent: 'claude');
+    expect(find.textContaining('claude-sonnet-native · max'), findsOneWidget);
+    expect(find.textContaining('上次使用'), findsOneWidget);
+    expect(c.calls.where((v) => v['method'] == 'send'), isEmpty);
+  });
+  testWidgets(
+    'stored phone choices never replace native session values in the label',
+    (t) async {
+      final c = InputClient()
+        ..nativeSettings = {
+          'model': 'native-model',
+          'effort': 'high',
+          'source': 'live',
+        };
+      final controller = TextEditingController();
+      addTearDown(c.dispose);
+      addTearDown(controller.dispose);
+      await c.saveTurnOptions(
+        'chat',
+        const TurnOptions(model: 'small', effort: 'low'),
+      );
+      await mount(t, c, FakeInputs(), controller);
+      expect(find.textContaining('native-model · high'), findsOneWidget);
+      expect(find.textContaining('下次发送'), findsNothing);
+      expect(find.textContaining('沿用'), findsNothing);
+      expect(find.textContaining('small'), findsNothing);
+      await t.tap(find.textContaining('native-model · high'));
+      await t.pumpAndSettle();
+      expect(find.textContaining('沿用'), findsNothing);
+      expect(find.textContaining('下次发送'), findsNothing);
+      await t.pumpWidget(const SizedBox());
+      await t.pump();
+    },
+  );
+
+  testWidgets(
+    'unreported effort stays unknown rather than using saved effort',
+    (t) async {
+      final c = InputClient()
+        ..nativeSettings = {'model': 'native-model', 'source': 'last_turn'};
+      final controller = TextEditingController();
+      addTearDown(c.dispose);
+      addTearDown(controller.dispose);
+      await c.saveTurnOptions(
+        'chat',
+        const TurnOptions(model: 'small', effort: 'high'),
+      );
+      await mount(t, c, FakeInputs(), controller);
+      expect(find.textContaining('Effort 未提供'), findsOneWidget);
+      expect(find.textContaining(' · high'), findsNothing);
+    },
+  );
+
   testWidgets('model and effort reach next send and persist per chat', (
     t,
   ) async {
@@ -438,14 +510,16 @@ void main() {
     addTearDown(c.dispose);
     addTearDown(controller.dispose);
     await mount(t, c, native, controller, send: true);
-    await t.tap(find.text('模型 · Effort'));
+    await t.tap(find.text('会话模型 · 参数未提供'));
     await t.pumpAndSettle();
     await t.tap(find.text('Vision'));
     await t.pumpAndSettle();
     await t.tap(find.text('high'));
     await t.pumpAndSettle();
-    await t.ensureVisible(find.text('应用到下次发送'));
-    await t.tap(find.text('应用到下次发送'));
+    await t.tap(find.text('快速'));
+    await t.pumpAndSettle();
+    await t.ensureVisible(find.text('保存'));
+    await t.tap(find.text('保存'));
     await t.pumpAndSettle();
     expect((await c.loadTurnOptions('chat')).effort, 'high');
     expect((await c.loadTurnOptions('other')).inherited, true);
@@ -454,6 +528,7 @@ void main() {
     await t.tap(find.byTooltip('发送消息'));
     await t.pumpAndSettle();
     final request = c.calls.lastWhere((v) => v['method'] == 'send');
+    expect(request['speed'], 'fast');
     expect(request['model'], 'vision');
     expect(request['effort'], 'high');
     expect(request['text'], 'work');
@@ -529,7 +604,7 @@ void main() {
       expect(find.byKey(const ValueKey('voice-hold')), findsNothing);
       await t.enterText(find.byType(TextField), '请 检查登录页面并测试');
       expect(controller.text, '请 检查登录页面并测试');
-      expect(c.calls, isEmpty);
+      expect(c.calls.where((v) => v['method'] != 'session_settings'), isEmpty);
       await t.pumpWidget(const SizedBox());
       await t.pump();
     },
@@ -556,7 +631,7 @@ void main() {
     await t.pump();
     expect(controller.text, '原草稿');
     expect(native.cancelled, true);
-    expect(c.calls, isEmpty);
+    expect(c.calls.where((v) => v['method'] != 'session_settings'), isEmpty);
     await t.pumpWidget(const SizedBox());
     await t.pump();
   });
@@ -627,11 +702,11 @@ void main() {
       addTearDown(c.dispose);
       addTearDown(controller.dispose);
       await mount(t, c, native, controller, agent: 'workbuddy');
-      await t.tap(find.text('会话模型'));
+      await t.tap(find.text('会话模型 · 参数未提供'));
       await t.pumpAndSettle();
       expect(find.text('WorkBuddy 当前接口未提供模型切换'), findsOneWidget);
       expect(find.text('Vision'), findsNothing);
-      await t.tap(find.text('应用到下次发送'));
+      await t.tap(find.text('关闭'));
       await t.pumpAndSettle();
       await t.tap(find.byTooltip('添加图片或文件'));
       await t.pumpAndSettle();
@@ -653,7 +728,7 @@ void main() {
     addTearDown(c.dispose);
     addTearDown(controller.dispose);
     await mount(t, c, native, controller, agent: 'opencode');
-    await t.tap(find.text('模型 · Variant'));
+    await t.tap(find.text('会话模型 · 参数未提供'));
     await t.pumpAndSettle();
     await t.tap(find.text('Vision'));
     await t.pumpAndSettle();

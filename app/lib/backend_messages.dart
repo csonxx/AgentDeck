@@ -1,5 +1,320 @@
 // App-owned backend messages. Keep wire values and conversation bodies unchanged.
 const backendUiMessages = <String, List<String>>{
+  "Claude 不支持此图片格式，消息未发送": [
+    "Claude does not support this image format. Message not sent.",
+    "Claude 不支援此圖片格式，訊息未傳送",
+    "Claude не поддерживает этот формат изображения. Сообщение не отправлено.",
+  ],
+  "Claude 原会话操作未确认，请刷新核对；审批可能已过期": [
+    "The operation in the original Claude chat is unconfirmed. Refresh to check; the approval may have expired.",
+    "Claude 原會話操作未確認，請重新整理核對；審批可能已過期",
+    "Операция в исходном чате Claude не подтверждена. Обновите чат; запрос разрешения мог истечь.",
+  ],
+  "Claude 审批结果尚未确认，请刷新核对": [
+    "The Claude approval result is unconfirmed. Refresh to check.",
+    "Claude 審批結果尚未確認，請重新整理核對",
+    "Результат разрешения Claude не подтверждён. Обновите чат для проверки.",
+  ],
+  "审批回答格式无效": [
+    "Invalid approval answer format.",
+    "審批回答格式無效",
+    "Недопустимый формат ответа на запрос разрешения.",
+  ],
+  "当前 Claude Desktop 不支持图片直发，消息未发送": [
+    "This Claude Desktop version does not support direct image input. Message not sent.",
+    "目前 Claude Desktop 不支援圖片直傳，訊息未傳送",
+    "Эта версия Claude Desktop не поддерживает прямую отправку изображений. Сообщение не отправлено.",
+  ],
+  "当前 Claude Desktop 不支持此会话操作": [
+    "This Claude Desktop version does not support this chat operation.",
+    "目前 Claude Desktop 不支援此會話操作",
+    "Эта версия Claude Desktop не поддерживает данную операцию с чатом.",
+  ],
+
+  "Claude 本机直发连接未开启；请在电脑 Claude 的 Developer 菜单开启 Enable Main Process Debugger，消息未发送": [
+    "Claude local direct input is unavailable. Enable Main Process Debugger in Desktop's Developer menu. Message not sent.",
+    "Claude 本機直傳連線未開啟；請在電腦 Claude 的 Developer 選單開啟 Enable Main Process Debugger，訊息未傳送",
+    "Локальная отправка в Claude недоступна. Включите Enable Main Process Debugger в меню Developer на компьютере. Сообщение не отправлено.",
+  ],
+  "Claude 原会话尚未确认收到这条消息；不会重复发送，请稍后刷新核对": [
+    "Reception in the original Claude chat is unconfirmed. This message will not be resent; refresh the chat to check.",
+    "Claude 原會話尚未確認收到這則訊息；不會重複傳送，請稍後重新整理核對",
+    "Получение в исходном чате Claude не подтверждено. Повторной отправки не будет; обновите чат для проверки.",
+  ],
+  "Claude Desktop 会话目录无效或权限不安全": [
+    "The Claude Desktop session directory is invalid or has unsafe permissions.",
+    "Claude Desktop 會話目錄無效或權限不安全",
+    "Каталог сеансов Claude Desktop неверен или имеет небезопасные права.",
+  ],
+  "无法唯一确认 Claude Desktop 原会话和项目，消息未发送": [
+    "Cannot uniquely verify the original Claude Desktop chat and project. Message not sent.",
+    "無法唯一確認 Claude Desktop 原會話和專案，訊息未傳送",
+    "Не удалось однозначно проверить исходный чат и проект Claude Desktop. Сообщение не отправлено.",
+  ],
+  "Claude Desktop 原会话记录不存在，消息未发送": [
+    "The original Claude Desktop chat record is missing. Message not sent.",
+    "Claude Desktop 原會話記錄不存在，訊息未傳送",
+    "Запись исходного чата Claude Desktop отсутствует. Сообщение не отправлено.",
+  ],
+  "Claude Desktop 本机直发图片输入尚未验收，消息未发送": [
+    "Image input through Claude Desktop local direct input has not passed acceptance. Message not sent.",
+    "Claude Desktop 本機直傳圖片輸入尚未驗收，訊息未傳送",
+    "Ввод изображений через локальную отправку Claude Desktop ещё не проверен. Сообщение не отправлено.",
+  ],
+  "无法确认 Claude Desktop 原会话，消息未发送": [
+    "Cannot verify the original Claude Desktop chat. Message not sent.",
+    "無法確認 Claude Desktop 原會話，訊息未傳送",
+    "Не удалось проверить исходный чат Claude Desktop. Сообщение не отправлено.",
+  ],
+  "此原会话由另一执行端持有，消息未发送；不会新建并行执行端": [
+    "Another executor owns this chat. Message not sent; no parallel executor will be created.",
+    "此原會話由另一執行端持有，訊息未傳送；不會新建平行執行端",
+    "Этот чат занят другим исполнителем. Сообщение не отправлено; параллельный исполнитель не будет создан.",
+  ],
+  "请在电脑 Claude 原会话中修改模型参数后再发送": [
+    "Change model settings in the original desktop Claude chat before sending.",
+    "請在電腦 Claude 原會話中修改模型參數後再傳送",
+    "Измените параметры модели в исходном чате Claude на компьютере перед отправкой.",
+  ],
+  "Claude Desktop 原会话身份已变化，消息未发送": [
+    "The original Claude Desktop chat identity changed. Message not sent.",
+    "Claude Desktop 原會話身分已變更，訊息未傳送",
+    "Идентичность исходного чата Claude Desktop изменилась. Сообщение не отправлено.",
+  ],
+  "Claude 原会话执行端已变化，消息未发送": [
+    "The executor of the original Claude chat changed. Message not sent.",
+    "Claude 原會話執行端已變更，訊息未傳送",
+    "Исполнитель исходного чата Claude изменился. Сообщение не отправлено.",
+  ],
+  "Claude 官方 CLI 远程接口会将消息标记为其他会话请求，尚不能用于手机作为用户直发 Desktop 原会话；消息未发送": [
+    "Claude's remote CLI treats input as a peer request and cannot deliver phone user input to the original Desktop chat. Message not sent.",
+    "Claude 官方 CLI 遠端介面會將訊息標記為其他會話請求，尚不能用於手機作為使用者直接傳送至 Desktop 原會話；訊息未傳送",
+    "Удалённый CLI Claude считает ввод запросом другого агента и пока не подходит для ввода пользователя с телефона в исходный чат Desktop. Сообщение не отправлено.",
+  ],
+  "电脑 Claude 原会话尚未开启 Remote Control；请在该会话启用远程连接后发送": [
+    "Enable Remote Control in the original desktop Claude chat before sending.",
+    "電腦 Claude 原會話尚未開啟 Remote Control；請在該會話啟用遠端連線後傳送",
+    "Включите Remote Control в исходном чате Claude на компьютере перед отправкой.",
+  ],
+  "Claude 原会话投递结果尚未确认，请核对原会话；不会自动重复发送": [
+    "Claude delivery is unconfirmed. Check the original chat; this message will not be resent automatically.",
+    "Claude 原會話投遞結果尚未確認，請核對原會話；不會自動重複傳送",
+    "Доставка в Claude не подтверждена. Проверьте исходный чат; автоматической повторной отправки не будет.",
+  ],
+  "消息编号已用于不同内容": [
+    "This message ID was already used for different content.",
+    "訊息編號已用於不同內容",
+    "Этот идентификатор сообщения уже использован для другого содержимого.",
+  ],
+  "消息为空、编号无效或超过 64 KiB": [
+    "The message is empty, its ID is invalid, or it exceeds 64 KiB.",
+    "訊息為空、編號無效或超過 64 KiB",
+    "Сообщение пустое, идентификатор неверен или размер превышает 64 КиБ.",
+  ],
+  "Claude 原会话的远程连接标识或目录权限无效": [
+    "The Claude remote connection ID or registry directory permissions are invalid.",
+    "Claude 原會話的遠端連線識別碼或目錄權限無效",
+    "Неверный идентификатор удалённого подключения Claude или права каталога реестра.",
+  ],
+  "Claude 原会话与授权项目不匹配": [
+    "The original Claude chat does not match the authorized project.",
+    "Claude 原會話與授權專案不符",
+    "Исходный чат Claude не соответствует разрешённому проекту.",
+  ],
+  "此 Claude 远程接口使用原会话的模型参数；请在电脑原会话修改": [
+    "This Claude remote interface uses the original chat model settings. Change them in the desktop chat.",
+    "此 Claude 遠端介面使用原會話的模型參數；請在電腦原會話修改",
+    "Этот удалённый интерфейс Claude использует настройки модели исходного чата. Измените их на компьютере.",
+  ],
+  "当前 Claude 远程发送接口尚不支持图片输入": [
+    "This Claude remote sender does not yet support image input.",
+    "目前 Claude 遠端傳送介面尚不支援圖片輸入",
+    "Этот интерфейс удалённой отправки Claude пока не поддерживает изображения.",
+  ],
+  "Claude 原会话连接已变化，消息未发送": [
+    "The original Claude connection changed; message not sent.",
+    "Claude 原會話連線已變更，訊息未傳送",
+    "Подключение исходного чата Claude изменилось; сообщение не отправлено.",
+  ],
+  "无法启动 Claude 远程发送客户端，消息未发送": [
+    "Unable to start the Claude remote sender; message not sent.",
+    "無法啟動 Claude 遠端傳送客戶端，訊息未傳送",
+    "Не удалось запустить удалённый клиент Claude; сообщение не отправлено.",
+  ],
+  "Claude 进程记录权限不安全": [
+    "The Claude process registry file permissions are unsafe.",
+    "Claude 程序記錄權限不安全",
+    "Небезопасные права файла реестра процессов Claude.",
+  ],
+  "Claude 桌面原进程不能交接；请使用原会话的 Remote Control 连接": [
+    "The original Claude Desktop process cannot be handed off. Use its Remote Control connection.",
+    "Claude 桌面原程序不能交接；請使用原會話的 Remote Control 連線",
+    "Исходный процесс Claude Desktop нельзя передать. Используйте его подключение Remote Control.",
+  ],
+  "当前任务正在执行，完成后可修改模型参数": [
+    "The task is running. Change model parameters after it finishes.",
+    "目前任務正在執行，完成後可修改模型參數",
+    "Задача выполняется. Измените параметры модели после завершения.",
+  ],
+  "此电脑 Claude 接口未提供模型参数修改，请在电脑会话中修改": [
+    "This desktop Claude interface cannot change model parameters. Change them in the desktop chat.",
+    "此電腦 Claude 介面未提供模型參數修改，請在電腦會話中修改",
+    "Интерфейс Claude не поддерживает изменение параметров модели. Измените их на компьютере.",
+  ],
+
+  "Claude 原会话仍在执行，尚未交接": [
+    "The original Claude executor is still running and has not handed off.",
+    "Claude 原會話仍在執行，尚未交接",
+    "Исходный исполнитель Claude ещё работает; передача не завершена.",
+  ],
+  "Claude 原会话执行交接失败，消息未发送": [
+    "Failed to hand off the original Claude executor; message not sent.",
+    "Claude 原會話執行交接失敗，訊息未傳送",
+    "Не удалось передать исходный чат Claude; сообщение не отправлено.",
+  ],
+  "Claude 原会话执行端发生变化，消息未发送": [
+    "The original Claude executor changed; message not sent.",
+    "Claude 原會話執行端發生變化，訊息未傳送",
+    "Исполнитель исходного чата Claude изменился; сообщение не отправлено.",
+  ],
+  "Claude 原会话尚未完成执行交接，消息未发送": [
+    "The original Claude executor has not finished handing off; message not sent.",
+    "Claude 原會話尚未完成執行交接，訊息未傳送",
+    "Передача исходного чата Claude ещё не завершена; сообщение не отправлено.",
+  ],
+
+  "请选择可用的 Claude 会话": [
+    "Choose an available Claude chat.",
+    "請選擇可用的 Claude 會話",
+    "Выберите доступный чат Claude.",
+  ],
+  "无法确认 Claude 会话占用状态，请稍后重试": [
+    "Unable to verify the Claude chat owner. Try again shortly.",
+    "無法確認 Claude 會話佔用狀態，請稍後重試",
+    "Не удалось проверить владельца чата Claude. Повторите позже.",
+  ],
+  "操作回执保存失败，请刷新核对，勿重复发送": [
+    "Could not save the receipt. Refresh to verify; do not resend.",
+    "操作回執儲存失敗，請重新整理核對，勿重複傳送",
+    "Не удалось сохранить подтверждение. Обновите чат для проверки; не отправляйте повторно.",
+  ],
+  "电脑 Claude 原生输入桥接与会话不匹配": [
+    "The native Claude input bridge does not match this chat.",
+    "電腦 Claude 原生輸入橋接與會話不符",
+    "Мост ввода Claude не соответствует этому чату.",
+  ],
+  "电脑 Claude 原生输入桥接状态无效，请在电脑检查": [
+    "The native Claude input bridge state is invalid. Check the workstation.",
+    "電腦 Claude 原生輸入橋接狀態無效，請在電腦檢查",
+    "Некорректное состояние моста Claude. Проверьте компьютер.",
+  ],
+  "Claude 原生输入桥接已安装，请在当前任务结束后重新启动电脑 Claude 并打开原会话": [
+    "The native Claude input bridge is installed. After the current task finishes, restart Claude Desktop and open the original chat.",
+    "Claude 原生輸入橋接已安裝，請在目前任務結束後重新啟動電腦 Claude 並開啟原會話",
+    "Мост ввода Claude установлен. После завершения задачи перезапустите Claude Desktop и откройте исходный чат.",
+  ],
+  "电脑 Claude 原会话需要原生输入桥接，请在本机安装后重新打开原会话": [
+    "This desktop Claude chat needs the native input bridge. Install it on the workstation, then reopen the original chat.",
+    "電腦 Claude 原會話需要原生輸入橋接，請在本機安裝後重新開啟原會話",
+    "Для этого чата нужен мост ввода Claude. Установите его на компьютере и снова откройте исходный чат.",
+  ],
+  "电脑 Claude 原生输入未确认，请刷新核对，勿重复发送": [
+    "Native Claude input is unconfirmed. Refresh to check; do not resend.",
+    "電腦 Claude 原生輸入未確認，請重新整理核對，勿重複傳送",
+    "Ввод Claude не подтверждён. Обновите чат для проверки; не отправляйте повторно.",
+  ],
+  "电脑 Claude 尚未确认接收；当前会话空闲，请检查 crossSessionInbound 收信设置。消息可能被暂存，勿重复发送": [
+    "Claude has not confirmed receipt. The chat is idle; check crossSessionInbound. The message may be held. Do not resend.",
+    "電腦 Claude 尚未確認接收；目前會話空閒，請檢查 crossSessionInbound 收信設定。訊息可能被暫存，勿重複傳送",
+    "Claude не подтвердил получение. Чат не занят; проверьте crossSessionInbound. Сообщение могло быть отложено. Не отправляйте повторно.",
+  ],
+
+  "电脑 Codex 尚未加载原会话": [
+    "Codex has not loaded the original chat yet.",
+    "電腦 Codex 尚未載入原會話",
+    "Codex ещё не загрузил исходный чат.",
+  ],
+  "Codex 原会话 ID 无效，无法自动唤起": [
+    "The original Codex chat ID is invalid.",
+    "Codex 原會話 ID 無效，無法自動喚起",
+    "Недопустимый ID исходного чата Codex.",
+  ],
+  "无法自动唤起电脑 Codex 原会话，请检查桌面端是否正常运行": [
+    "Could not open the original Codex chat. Check the desktop app.",
+    "無法自動喚起電腦 Codex 原會話，請檢查桌面端是否正常執行",
+    "Не удалось открыть исходный чат Codex. Проверьте приложение на компьютере.",
+  ],
+  "电脑 Codex 已尝试加载原会话，但执行端尚未就绪；消息未发送，请稍后重试": [
+    "Codex tried to load the original chat but is not ready. The message was not sent; try again shortly.",
+    "電腦 Codex 已嘗試載入原會話，但執行端尚未就緒；訊息未傳送，請稍後重試",
+    "Codex попытался загрузить исходный чат, но пока не готов. Сообщение не отправлено; повторите позже.",
+  ],
+
+  "已向电脑 Claude 原会话投递，但尚未确认接收；请检查电脑的消息接收设置或等待当前工具结束，勿重复发送": [
+    "Submitted to the original Claude chat, but receipt is unconfirmed. Check inbound settings or wait for the current tool. Do not resend.",
+    "已向電腦 Claude 原會話投遞，但尚未確認接收；請檢查電腦的訊息接收設定或等待目前工具結束，勿重複傳送",
+    "Отправлено в исходный чат Claude, получение не подтверждено. Проверьте приём сообщений или дождитесь инструмента. Не отправляйте повторно.",
+  ],
+  "电脑 Claude 原会话的模型和 effort 请在电脑设置；手机请选择「沿用当前会话设置」": [
+    "Set the original Claude chat model and effort on the computer; select Inherit current chat settings on mobile.",
+    "電腦 Claude 原會話的模型和 effort 請在電腦設定；手機請選擇「沿用目前會話設定」",
+    "Модель и effort исходного чата Claude задайте на компьютере; на телефоне выберите настройки агента по умолчанию.",
+  ],
+  "Claude 进程目录权限不安全，无法连接原会话": [
+    "Claude process registry permissions are unsafe. Cannot connect to the original chat.",
+    "Claude 進程目錄權限不安全，無法連接原會話",
+    "Небезопасные права каталога процессов Claude. Подключение невозможно.",
+  ],
+  "多个 Claude 进程持有同一会话，请先在电脑确认": [
+    "Multiple Claude processes own this chat. Check the computer first.",
+    "多個 Claude 進程持有同一會話，請先在電腦確認",
+    "Этот чат открыт несколькими процессами Claude. Проверьте компьютер.",
+  ],
+  "电脑 Claude 未提供兼容的原会话消息接口，请更新并重新打开该会话": [
+    "Claude has no compatible original-chat inbox. Update Claude and reopen the chat.",
+    "電腦 Claude 未提供相容的原會話訊息介面，請更新並重新開啟該會話",
+    "Нет совместимого интерфейса чата Claude. Обновите Claude и откройте чат заново.",
+  ],
+  "电脑 Claude 原会话消息接口权限不安全或已断开": [
+    "The original Claude inbox is disconnected or has unsafe permissions.",
+    "電腦 Claude 原會話訊息介面權限不安全或已斷開",
+    "Интерфейс исходного чата Claude отключён или имеет небезопасные права.",
+  ],
+  "电脑 Claude 原会话消息接口暂不支持图片输入；请在电脑发送图片": [
+    "The original Claude inbox does not support image input yet. Send images on the computer.",
+    "電腦 Claude 原會話訊息介面暫不支援圖片輸入；請在電腦傳送圖片",
+    "Интерфейс исходного чата Claude пока не поддерживает изображения. Отправьте их с компьютера.",
+  ],
+  "电脑 Claude 原会话消息接口已断开，请重试": [
+    "The original Claude inbox disconnected. Please retry.",
+    "電腦 Claude 原會話訊息介面已斷開，請重試",
+    "Интерфейс исходного чата Claude отключился. Повторите попытку.",
+  ],
+  "电脑 Claude 已接收，历史同步暂未完成，请刷新会话，勿重复发送": [
+    "Claude received the message. History sync is incomplete; refresh the chat without resending.",
+    "電腦 Claude 已接收，歷史同步暫未完成，請重新整理會話，勿重複傳送",
+    "Claude получил сообщение. История ещё синхронизируется; обновите чат без повторной отправки.",
+  ],
+  "请在电脑 Claude 原会话中处理停止或工具审批": [
+    "Handle stopping and tool approval in the original Claude chat on the computer.",
+    "請在電腦 Claude 原會話中處理停止或工具審批",
+    "Остановку и разрешения инструментов обрабатывайте в исходном чате Claude на компьютере.",
+  ],
+  "此 Claude 会话已从桌面目录移除或归档": [
+    "This Claude chat was removed from the desktop catalog or archived.",
+    "此 Claude 會話已從桌面目錄移除或封存",
+    "Этот чат Claude удалён из каталога или архивирован.",
+  ],
+  "此会话保留在 Claude 桌面目录中，但本机没有对应的日志，暂时无法读取历史或从手机续聊": [
+    "This chat is listed on Claude Desktop, but its local log is missing. History and mobile continuation are unavailable.",
+    "此會話保留在 Claude 桌面目錄中，但本機沒有對應的日誌，暫時無法讀取歷史或從手機續聊",
+    "Чат есть в Claude Desktop, но локальный журнал отсутствует. История и продолжение на телефоне недоступны.",
+  ],
+  "Claude 本机会话日志暂时无法读取": [
+    "The local Claude chat log is temporarily unreadable.",
+    "Claude 本機會話日誌暫時無法讀取",
+    "Локальный журнал чата Claude временно недоступен.",
+  ],
   "此队列消息包含特殊上下文，请在电脑操作": [
     "This queued message has special context. Manage it on the computer.",
     "此佇列訊息包含特殊上下文，請在電腦操作",
@@ -833,6 +1148,9 @@ const backendUiMessages = <String, List<String>>{
 
 // Only these known backend notices may be localized in the transcript.
 const backendNoticeKeys = <String>{
+  "此 Claude 会话已从桌面目录移除或归档",
+  "此会话保留在 Claude 桌面目录中，但本机没有对应的日志，暂时无法读取历史或从手机续聊",
+  "Claude 本机会话日志暂时无法读取",
   "Agent 进程退出；检查登录或网络后重试。",
   "OpenCode 执行失败，请检查工作站的模型或登录配置",
   "{0} 执行失败，请检查登录、网络或模型配置",

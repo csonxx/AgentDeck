@@ -12,6 +12,7 @@ import (
 )
 
 type ModelChoice struct {
+	FastTier      string   `json:"fast_tier,omitempty"`
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
 	Efforts       []string `json:"efforts"`
@@ -21,6 +22,7 @@ type ModelChoice struct {
 }
 type TurnOptions struct {
 	Model  string `json:"model,omitempty"`
+	Speed  string `json:"speed,omitempty"`
 	Effort string `json:"effort,omitempty"`
 }
 type modelEntry struct {
@@ -171,6 +173,11 @@ func (m *Manager) Models(agent, session string) ([]ModelChoice, error) {
 						}
 					}
 				}
+				for _, tier := range arr(v["serviceTiers"]) {
+					if str(obj(tier)["id"]) == "priority" {
+						c.FastTier = "priority"
+					}
+				}
 				if modelPattern.MatchString(c.ID) {
 					choices = append(choices, c)
 				}
@@ -184,9 +191,13 @@ func (m *Manager) Models(agent, session string) ([]ModelChoice, error) {
 		for _, raw := range arr(response["models"]) {
 			v := obj(raw)
 			c := ModelChoice{ID: str(v["value"]), Name: str(v["displayName"]), Default: str(v["value"]) == "default", Images: true, Efforts: []string{}}
+			if v["supportsFastMode"] == true {
+				c.FastTier = "fast"
+			}
+			// Claude advertises its own effort scale; never copy Codex levels.
 			for _, raw := range arr(v["supportedEffortLevels"]) {
 				eff := str(raw)
-				if efforts[eff] {
+				if eff == "low" || eff == "medium" || eff == "high" || eff == "xhigh" || eff == "max" {
 					c.Efforts = append(c.Efforts, eff)
 				}
 			}
@@ -205,7 +216,10 @@ func (m *Manager) Models(agent, session string) ([]ModelChoice, error) {
 	return choices, nil
 }
 func (m *Manager) validateOptions(ssID, agent string, o TurnOptions) error {
-	if o.Model == "" && o.Effort == "" {
+	if o.Speed != "" && o.Speed != "fast" && o.Speed != "standard" {
+		return errors.New("无效速度选项")
+	}
+	if o.Model == "" && o.Effort == "" && o.Speed == "" {
 		return nil
 	}
 	if !modelPattern.MatchString(o.Model) {
@@ -218,6 +232,12 @@ func (m *Manager) validateOptions(ssID, agent string, o TurnOptions) error {
 	for _, c := range cs {
 		if c.ID != o.Model {
 			continue
+		}
+		if o.Speed == "fast" && c.FastTier == "" {
+			return errors.New("所选模型不支持快速模式")
+		}
+		if o.Speed != "" && (agent != "codex" && agent != "claude") && c.FastTier == "" {
+			return errors.New("当前 Agent 没有独立快速模式，请选择原生 Variant")
 		}
 		if o.Effort == "" {
 			return nil

@@ -150,6 +150,8 @@ func configCategory(v map[string]any) string {
 	switch str(v["id"]) {
 	case "model":
 		return "model"
+	case "speed", "service_tier", "fast_mode":
+		return "speed"
 	case "effort", "reasoning_effort", "thought_level", "variant":
 		return "thought_level"
 	}
@@ -170,7 +172,7 @@ func configValues(v map[string]any) []map[string]any {
 	return out
 }
 func (r *acpRuntime) modelChoicesLocked() []ModelChoice {
-	var model, thought map[string]any
+	var model, thought, speed map[string]any
 	for _, option := range r.configOptions {
 		if option["type"] != "select" {
 			continue
@@ -180,6 +182,8 @@ func (r *acpRuntime) modelChoicesLocked() []ModelChoice {
 			if model == nil {
 				model = option
 			}
+		case "speed":
+			speed = option
 		case "thought_level":
 			if thought == nil {
 				thought = option
@@ -198,6 +202,10 @@ func (r *acpRuntime) modelChoicesLocked() []ModelChoice {
 				c.Efforts = append(c.Efforts, value)
 			}
 		}
+		fast, standard := acpSpeedValues(speed)
+		if fast != "" && standard != "" {
+			c.FastTier = fast
+		}
 		if c.Default {
 			c.DefaultEffort = str(thought["currentValue"])
 		}
@@ -209,7 +217,7 @@ func (r *acpRuntime) modelChoicesLocked() []ModelChoice {
 // Configure only model/reasoning selectors. Permission/mode selectors are never
 // touched. Refresh after model changes because reasoning options may depend on it.
 func (r *acpRuntime) applyOptions(ctx context.Context, o TurnOptions) error {
-	for _, selection := range []struct{ category, value string }{{"model", o.Model}, {"thought_level", o.Effort}} {
+	for _, selection := range []struct{ category, value string }{{"model", o.Model}, {"thought_level", o.Effort}, {"speed", o.Speed}} {
 		if selection.value == "" {
 			continue
 		}
@@ -221,16 +229,25 @@ func (r *acpRuntime) applyOptions(ctx context.Context, o TurnOptions) error {
 				break
 			}
 		}
-		valid := false
+		if selection.category == "speed" {
+			fast, standard := acpSpeedValues(chosen)
+			if selection.value == "fast" {
+				selection.value = fast
+			} else {
+				selection.value = standard
+			}
+		}
+		valid := selection.value != ""
+		found := false
 		for _, option := range configValues(chosen) {
 			if str(option["value"]) == selection.value {
-				valid = true
+				found = true
 			}
 		}
 		current := str(chosen["currentValue"])
 		id := str(chosen["id"])
 		r.mu.Unlock()
-		if !valid {
+		if !valid || !found {
 			return errors.New("当前模型不支持该选择，请刷新模型与强度选项")
 		}
 		if current == selection.value {
@@ -256,4 +273,18 @@ func imageFiles(files []InputAttachment) bool {
 		}
 	}
 	return false
+}
+
+// Only explicit native speed selectors are touched; no permission/mode selectors.
+func acpSpeedValues(option map[string]any) (fast, standard string) {
+	for _, v := range configValues(option) {
+		value := str(v["value"])
+		switch strings.ToLower(value) {
+		case "fast", "priority", "on", "true":
+			fast = value
+		case "standard", "default", "normal", "off", "false":
+			standard = value
+		}
+	}
+	return
 }

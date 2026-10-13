@@ -1,16 +1,27 @@
 // Runs against direct Go HTTPS and a separate TLS-terminating proxy. Test roots use a memory vault;
 // production uses FlutterSecureStorage, covered separately by native builds.
 import 'dart:convert';
+import 'package:crypto/crypto.dart';
+import 'package:agentdeck/core/download.dart';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:agentdeck/core/input.dart';
 import 'dart:ui' as ui;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:agentdeck/core/client.dart';
+import 'package:agentdeck/core/model.dart';
 import 'package:agentdeck/core/clock.dart';
 import 'package:agentdeck/core/vault.dart';
 
 class MemoryVault extends DeviceVault {
+  List<dynamic> downloads = [];
+  @override
+  Future<List<dynamic>> loadDownloads() async => downloads;
+  @override
+  Future<void> saveDownloads(List<dynamic> value) async {
+    downloads = value;
+  }
+
   Map<String, dynamic>? value;
   Map<String, dynamic> cache = {};
   Map<String, dynamic>? layout;
@@ -98,7 +109,7 @@ void main() {
           await c.pair(bundle);
         } catch (_) {
           // Only synthetic clock diagnostics: no bundle, keys or session data.
-          // Useful when a busy host exceeds the fixture's one-second epoch.
+          // Useful when a busy host exceeds the fixture's short rotation epoch.
           printOnFailure(
             jsonEncode({
               'fixture': proxy ? 'proxy' : 'direct',
@@ -135,6 +146,18 @@ void main() {
           );
         }
         expect(c.projects, isNotEmpty);
+        expect(
+          await c.request({
+            'method': 'ping',
+          }, timeout: const Duration(seconds: 5)),
+          isNull,
+        );
+        final selection = c.selected;
+        final layoutBefore = c.projectLayout.toJson();
+        await c.refreshSessions();
+        expect(c.selected, selection);
+        expect(c.projectLayout.toJson(), layoutBefore);
+        expect(c.sessions.any((s) => s.id == 'e2e-session'), isTrue);
         for (final agent in ['codex', 'claude']) {
           final session = await c.createSession(agent, c.projects.first.id);
           expect(session.managed, isTrue);
@@ -154,6 +177,10 @@ void main() {
           final catalog = await c.inputCatalog(agent, session.id);
           expect(catalog.models.single.id, 'fixture-model');
           expect(catalog.voice, isTrue);
+          final usage = await c.accountUsage(agent);
+          expect(usage.windows.single.used, 25);
+          expect(usage.windows.single.resets, DateTime.utc(2030));
+          expect(usage.stale, isFalse);
           final file = DraftFile(
             'report.txt',
             'text/plain',
@@ -171,7 +198,11 @@ void main() {
           await c.sendInput(
             session.id,
             'generation-check',
-            const TurnOptions(model: 'fixture-model', effort: 'high'),
+            TurnOptions(
+              model: 'fixture-model',
+              effort: 'high',
+              speed: agent == 'codex' ? 'fast' : '',
+            ),
             [fileId, imageId],
           );
           await until(
@@ -210,6 +241,17 @@ void main() {
           );
           expect(legacyPreview.mime, 'application/vnd.agentdeck.office+json');
           expect(jsonDecode(utf8.decode(legacyPreview.bytes))['kind'], 'excel');
+          final rawLegacy = BytesBuilder(copy: false);
+          await c.downloadAttachment(
+            session.id,
+            'agentdeck-file:$legacyId',
+            control: DownloadControl(),
+            write: (chunk) async {
+              rawLegacy.add(chunk);
+            },
+            progress: (_, _) {},
+          );
+          expect(rawLegacy.takeBytes(), legacyBytes);
           await c.removeDraftFile(legacyDraft);
           final binary = File('../artifacts/agentdeck').absolute.path;
           final state = proxy ? '$dir/proxy/state' : '$dir/state';
@@ -370,6 +412,26 @@ void main() {
         expect(paged.detached, true);
         await Future<void>.delayed(const Duration(milliseconds: 700));
         expect(paged.blocks.length, 40);
+        var lastIndex = 39;
+        while (paged.detached) {
+          await c.loadNewer('paged-session');
+          final nextIndex = int.parse(paged.blocks.last.text.split(' ').last);
+          expect(nextIndex, greaterThan(lastIndex));
+          expect(paged.blocks.length, lessThanOrEqualTo(Transcript.maxBlocks));
+          expect(
+            paged.blocks.map((b) => b.key).toSet().length,
+            paged.blocks.length,
+          );
+          lastIndex = nextIndex;
+        }
+        expect(lastIndex, 239);
+        expect(paged.blocks.length, 200);
+        expect(paged.hasMore, true);
+        await c.loadOlder('paged-session');
+        expect(paged.detached, true);
+        await c.loadNewer('paged-session');
+        expect(paged.blocks.last.text, 'Paged message 239');
+        expect(paged.detached, false);
         await c.reload('paged-session');
         await until(
           () => c.transcripts['paged-session']!.blocks.any(
@@ -398,6 +460,78 @@ void main() {
         expect(frame.image.width, greaterThan(0));
         frame.image.dispose();
         codec.dispose();
+        final generation = await c.sessionGeneration('e2e-session');
+        expect(generation.options.model, 'fixture-native-model');
+        expect(generation.options.effort, 'high');
+        expect(generation.options.speed, 'fast');
+        expect(generation.source, 'last_turn');
+        final large = await c.attachment('e2e-session', 'large.bin');
+        expect(large.downloadRequired, isTrue);
+        expect(large.bytes, isEmpty);
+        expect(large.size, 9 << 20);
+        final digestOutput = <Digest>[];
+        final hash = sha256.startChunkedConversion(
+          ChunkedConversionSink<Digest>.withCallback(digestOutput.addAll),
+        );
+        var downloaded = 0;
+        var sourceVersion = '';
+        await c.downloadAttachment(
+          'e2e-session',
+          'large.bin',
+          control: DownloadControl(),
+          expectedSize: large.size,
+          identity: (version, _) async {
+            sourceVersion = version;
+          },
+          write: (chunk) async {
+            expect(chunk.length, lessThanOrEqualTo(512 << 10));
+            hash.add(chunk);
+          },
+          progress: (done, total) {
+            downloaded = done;
+            expect(total, large.size);
+          },
+        );
+        hash.close();
+        expect(downloaded, large.size);
+        expect(
+          digestOutput.single.toString(),
+          sha256.convert(List.generate(9 << 20, (i) => i % 256)).toString(),
+        );
+        // Reopen the authorized file on a fresh token and continue at the saved offset.
+        var resumedBytes = 0;
+        await c.downloadAttachment(
+          'e2e-session',
+          'large.bin',
+          startOffset: 512 << 10,
+          version: sourceVersion,
+          expectedSize: large.size,
+          control: DownloadControl(),
+          progress: (_, _) {},
+          write: (chunk) async {
+            for (var i = 0; i < chunk.length; i++) {
+              if (chunk[i] != (((512 << 10) + resumedBytes + i) % 256)) {
+                fail('Resumed bytes differ');
+              }
+            }
+            resumedBytes += chunk.length;
+          },
+        );
+        expect(resumedBytes, large.size - (512 << 10));
+        // Cancel after one chunk: later reads stop and the descriptor is closed.
+        final cancelDownload = DownloadControl();
+        await expectLater(
+          c.downloadAttachment(
+            'e2e-session',
+            'large.bin',
+            control: cancelDownload,
+            write: (_) async {
+              cancelDownload.cancelled = true;
+            },
+            progress: (_, _) {},
+          ),
+          throwsA(isA<DownloadCancelled>()),
+        );
         final linked = await c.attachment('e2e-session', 'linked.md:2');
         expect(linked.line, 2);
         expect(utf8.decode(linked.bytes), contains('Encrypted linked text'));
@@ -429,7 +563,15 @@ void main() {
           (clock.millis - DateTime.now().millisecondsSinceEpoch).abs(),
           lessThan(10000),
         );
-        await Future<void>.delayed(const Duration(milliseconds: 1200));
+        await Future<void>.delayed(
+          Duration(
+            milliseconds:
+                int.parse(
+                  Platform.environment['AGENTDECK_E2E_ROTATION_MS'] ?? '1000',
+                ) +
+                200,
+          ),
+        );
         expect(c.epoch, greaterThan(before));
         await c.send({'method': 'ping'});
         final file = File('$pairDir/source/live.jsonl');
@@ -523,7 +665,7 @@ void main() {
       // This case performs pairing, uploads, rotation and reconnects. Give the
       // whole integration the same budget as gateway coverage; per-step waits
       // and protocol epoch / expiry checks stay unchanged.
-      timeout: const Timeout(Duration(seconds: 90)),
+      timeout: const Timeout(Duration(seconds: 180)),
       skip: dir == null
           ? 'Run scripts/verify.sh for real Go/Flutter integration'
           : false,

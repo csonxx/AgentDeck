@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-var control = []string{"environment_context", "user_instructions", "permissions instructions", "collaboration_mode", "app-context", "skills_instructions", "send_user_message_question_reply", "external_codex_apps_open_page", "codex_apps_open_page_instructions", "system-reminder", "local-command-caveat", "local-command-stdout", "command-name", "command-message", "command-args", "task-notification"}
+var control = []string{"environment_context", "user_instructions", "permissions instructions", "collaboration_mode", "app-context", "skills_instructions", "send_user_message_question_reply", "external_codex_apps_open_page", "codex_apps_open_page_instructions", "system-reminder", "local-command-caveat", "local-command-stdout", "command-name", "command-message", "command-args", "task-notification", "oai-mem-citation"}
 var answer = regexp.MustCompile(`"answer"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"`)
 
 func Clean(s string) string {

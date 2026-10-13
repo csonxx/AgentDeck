@@ -247,6 +247,11 @@ void main() {
         ),
       );
       await t.pumpAndSettle();
+      await t.scrollUntilVisible(
+        find.byKey(const ValueKey('language-setting')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await t.tap(find.byKey(const ValueKey('language-setting')));
       await t.pumpAndSettle();
       expect(find.text('繁體中文'), findsOneWidget);

@@ -63,6 +63,42 @@ type HistoryPage struct {
 	HasNewer bool    `json:"has_newer,omitempty"`
 }
 
+// Continue towards the present without loading the entire intervening log.
+// The anchor is exclusive, including when its single record exceeds a page.
+func (s *Store) HistoryAfter(session string, after uint64) (HistoryPage, error) {
+	out := HistoryPage{Events: []Event{}}
+	if session == "" || after == 0 {
+		return out, errors.New("missing anchor")
+	}
+	err := s.db.View(func(t *bolt.Tx) error {
+		out.Cursor = t.Bucket([]byte("events")).Sequence()
+		prefix := session + "\x00"
+		c := t.Bucket([]byte("transcript")).Cursor()
+		k, _ := c.Seek([]byte(sessionIndexKey(session, after)))
+		if k != nil && string(k) == sessionIndexKey(session, after) {
+			k, _ = c.Next()
+		}
+		size := 0
+		for ; k != nil && strings.HasPrefix(string(k), prefix); k, _ = c.Next() {
+			if len(out.Events) == 40 || size >= 512<<10 {
+				out.HasNewer = true
+				break
+			}
+			var ev Event
+			if err := s.get(t, "transcript", string(k), &ev); err != nil {
+				return err
+			}
+			if ev.Session != session {
+				return errors.New("invalid history session")
+			}
+			out.Events = append(out.Events, ev)
+			size += len(ev.Text)
+		}
+		return nil
+	})
+	return out, err
+}
+
 // Read backwards by first appearance, returning ascending complete items.
 // The live cursor and snapshots come from the same transaction, so events that
 // arrive during paging are neither skipped nor appended twice.
@@ -121,13 +157,15 @@ func (s *Store) LiveEvents(session string, after uint64, limit int) ([]Event, ui
 	if err != nil || len(events) == 0 {
 		return events, after, err
 	}
-	cursor := events[len(events)-1].Seq
+	cursor := after
+	size := 0
 	out := []Event{}
-	seen := map[string]bool{}
+	seen := map[uint64]bool{}
 	err = s.db.View(func(t *bolt.Tx) error {
 		for _, ev := range events {
 			if ev.Kind == "status" {
 				out = append(out, ev)
+				cursor = ev.Seq
 				continue
 			}
 			item := ev.Item
@@ -136,21 +174,31 @@ func (s *Store) LiveEvents(session string, after uint64, limit int) ([]Event, ui
 			}
 			hash := sha256.Sum256([]byte(ev.Session + "\x00" + item + "\x00" + ev.Kind))
 			id := hex.EncodeToString(hash[:])
-			if seen[id] {
-				continue
-			}
-			seen[id] = true
 			var first uint64
 			if err := s.get(t, "itemkeys", id, &first); errors.Is(err, os.ErrNotExist) {
+				cursor = ev.Seq
 				continue
 			} else if err != nil {
 				return err
+			}
+			if seen[first] {
+				cursor = ev.Seq
+				continue
 			}
 			var latest Event
 			if err := s.get(t, "transcript", sessionIndexKey(session, first), &latest); err != nil {
 				return err
 			}
+			// One complete item is always allowed; never split a snapshot or
+			// advance the cursor over an item deferred to the next push.
+			itemSize := len(latest.Text) + len(latest.Media)
+			if len(out) > 0 && size+itemSize > 256<<10 {
+				break
+			}
+			seen[first] = true
+			size += itemSize
 			out = append(out, latest)
+			cursor = ev.Seq
 		}
 		return nil
 	})

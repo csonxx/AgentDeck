@@ -6,6 +6,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -54,6 +55,52 @@ func TestHistoryLargeSessionCompleteItemsPagingAndLiveCursor(t *testing.T) {
 	raw, _ := os.ReadFile(filepath.Join(dir, "vault.db"))
 	if bytes.Contains(raw, []byte("partpartpart")) {
 		t.Fatal("vault is plaintext")
+	}
+}
+
+func TestHistoryAfterPagesForwardWithoutRepeatsOrSplittingOversizedAnchor(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	anchor, _, err := s.Append(Event{ID: "anchor", Session: "s", Kind: "message", Text: strings.Repeat("x", 600<<10)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 95; i++ {
+		if _, _, err = s.Append(Event{ID: fmt.Sprint(i), Session: "s", Kind: "message", Text: fmt.Sprint(i)}); err != nil {
+			t.Fatal(err)
+		}
+		s.Append(Event{ID: fmt.Sprintf("foreign-%d", i), Session: "other", Kind: "message", Text: "foreign"})
+	}
+	after := anchor.Seq
+	count := 0
+	for {
+		page, err := s.HistoryAfter("s", after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Events) == 0 {
+			t.Fatal("forward page stalled")
+		}
+		for _, ev := range page.Events {
+			count++
+			if ev.Session != "s" || ev.First <= after || ev.Text != fmt.Sprint(count) {
+				t.Fatal("repeat, skip, foreign item or oversized anchor")
+			}
+			after = ev.First
+		}
+		if !page.HasNewer {
+			break
+		}
+	}
+	if count != 95 {
+		t.Fatal("incomplete forward history")
+	}
+	last, err := s.HistoryAfter("s", after)
+	if err != nil || len(last.Events) != 0 || last.HasNewer {
+		t.Fatal("latest boundary not terminal")
 	}
 }
 
@@ -109,5 +156,45 @@ func TestLiveUpdatesOutsideRecentWindowUseFullSnapshots(t *testing.T) {
 	events, cursor, err := s.LiveEvents("s", recent.Cursor, 100)
 	if err != nil || len(events) != 1 || events[0].Text != "prefix suffix" || events[0].Mode != "snapshot" || events[0].First != 1 || cursor <= recent.Cursor {
 		t.Fatal("streamed older item lost its prefix")
+	}
+}
+
+func TestLiveEventsByteBudgetNeverSkipsDeferredSnapshots(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	rows := []Event{}
+	for i := 1; i <= 10; i++ {
+		rows = append(rows, Event{ID: fmt.Sprint(i), Item: fmt.Sprint(i), Session: "s", Agent: "codex", Source: "log", Kind: "tool_result", Mode: "snapshot", Text: strings.Repeat("x", 100<<10)})
+	}
+	if _, err = s.AppendImported(rows, false); err != nil {
+		t.Fatal(err)
+	}
+	cursor := uint64(0)
+	seen := map[string]bool{}
+	pushes := 0
+	for cursor < s.LastSeq() {
+		items, next, err := s.LiveEvents("s", cursor, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		size := 0
+		for _, ev := range items {
+			if seen[ev.Item] {
+				t.Fatal("snapshot repeated")
+			}
+			seen[ev.Item] = true
+			size += len(ev.Text)
+		}
+		if len(items) == 0 || size > 256<<10 || next <= cursor {
+			t.Fatal("oversized push or stalled cursor")
+		}
+		cursor = next
+		pushes++
+	}
+	if len(seen) != 10 || pushes != 5 {
+		t.Fatal("deferred snapshots lost")
 	}
 }

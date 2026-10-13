@@ -7,7 +7,7 @@ Use **Settings** at the upper right of Home to show or hide Codex, Claude Code, 
 | Agent | 接入 / Interface | 能力与边界 / Capabilities and boundaries |
 | --- | --- | --- |
 | Codex | JSONL + CLI + 可选桌面原生实时 IPC / optional native desktop live IPC | 原桌面 ID 发送须显式配置 IPC，并且电脑已打开会话。手机创建会话由 CLI 执行。 / Sending to the original desktop ID requires explicit IPC configuration and an open desktop chat. Mobile-created chats run through the CLI. |
-| Claude Code | JSONL + stream-json CLI | 原日志旁观；手机续聊分支与原电脑会话区分显示。 / Observe original logs; mobile continuation branches are labeled separately. |
+| Claude Code | 桌面目录 + JSONL + 可选本机原生调试器 / opt-in local native debugger；自有 stream-json CLI | 后端 human 直发已实测保持原 UUID/PID，额度错误同步；完整手机往返待额度恢复。实验开关默认关闭，9229 禁止公网暴露；官方 CLI peer 入口仍禁用。 / Backend human input preserves native UUID/PID and synchronizes quota errors; full phone acceptance awaits quota. Experimental opt-in defaults off; never expose 9229 publicly. CLI peer ingress remains blocked. |
 | OpenCode | REST + `/global/event` SSE | 列举、原 ID 发送、创建、停止、单次审批、消息/思考/工具/图片。首次或重连修复最近 200 条 provider 消息；首次列举每项目最近 100 个会话。 / List, send to original IDs, create, stop, one-time permission replies, messages/thoughts/tools/images. Initial/reconnect recovery fetches 200 recent provider messages and 100 recent sessions per project. |
 | Qoder | 官方 CLI ACP，stdio / official CLI ACP over stdio | 在 Agent 广告 `session/list`、`session/load` 时列举及恢复原 ACP ID；不虚构 IDE 私有历史。 / List and restore native ACP IDs when the agent advertises `session/list` and `session/load`; private IDE histories are not fabricated. |
 | TRAE | 官方 CLI ACP，stdio / official CLI ACP over stdio | 同上；创建、发送、停止、单次审批和已公开思考/工具/图片。 / Same ACP limits, with create, send, cancel, one-time approvals and exposed thoughts/tools/images. |
@@ -16,6 +16,10 @@ Use **Settings** at the upper right of Home to show or hide Codex, Claude Code, 
 没有登录或未配置时显示真实错误；不生成示例对话。ACP 恢复失败不自动创建分支；Agent 不支持的能力不以“成功”返回。
 
 Missing login/configuration reports a real error without sample conversations. ACP restore failures do not silently fork. Unsupported operations do not return success.
+
+Claude 桌面目录和 Codex/Claude「用量」入口的启动参数、缓存与限制见 [README](../README.md#查看用量--view-usage)。
+
+See [README](../README.md#查看用量--view-usage) for Claude desktop discovery, the Codex/Claude **Usage** entry, cache freshness and limitations.
 
 ## 工作站配置 / Workstation configuration
 

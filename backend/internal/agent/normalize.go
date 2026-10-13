@@ -14,22 +14,27 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"agentdeck/internal/presentation"
 	"agentdeck/internal/store"
 )
 
 type State struct {
-	Offset       int64  `json:"offset"`
-	Session      string `json:"session"`
-	CWD          string `json:"cwd"`
-	Message      string `json:"message"`
-	MediaVersion int    `json:"media_version,omitempty"`
-	DesktopSync  int    `json:"desktop_sync,omitempty"`
+	Offset        int64  `json:"offset"`
+	Session       string `json:"session"`
+	CWD           string `json:"cwd"`
+	Message       string `json:"message"`
+	MediaVersion  int    `json:"media_version,omitempty"`
+	DesktopSync   int    `json:"desktop_sync,omitempty"`
+	SourceVersion int    `json:"source_version,omitempty"`
+	Excluded      bool   `json:"excluded,omitempty"`
 }
 type Normalizer struct {
-	Store      *store.Store
-	MediaRoots []string
+	goalRecordMu     sync.Mutex
+	nativeSettingsMu sync.Mutex
+	Store            *store.Store
+	MediaRoots       []string
 }
 
 func obj(v any) map[string]any {
@@ -115,8 +120,18 @@ func (n *Normalizer) Parse(raw []byte, agent, source string, st *State) ([]store
 	if e := json.Unmarshal(raw, &d); e != nil {
 		return nil, e
 	}
+	defer n.recordNativeSettings(d, agent, st)
 	p := obj(d["payload"])
 	t := str(d["type"])
+	if agent == "codex" && t == "session_meta" {
+		st.Session = str(p["id"])
+		st.CWD = str(p["cwd"])
+		st.Excluded = codexInternalSource(p["source"])
+		return nil, nil
+	}
+	if agent == "codex" && st.Excluded {
+		return nil, nil
+	}
 	out := []store.Event{}
 	emit := func(kind, role, text, item, mode, status string) {
 		if kind == "message" && mode != "delta" {
@@ -260,12 +275,22 @@ func (n *Normalizer) Parse(raw []byte, agent, source string, st *State) ([]store
 		if s := str(d["cwd"]); s != "" {
 			st.CWD = s
 		}
+		n.captureClaudeGoal(d, st)
 		switch t {
 		case "user", "assistant":
 			m := obj(d["message"])
+			if t == "user" && claudeHumanInput(d) && (source != "log" || str(d["timestamp"]) != "") {
+				status := "running"
+				if claudeInterruptedInput(d) {
+					status = "interrupted"
+				}
+				emit("status", "", "", "", "", status)
+			}
 			message(m)
 			stop := str(m["stop_reason"])
-			if stop == "end_turn" || stop == "stop_sequence" {
+			if d["isApiErrorMessage"] == true {
+				emit("status", "", "", "", "", "failed")
+			} else if stop == "end_turn" || stop == "stop_sequence" {
 				emit("status", "", "", "", "", "completed")
 			}
 
@@ -300,11 +325,6 @@ func (n *Normalizer) Parse(raw []byte, agent, source string, st *State) ([]store
 			}
 			emit("status", "", status, "", "", status)
 		}
-		return out, nil
-	}
-	if t == "session_meta" {
-		st.Session = str(p["id"])
-		st.CWD = str(p["cwd"])
 		return out, nil
 	}
 	// The app-server bridge records JSON-RPC notifications without response bodies.

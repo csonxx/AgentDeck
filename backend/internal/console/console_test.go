@@ -16,6 +16,8 @@ func TestConsoleBoundariesAndPendingRedaction(t *testing.T) {
 			io.WriteString(w, `[{"grant":"test-grant","code":"not-for-browser","invite":"secret-invite","expires":2000000000,"approved":false}]`)
 		case "/gateway/status":
 			io.WriteString(w, `{"linked":true,"online":true}`)
+		case "/app-connections":
+			io.WriteString(w, `{"online":1,"paired":2,"connections":1,"devices":[{"id":"phone","name":"My phone","online":true,"connections":1}]}`)
 		case "/pair-approve":
 			var v map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&v)
@@ -52,6 +54,9 @@ func TestConsoleBoundariesAndPendingRedaction(t *testing.T) {
 		status                            int
 	}{
 		{"/api/status", "", "", c.Host, "127.0.0.1:20", 401},
+		{"/api/apps", "", "", c.Host, "127.0.0.1:20", 401},
+		{"/api/apps", c.Token, "http://evil.example", c.Host, "127.0.0.1:20", 403},
+		{"/api/apps", c.Token, "", c.Host, "127.0.0.1:20", 200},
 		{"/api/status", c.Token, "http://evil.example", c.Host, "127.0.0.1:20", 403},
 		{"/api/status", c.Token, "", "evil.example", "127.0.0.1:20", 403},
 		{"/api/status", c.Token, "", c.Host, "192.168.1.2:20", 403},

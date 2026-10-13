@@ -302,6 +302,21 @@ func (p *desktopProjection) publish(state map[string]any) error {
 	if p.itemSeen == nil {
 		p.itemSeen = map[string]string{}
 	}
+	var pending []store.Event
+	pendingBytes := 0
+	hashes := map[string]string{}
+	flush := func() error {
+		if err := p.appendBatch(pending); err != nil {
+			return err
+		}
+		for id, h := range hashes {
+			p.itemSeen[id] = h
+		}
+		pending = nil
+		pendingBytes = 0
+		hashes = map[string]string{}
+		return nil
+	}
 	turns := desktopTurns(state)
 	if len(turns) > 2 {
 		turns = turns[len(turns)-2:]
@@ -349,12 +364,19 @@ func (p *desktopProjection) publish(state map[string]any) error {
 					continue
 				}
 				event.Status = ""
-				if err = p.append(event); err != nil {
+				pending = append(pending, event)
+				pendingBytes += len(event.Text) + len(event.Media)
+			}
+			hashes[id] = itemHash
+			if len(pending) >= 128 || pendingBytes >= 512<<10 {
+				if err = flush(); err != nil {
 					return err
 				}
 			}
-			p.itemSeen[id] = itemHash
 		}
+	}
+	if err := flush(); err != nil {
+		return err
 	}
 	status := desktopTurnStatus(state)
 	if status != "" {
@@ -367,18 +389,32 @@ func (p *desktopProjection) publish(state map[string]any) error {
 	return nil
 }
 func (p *desktopProjection) append(event store.Event) error {
-	key := event.Item + "/" + event.Kind
-	body, _ := json.Marshal([]string{event.Text, event.Media, event.Status})
-	fingerprint := digest(string(body))
-	if p.seen[key] == fingerprint {
+	return p.appendBatch([]store.Event{event})
+}
+func (p *desktopProjection) appendBatch(events []store.Event) error {
+	pending := []store.Event{}
+	fingerprints := map[string]string{}
+	for _, event := range events {
+		key := event.Item + "/" + event.Kind
+		body, _ := json.Marshal([]string{event.Text, event.Media, event.Status})
+		fingerprint := digest(string(body))
+		if p.seen[key] == fingerprint {
+			continue
+		}
+		event.ID = "desktop-live/" + UUID()
+		pending = append(pending, event)
+		fingerprints[key] = fingerprint
+	}
+	if len(pending) == 0 {
 		return nil
 	}
-	event.ID = "desktop-live/" + UUID()
-	_, _, err := p.m.Store.AppendDesktop(event, false)
-	if err == nil {
-		p.seen[key] = fingerprint
+	if _, err := p.m.Store.AppendImported(pending, false); err != nil {
+		return err
 	}
-	return err
+	for key, value := range fingerprints {
+		p.seen[key] = value
+	}
+	return nil
 }
 
 type desktopLease struct {
@@ -389,14 +425,15 @@ type desktopLease struct {
 
 // One owner connection per watched thread, shared across phones and send leases.
 func (m *Manager) WatchDesktop(ctx context.Context, id string) func() {
+	var session store.Session
+	if m.Normalizer == nil || m.Store.Get("sessions", id, &session) != nil {
+		return func() {}
+	}
 	follow, ok := m.Desktop.(interface {
 		Follow(context.Context, string, func(map[string]any) error) error
 	})
-	if !ok || m.Normalizer == nil {
-		return func() {}
-	}
-	var session store.Session
-	if m.Store.Get("sessions", id, &session) != nil || session.Agent != "codex" || (session.Managed && session.Source != "desktop") {
+	claude := session.Agent == "claude" && session.Source == "claude-desktop" && m.ClaudeDesktopDebugger
+	if !claude && (!ok || session.Agent != "codex" || (session.Managed && session.Source != "desktop")) {
 		return func() {}
 	}
 	if _, err := m.allowed(session.Project); err != nil {
@@ -434,7 +471,11 @@ func (m *Manager) WatchDesktop(ctx context.Context, id string) func() {
 			for life.Err() == nil {
 				p.seen = map[string]string{}
 				p.itemSeen = map[string]string{}
-				_ = follow.Follow(life, id, p.publish)
+				if claude {
+					_ = m.followClaudeDesktop(life, session)
+				} else {
+					_ = follow.Follow(life, id, p.publish)
+				}
 				select {
 				case <-life.Done():
 					return
@@ -467,9 +508,11 @@ func (m *Manager) keepDesktopSend(id string) {
 	if m.Normalizer == nil {
 		return
 	}
+	var session store.Session
+	_ = m.Store.Get("sessions", id, &session)
 	if _, ok := m.Desktop.(interface {
 		Follow(context.Context, string, func(map[string]any) error) error
-	}); !ok {
+	}); !ok && !(m.ClaudeDesktopDebugger && session.Agent == "claude" && session.Source == "claude-desktop") {
 		return
 	}
 	release := m.WatchDesktop(nil, id)
@@ -488,7 +531,9 @@ func (m *Manager) keepDesktopSend(id string) {
 		defer release()
 		t := time.NewTicker(time.Second)
 		defer t.Stop()
-		running := false
+		// A confirmed Claude human record may finish before the first observer
+		// tick. Do not retain an otherwise idle send lease for thirty minutes.
+		running := session.Agent == "claude"
 		for {
 			select {
 			case <-ctx.Done():
@@ -501,7 +546,7 @@ func (m *Manager) keepDesktopSend(id string) {
 				if s.Status == "running" {
 					running = true
 				}
-				if running && (s.Status == "completed" || s.Status == "failed" || s.Status == "interrupted") {
+				if running && (s.Status == "completed" || s.Status == "failed" || s.Status == "interrupted" || s.Status == "idle") {
 					return
 				}
 			}

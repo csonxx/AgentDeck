@@ -82,7 +82,84 @@ class DirectoryClient extends AgentClient {
   Future<void> loadOlder(String id) async {}
 }
 
+class ActivityDirectoryClient extends DirectoryClient {
+  @override
+  Map<String, dynamic> entry(int i) => {
+    ...super.entry(i),
+    'key': 'm$i:tool_result',
+    'kind': 'tool_result',
+  };
+  @override
+  Map<String, dynamic> event(int i) => {
+    ...super.event(i),
+    'kind': 'tool_result',
+    'role': '',
+  };
+}
+
 void main() {
+  testWidgets('outline filters sender across all pages and combines search', (
+    tester,
+  ) async {
+    final c = DirectoryClient();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: UiStrings.delegates,
+        supportedLocales: UiStrings.supportedLocales,
+        locale: AppLanguage.simplifiedChinese.locale,
+        home: Scaffold(
+          body: ConversationOutline(client: c, session: 's'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('outline-filter-sent')));
+    await tester.pumpAndSettle();
+    expect(find.text('Dialogue record 10'), findsOneWidget);
+    expect(find.text('Dialogue record 1'), findsNothing);
+    await tester.enterText(find.byType(TextField), 'record 1');
+    await tester.pumpAndSettle();
+    expect(find.text('Dialogue record 10'), findsOneWidget);
+    expect(find.text('Dialogue record 90'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('outline-filter-received')));
+    await tester.pumpAndSettle();
+    expect(find.text('Dialogue record 1'), findsOneWidget);
+    expect(find.text('Dialogue record 10'), findsNothing);
+    await tester.tap(find.text('Dialogue record 1'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('outline expands collapsed activity and the target detail', (
+    tester,
+  ) async {
+    final c = ActivityDirectoryClient();
+    addTearDown(c.dispose);
+    c.transcripts['s']!.add(c.event(100));
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: UiStrings.delegates,
+        supportedLocales: UiStrings.supportedLocales,
+        locale: AppLanguage.simplifiedChinese.locale,
+        home: ConversationPage(client: c, session: c.sessions.first),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Full message 100'), findsNothing);
+    await tester.tap(find.byTooltip('对话目录'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dialogue record 10'));
+    await tester.pumpAndSettle();
+    expect(c.requestedFirst, 10);
+    expect(find.text('Full message 10'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('all-activities-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('all-activities-toggle')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ExpansionTile), findsNothing);
+  });
+
   testWidgets(
     'directory includes unloaded records and jumps precisely without all bodies',
     (tester) async {

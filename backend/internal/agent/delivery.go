@@ -18,15 +18,39 @@ type queuedInput struct {
 }
 
 func (m *Manager) SendDelivery(id, text, request string, o TurnOptions, files []InputAttachment, mode string) error {
-	if mode == "" || mode == "send" {
-		return m.SendInput(id, text, request, o, files)
-	}
-	if mode != "queue" && mode != "steer" {
+	if mode != "" && mode != "send" && mode != "queue" && mode != "steer" {
 		return errors.New("无效的消息发送方式")
 	}
 	ss, e := m.sessionForInput(id)
 	if e != nil {
 		return e
+	}
+	if ss.Agent == "claude" && !m.ClaudeDesktopInput {
+		if handled, err := m.sendClaudeRemote(ss, text, request, o, files); handled {
+			return err
+		}
+		owner, err := m.claudeHandoffOwner(id, m.claudeRuntimePID(id))
+		if err != nil {
+			return &InputNotSentError{Err: err}
+		}
+		// Persist first, then hand off only after the current native turn ends.
+		// The phone does not wait for process shutdown or need a computer page.
+		if owner != nil && owner.Status != "idle" && (mode == "" || mode == "send" || mode == "steer") {
+			mode = "queue"
+		}
+	}
+	if mode == "" || mode == "send" {
+		// The long-lived Claude CLI accepts native streaming input while busy.
+		// Keep explicit queue mode available, but never turn a normal send into
+		// a second workstation queue for a runtime we already own.
+		lock := m.deliveryLock(id)
+		lock.Lock()
+		defer lock.Unlock()
+		return m.SendInput(id, text, request, o, files)
+	}
+
+	if mode != "queue" && mode != "steer" {
+		return errors.New("无效的消息发送方式")
 	}
 	if ss.Agent != "codex" && ss.Agent != "claude" {
 		return errors.New("此 Agent 使用自身的发送方式")
@@ -36,6 +60,17 @@ func (m *Manager) SendDelivery(id, text, request string, o TurnOptions, files []
 	}
 	if mode == "steer" {
 		return m.steerInput(ss, text, request, o, files)
+	}
+	// Desktop Claude already owns a native input queue. Append to that same
+	// process while busy rather than waiting in a second Local-side queue.
+	if ss.Agent == "claude" {
+		owner, native, err := m.claudeInbox(ss)
+		if err != nil {
+			return &InputNotSentError{Err: err}
+		}
+		if native && m.ControlDir != "" {
+			return m.sendClaudeInbox(ss, owner, text, request, o, files)
+		}
 	}
 	if e = m.validateOptions(id, ss.Agent, o); e != nil {
 		return e
@@ -209,8 +244,33 @@ func (m *Manager) dispatchDelivery(ctx context.Context, d store.Delivery) {
 	if m.Store.Get("sessions", d.Session, &ss) != nil {
 		return
 	}
-	if ss.Status == "running" || ss.Status == "pending" {
+	if (ss.Agent != "claude" || m.ClaudeDesktopInput) && (ss.Status == "running" || ss.Status == "pending" || ss.Status == "waiting") {
 		return
+	}
+	if ss.Agent == "claude" && !m.ClaudeDesktopInput {
+		pid := m.claudeRuntimePID(ss.ID)
+		owner, err := m.claudeHandoffOwner(ss.ID, pid)
+		if err != nil || owner != nil && owner.Status != "idle" {
+			return
+		}
+		m.mu.Lock()
+		r := m.runs[ss.ID]
+		busy := false
+		if r != nil {
+			r.mu.Lock()
+			busy = r.busy
+			r.mu.Unlock()
+		}
+		m.mu.Unlock()
+		if busy {
+			return
+		}
+	}
+	if ss.Agent == "claude" {
+		owner, native, err := m.claudeInbox(ss)
+		if err != nil || native && owner.Status != "idle" {
+			return
+		}
 	}
 	if when, e := time.Parse(time.RFC3339Nano, d.Created); e == nil && time.Since(when) < time.Second {
 		return
@@ -238,7 +298,9 @@ func (m *Manager) dispatchDelivery(ctx context.Context, d store.Delivery) {
 	// Never automatically retry after dispatch: an acknowledgement can be lost.
 	e = m.SendInput(d.Session, q.Text, d.ID, q.Options, q.Files)
 	next := "sent"
-	if e != nil {
+	if errors.Is(e, errClaudeActive) {
+		next = "queued" // state changed before launch; no bytes were written
+	} else if e != nil {
 		next = "unknown"
 	}
 	if changed, _ = m.Store.TransitionDelivery(d.ID, d.Session, "dispatching", next); changed {
@@ -273,6 +335,17 @@ func (m *Manager) steerInput(ss store.Session, text, request string, o TurnOptio
 			m.keepDesktopSend(ss.ID)
 		}
 		return e
+	}
+	if ss.Agent == "claude" {
+		owner, native, err := m.claudeInbox(ss)
+		if err != nil {
+			return err
+		}
+		if native {
+			// The native inbox injects between tool calls in an active turn;
+			// never start a second CLI or interrupt its pending approval.
+			return m.sendClaudeInbox(ss, owner, text, request, o, files)
+		}
 	}
 	r, e := m.get(ss.ID)
 	if e != nil {

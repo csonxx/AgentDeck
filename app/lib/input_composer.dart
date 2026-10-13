@@ -332,6 +332,7 @@ class _InputComposerState extends State<InputComposer>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.controller.addListener(_changed);
+    widget.client.addListener(_nativeChanged);
     _restore();
     if (services is LocalVoiceInputs) {
       unawaited(
@@ -346,7 +347,43 @@ class _InputComposerState extends State<InputComposer>
     if (mounted) setState(() {});
   }
 
+  String generationLabel(BuildContext context) {
+    final native = nativeGeneration;
+    if (native == null || native.options.model.isEmpty) {
+      return context.tr('会话模型 · 参数未提供');
+    }
+    final o = native.options;
+    return '${o.model}${o.effort.isEmpty ? " · ${context.tr('Effort 未提供')}" : " · ${o.effort}"}${o.speed.isEmpty ? "" : " · ${context.tr(o.speed == 'fast' ? '快速' : '标准')}"}${native.source == 'last_turn' ? " · ${context.tr('上次使用')}" : ""}';
+  }
+
+  SessionGeneration? nativeGeneration;
+  DateTime _generationRead = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _generationLoading = false;
+  void _nativeChanged() {
+    if (widget.client.connected &&
+        DateTime.now().difference(_generationRead).inSeconds >= 15) {
+      unawaited(_readNative());
+    }
+  }
+
+  Future<void> _readNative() async {
+    if (_generationLoading || !widget.client.connected) return;
+    _generationLoading = true;
+    _generationRead = DateTime.now();
+    final session = widget.session;
+    try {
+      final value = await widget.client.sessionGeneration(session);
+      if (mounted && widget.session == session) {
+        setState(() => nativeGeneration = value);
+      }
+    } catch (_) {
+    } finally {
+      _generationLoading = false;
+    }
+  }
+
   Future<void> _restore() async {
+    unawaited(_readNative());
     try {
       final value = await widget.client.loadTurnOptions(widget.session);
       if (mounted) setState(() => options = value);
@@ -359,6 +396,10 @@ class _InputComposerState extends State<InputComposer>
   void didUpdateWidget(InputComposer old) {
     super.didUpdateWidget(old);
     if (old.session != widget.session) {
+      nativeGeneration = null;
+      options = const TurnOptions();
+      _generationRead = DateTime.fromMillisecondsSinceEpoch(0);
+      _restore();
       if (recording || starting || finishing || transcribing) _cancel();
     }
   }
@@ -374,6 +415,7 @@ class _InputComposerState extends State<InputComposer>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_changed);
+    widget.client.removeListener(_nativeChanged);
     textFocus.dispose();
     timer?.cancel();
     recordGeneration++;
@@ -404,7 +446,9 @@ class _InputComposerState extends State<InputComposer>
         client: widget.client,
         agent: widget.agent,
         session: widget.session,
-        initial: options,
+        initial: options.inherited
+            ? nativeGeneration?.options ?? const TurnOptions()
+            : options,
       ),
     );
     if (selected != null && mounted) setState(() => options = selected);
@@ -1040,13 +1084,7 @@ class _InputComposerState extends State<InputComposer>
                   onPressed: enabled ? _settings : null,
                   icon: const Icon(Icons.tune, size: 15),
                   label: Text(
-                    options.inherited
-                        ? widget.agent == 'opencode'
-                              ? context.tr('模型 · Variant')
-                              : widget.agent == 'workbuddy'
-                              ? context.tr('会话模型')
-                              : context.tr('模型 · Effort')
-                        : '${options.model}${options.effort.isEmpty ? "" : " · ${options.effort}"}',
+                    generationLabel(context),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 11),
@@ -1234,7 +1272,7 @@ class _ModelSettingsState extends State<ModelSettings> {
           ),
           const SizedBox(height: 5),
           Text(
-            context.tr('从下一次发送生效'),
+            context.tr('会话模型与参数'),
             style: TextStyle(fontSize: 12, color: DeckColors.muted),
           ),
           const SizedBox(height: 10),
@@ -1275,10 +1313,9 @@ class _ModelSettingsState extends State<ModelSettings> {
                     .where((m) => m.id == options.model)
                     .firstOrNull;
                 final valid =
-                    options.inherited ||
                     selected != null &&
-                        (options.effort.isEmpty ||
-                            selected.efforts.contains(options.effort));
+                    (options.effort.isEmpty ||
+                        selected.efforts.contains(options.effort));
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -1290,7 +1327,7 @@ class _ModelSettingsState extends State<ModelSettings> {
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               child: Text(
                                 detail.isEmpty
-                                    ? context.tr('当前接口未返回模型选择项，沿用电脑会话设置。')
+                                    ? context.tr('当前接口未提供模型设置。')
                                     : context.tr(detail),
                                 style: const TextStyle(
                                   fontSize: 13,
@@ -1298,21 +1335,6 @@ class _ModelSettingsState extends State<ModelSettings> {
                                 ),
                               ),
                             ),
-                          ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: Icon(
-                              options.inherited
-                                  ? Icons.radio_button_checked
-                                  : Icons.radio_button_off,
-                              size: 20,
-                            ),
-                            title: Text(
-                              context.tr('沿用当前会话设置'),
-                              style: TextStyle(fontSize: 14),
-                            ),
-                            onTap: () =>
-                                setState(() => options = const TurnOptions()),
-                          ),
                           for (final model in models)
                             ListTile(
                               contentPadding: EdgeInsets.zero,
@@ -1337,6 +1359,11 @@ class _ModelSettingsState extends State<ModelSettings> {
                                 () => options = TurnOptions(
                                   model: model.id,
                                   effort: model.defaultEffort,
+                                  speed:
+                                      options.speed == 'fast' &&
+                                          model.fastTier.isEmpty
+                                      ? ''
+                                      : options.speed,
                                 ),
                               ),
                             ),
@@ -1346,7 +1373,13 @@ class _ModelSettingsState extends State<ModelSettings> {
                     if (selected != null && selected.efforts.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Text(
-                        snapshot.data!.effortLabel,
+                        context.tr(
+                          widget.agent == 'claude'
+                              ? 'Claude Effort（原生目录）'
+                              : widget.agent == 'codex'
+                              ? 'Codex Reasoning Effort'
+                              : snapshot.data!.effortLabel,
+                        ),
                         style: const TextStyle(fontSize: 13),
                       ),
                       const SizedBox(height: 6),
@@ -1354,13 +1387,6 @@ class _ModelSettingsState extends State<ModelSettings> {
                         spacing: 6,
                         runSpacing: 2,
                         children: [
-                          ChoiceChip(
-                            label: Text(context.tr('默认')),
-                            selected: options.effort.isEmpty,
-                            onSelected: (_) => setState(
-                              () => options = TurnOptions(model: options.model),
-                            ),
-                          ),
                           for (final effort in selected.efforts)
                             ChoiceChip(
                               label: Text(effort),
@@ -1369,23 +1395,65 @@ class _ModelSettingsState extends State<ModelSettings> {
                                 () => options = TurnOptions(
                                   model: options.model,
                                   effort: effort,
+                                  speed: options.speed,
                                 ),
                               ),
                             ),
                         ],
                       ),
                     ],
-                    if (!valid)
+                    if (selected != null &&
+                        (selected.fastTier.isNotEmpty ||
+                            widget.agent == 'codex' ||
+                            widget.agent == 'claude')) ...[
+                      const SizedBox(height: 8),
+                      Text(context.tr('速度（不改变 Effort）')),
+                      Wrap(
+                        spacing: 6,
+                        children: [
+                          for (final speed in [
+                            'standard',
+                            if (selected.fastTier.isNotEmpty) 'fast',
+                          ])
+                            ChoiceChip(
+                              label: Text(
+                                context.tr(speed == 'fast' ? '快速' : '标准'),
+                              ),
+                              selected: options.speed == speed,
+                              onSelected: (_) => setState(
+                                () => options = TurnOptions(
+                                  model: options.model,
+                                  effort: options.effort,
+                                  speed: speed,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      if (options.speed == 'fast')
+                        Text(
+                          context.tr('原生快速模式可能增加用量或费用，是否可用由 Agent 和账号决定。'),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: DeckColors.muted,
+                          ),
+                        ),
+                    ],
+                    if (!valid && !options.inherited)
                       Padding(
                         padding: EdgeInsets.symmetric(vertical: 8),
                         child: Text(context.tr('之前选择的模型已不可用，请重新选择。')),
                       ),
                     const SizedBox(height: 14),
                     FilledButton(
-                      onPressed: valid && !saving ? _save : null,
+                      onPressed: models.isEmpty
+                          ? () => Navigator.pop(context)
+                          : valid && !saving
+                          ? _save
+                          : null,
                       child: saving
                           ? const RunningIndicator()
-                          : Text(context.tr('应用到下次发送')),
+                          : Text(context.tr(models.isEmpty ? '关闭' : '保存')),
                     ),
                   ],
                 );

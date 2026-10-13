@@ -62,6 +62,8 @@ type Server struct {
 	window      time.Time
 	attempts    int
 	active      int
+	appStreams  map[string]map[uint64]appStream
+	appStreamID uint64
 	Manager     *agent.Manager
 	Normalizer  *agent.Normalizer
 	commandMu   sync.Mutex
@@ -232,8 +234,15 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 		tok, e = secure.B64.DecodeString(proof.Token)
 		req.Name = proof.Name
 	}
-	if e != nil || subtle.ConstantTimeCompare(tok, iv.Token) != 1 || len(req.Name) > 80 {
+	if e != nil || subtle.ConstantTimeCompare(tok, iv.Token) != 1 {
 		fail(w, 401)
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		req.Name = "AgentDeck"
+	}
+	if req.Name, e = store.CleanDeviceName(req.Name); e != nil {
+		fail(w, 400)
 		return
 	}
 	if len(iv.AppPublic) > 0 {
@@ -324,7 +333,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	salt := secure.Random(32)
 	s.tickets[id] = ticket{dev.ID, salt, now.Add(30 * time.Second), clock}
 	s.mu.Unlock()
-	box, e := secure.SealJSON(dev.Root, "welcome/"+dev.ID, 0, 0, map[string]any{"ticket": id, "salt": secure.B64.EncodeToString(salt), "rotation_ms": s.Rotation.Milliseconds(), "server_time_ms": clock.Millis(), "clock_version": 1, "challenge": hello.Challenge})
+	box, e := secure.SealJSON(dev.Root, "welcome/"+dev.ID, 0, 0, map[string]any{"device_name": dev.Name, "ticket": id, "salt": secure.B64.EncodeToString(salt), "rotation_ms": s.Rotation.Milliseconds(), "server_time_ms": clock.Millis(), "clock_version": 1, "challenge": hello.Challenge})
 	if e != nil {
 		fail(w, 500)
 		return
@@ -333,6 +342,11 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 }
 
 type Request struct {
+	Version      string   `json:"version,omitempty"`
+	Speed        string   `json:"speed,omitempty"`
+	Download     string   `json:"download,omitempty"`
+	GoalVersion  string   `json:"goal_version,omitempty"`
+	GoalAction   string   `json:"goal_action,omitempty"`
 	Delivery     string   `json:"delivery,omitempty"`
 	QueueID      string   `json:"queue_id,omitempty"`
 	QueueVersion string   `json:"queue_version,omitempty"`
@@ -387,6 +401,17 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	disconnect, err := s.trackAppConnection(tk.Device, connectionIP(r), func() {
+		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4003, "pairing revoked"), time.Now().Add(time.Second))
+		_ = conn.Close()
+	})
+	if err != nil {
+		return
+	}
+	defer disconnect()
+	lastDeviceName := dev.Name
+	downloads := downloads{}
+	defer downloads.prune(true)
 	conn.SetReadLimit(1 << 20)
 	_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(90 * time.Second)) })
@@ -454,6 +479,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		return send(packet)
 	}
 	catalogState := ""
+	sessionRevision := s.Store.SessionCatalogRevision()
 	catalogCheck := time.Now()
 	sessions := func(id string) error {
 		ss, e := s.Store.Sessions()
@@ -506,7 +532,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			switch req.Method {
-			case "models", "input_capabilities", "transcribe", "transcribe_preview", "upload_preview":
+			case "goal_list", "usage", "models", "session_settings", "input_capabilities", "transcribe", "transcribe_preview", "upload_preview":
 				select {
 				case asyncSlots <- struct{}{}:
 					go func(req Request, owner string) {
@@ -550,8 +576,9 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				if send(response) != nil {
 					return
 				}
-			case "create", "send", "interrupt", "approve", "queue_cancel", "queue_edit", "queue_steer", "queue_delete":
+			case "goal_change", "create", "send", "interrupt", "approve", "queue_cancel", "queue_edit", "queue_steer", "queue_delete":
 				var result any
+				notSent := false
 				err := errors.New("工作站未启用项目操作")
 				if s.Manager != nil && req.ID != "" && len(req.ID) <= 100 {
 					s.commandMu.Lock()
@@ -559,15 +586,18 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 					requestHash := sha256.Sum256(plain)
 					hash := hex.EncodeToString(requestHash[:])
 					var previous struct {
-						Result any
-						Error  string
-						Hash   string
+						Result  any
+						Error   string
+						Hash    string
+						NotSent bool
 					}
 					if s.Store.Get("commands", commandKey, &previous) == nil {
 						result = previous.Result
+						notSent = previous.NotSent
 						err = nil
 						if previous.Hash != hash {
 							previous.Error = "请求标识已用于不同操作"
+							notSent = true
 						}
 						if previous.Error != "" {
 							err = errors.New(previous.Error)
@@ -585,15 +615,18 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 							return
 						}
 						switch req.Method {
+						case "goal_change":
+							err = s.Manager.ChangeGoal(req.Session, req.GoalVersion, req.GoalAction, req.ID)
 						case "create":
 							result, err = s.Manager.Create(req.Agent, req.Project, req.Session)
 						case "send":
 							var files []agent.InputAttachment
 							files, err = s.inputFiles(tk.Device, req.Session, req.Attachments)
 							if err == nil {
-								err = s.Manager.SendDelivery(req.Session, req.Text, req.ID, agent.TurnOptions{Model: req.Model, Effort: req.Effort}, files, req.Delivery)
+								err = s.Manager.SendDelivery(req.Session, req.Text, req.ID, agent.TurnOptions{Model: req.Model, Effort: req.Effort, Speed: req.Speed}, files, req.Delivery)
 							}
 							if err == nil {
+								result = s.Manager.NativeSubmission(req.Session, req.ID)
 								_ = s.markUploadsUsed(tk.Device, req.Session, req.Attachments)
 							}
 						case "queue_edit", "queue_steer", "queue_delete":
@@ -609,6 +642,8 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 						previous.Result = result
 						if err != nil {
 							previous.Error = err.Error()
+							previous.NotSent = agent.InputDefinitelyNotSent(err)
+							notSent = previous.NotSent
 						}
 						_ = s.Store.Put("commands", commandKey, previous)
 					}
@@ -618,7 +653,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if err != nil {
-					if send(map[string]any{"type": "error", "id": req.ID, "message": err.Error()}) != nil {
+					if send(map[string]any{"type": "error", "id": req.ID, "message": err.Error(), "not_sent": notSent}) != nil {
 						return
 					}
 				} else {
@@ -639,6 +674,15 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 				} else if send(map[string]any{"type": "result", "id": req.ID, "result": result}) != nil {
+					return
+				}
+			case "rename_device":
+				name, err := s.Store.RenameDevice(tk.Device, req.Text)
+				if err != nil {
+					if send(map[string]any{"type": "error", "id": req.ID, "message": "设备名称无效，请输入 1–80 个字符"}) != nil {
+						return
+					}
+				} else if send(map[string]any{"type": "result", "id": req.ID, "result": map[string]string{"name": name}}) != nil {
 					return
 				}
 			case "sessions":
@@ -667,7 +711,12 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 							if err := s.Manager.Hydrate(id); err != nil {
 								var session store.Session
 								if s.Store.Get("sessions", id, &session) == nil {
-									_, _, _ = s.Store.Append(store.Event{Session: id, Agent: session.Agent, Kind: "notice", Text: err.Error()})
+									event := store.Event{ID: "hydrate-error/" + id, Session: id, Agent: session.Agent, Kind: "notice", Text: err.Error()}
+									if session.Source == "claude-desktop" {
+										_, _, _ = s.Store.AppendCatalogHistory(event)
+									} else {
+										_, _, _ = s.Store.Append(event)
+									}
 								}
 							}
 						}()
@@ -702,6 +751,15 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				} else if send(map[string]any{"type": "result", "id": req.ID, "result": page}) != nil {
 					return
 				}
+			case "history_after":
+				page, err := s.Store.HistoryAfter(req.Session, req.After)
+				if err != nil {
+					if send(map[string]any{"type": "error", "id": req.ID, "message": "历史读取失败"}) != nil {
+						return
+					}
+				} else if send(map[string]any{"type": "result", "id": req.ID, "result": page}) != nil {
+					return
+				}
 			case "history":
 				page, err := s.Store.History(req.Session, req.Before, 40)
 				if err != nil {
@@ -709,6 +767,15 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 				} else if send(map[string]any{"type": "result", "id": req.ID, "result": page}) != nil {
+					return
+				}
+			case "attachment_open", "attachment_read", "attachment_close":
+				result, err := downloads.request(s.Normalizer, req)
+				response := map[string]any{"type": "result", "id": req.ID, "result": result}
+				if err != nil {
+					response = map[string]any{"type": "error", "id": req.ID, "message": err.Error()}
+				}
+				if send(response) != nil {
 					return
 				}
 			case "attachment":
@@ -750,6 +817,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		case <-ticker.C:
+			downloads.prune(false)
 			if time.Since(queueCheck) >= time.Second {
 				if pushQueue(false) != nil {
 					return
@@ -757,6 +825,12 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 			}
 			if s.Store.Get("devices", tk.Device, &dev) != nil {
 				return
+			}
+			if dev.Name != lastDeviceName {
+				lastDeviceName = dev.Name
+				if send(map[string]any{"type": "device", "name": dev.Name}) != nil {
+					return
+				}
 			}
 			if s.Manager != nil && time.Since(catalogCheck) >= 2*time.Second {
 				catalogCheck = time.Now()
@@ -770,11 +844,13 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			seq := s.Store.LastSeq()
-			if seq != last {
+			revision := s.Store.SessionCatalogRevision()
+			if seq != last || revision != sessionRevision {
 				if sessions("") != nil {
 					return
 				}
 				last = seq
+				sessionRevision = revision
 			}
 			if watched != "" {
 				var events []store.Event
@@ -917,6 +993,30 @@ func (s *Server) Admin(ctx context.Context, dir string) error {
 		}
 		write(w, v)
 	})
+	m.HandleFunc("GET /app-connections", func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.appConnections()
+		if err != nil {
+			fail(w, 500)
+			return
+		}
+		write(w, v)
+	})
+	m.HandleFunc("POST /device-name", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if decode(w, r, &req) != nil {
+			fail(w, 400)
+			return
+		}
+		name, err := s.Store.RenameDevice(req.ID, req.Name)
+		if err != nil {
+			fail(w, 400)
+			return
+		}
+		write(w, map[string]string{"name": name})
+	})
 	m.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			ID string `json:"id"`
@@ -925,7 +1025,7 @@ func (s *Server) Admin(ctx context.Context, dir string) error {
 			fail(w, 400)
 			return
 		}
-		if e := s.Store.Delete("devices", req.ID); e != nil {
+		if e := s.revokeDevice(req.ID); e != nil {
 			fail(w, 500)
 			return
 		}

@@ -19,6 +19,7 @@ class ConversationOutline extends StatefulWidget {
 class _ConversationOutlineState extends State<ConversationOutline> {
   final search = TextEditingController();
   final entries = <ConversationEntry>[];
+  String roleFilter = 'all';
   bool loading = true;
   String error = '';
   int generation = 0;
@@ -76,7 +77,14 @@ class _ConversationOutlineState extends State<ConversationOutline> {
   Widget build(BuildContext context) {
     final query = search.text.trim().toLowerCase();
     final visible = entries
-        .where((e) => e.preview.toLowerCase().contains(query))
+        .where(
+          (e) =>
+              (roleFilter == 'all' ||
+                  (roleFilter == 'sent'
+                      ? e.role == 'user'
+                      : e.role != 'user')) &&
+              e.preview.toLowerCase().contains(query),
+        )
         .toList();
     return SafeArea(
       child: Column(
@@ -132,7 +140,25 @@ class _ConversationOutlineState extends State<ConversationOutline> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final filter in const {
+                      'all': '全部',
+                      'sent': '我发送的',
+                      'received': '我收到的',
+                    }.entries)
+                      ChoiceChip(
+                        key: ValueKey('outline-filter-${filter.key}'),
+                        label: Text(context.tr(filter.value)),
+                        selected: roleFilter == filter.key,
+                        onSelected: (_) =>
+                            setState(() => roleFilter = filter.key),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
                 TextField(
                   controller: search,
                   onChanged: (_) => setState(() {}),

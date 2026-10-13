@@ -27,7 +27,9 @@ for line in sys.stdin:
  d=json.loads(line)
  if claude:
   if d.get('type')=='control_request':
-   send({'type':'control_response','response':{'subtype':'success','request_id':d['request_id'],'response':{'models':[{'value':'fixture-model','displayName':'Fixture model','supportsEffort':True,'supportedEffortLevels':['low','high']}]}}})
+   if d['request']['subtype']=='get_usage':
+    send({'type':'control_response','response':{'subtype':'success','request_id':d['request_id'],'response':{'rate_limits_available':True,'rate_limits':{'five_hour':{'utilization':25,'resets_at':'2030-01-01T00:00:00Z'}}}}});continue
+   send({'type':'control_response','response':{'subtype':'success','request_id':d['request_id'],'response':{'models':[{'value':'fixture-model','displayName':'Fixture model','supportsEffort':True,'supportsFastMode':True,'supportedEffortLevels':['low','high']}]}}})
    if d['request']['subtype']=='interrupt':finish('STOPPED','interrupted')
    continue
   if d.get('type')=='control_response':
@@ -38,8 +40,27 @@ for line in sys.stdin:
   if isinstance(message,list):message='\n'.join(x.get('text','') for x in message if x.get('type')=='text')
  else:
   method=d.get('method');params=d.get('params',{})
+  if method in ('thread/goal/get','thread/goal/set','thread/goal/clear'):
+   path=os.environ.get('AGENTDECK_FIXTURE_GOALS');goals=json.loads(pathlib.Path(path).read_text()) if path and pathlib.Path(path).exists() else {}
+   gid=params['threadId']
+   if method=='thread/goal/set':
+    assert params.get('origin')=='user'
+    goals[gid]['status']=params['status'];goals[gid]['updatedAt']+=1
+   if method=='thread/goal/clear':
+    assert params.get('origin')=='user'
+    goals.pop(gid,None)
+   if path:pathlib.Path(path).write_text(json.dumps(goals))
+   dbpath=os.environ.get('AGENTDECK_FIXTURE_GOAL_DB')
+   if dbpath and method!='thread/goal/get':
+    import sqlite3
+    with sqlite3.connect(dbpath) as db:
+     if method=='thread/goal/clear':db.execute('DELETE FROM thread_goals WHERE thread_id=?',(gid,))
+     else:db.execute('UPDATE thread_goals SET status=? WHERE thread_id=?',(params['status'],gid))
+   send({'id':d['id'],'result':{'cleared':True} if method=='thread/goal/clear' else {'goal':goals.get(gid)}});continue
+  if method=='account/rateLimits/read':
+   send({'id':d['id'],'result':{'rateLimits':{'primary':{'usedPercent':25,'windowDurationMins':300,'resetsAt':1893456000}}}});continue
   if method=='model/list':
-   send({'id':d['id'],'result':{'data':[{'id':'fixture-model','model':'fixture-model','displayName':'Fixture model','defaultReasoningEffort':'low','supportedReasoningEfforts':[{'reasoningEffort':'low'},{'reasoningEffort':'high'}],'inputModalities':['text','image'],'isDefault':True}],'nextCursor':None}});continue
+   send({'id':d['id'],'result':{'data':[{'id':'fixture-model','model':'fixture-model','displayName':'Fixture model','defaultReasoningEffort':'low','supportedReasoningEfforts':[{'reasoningEffort':'low'},{'reasoningEffort':'high'}],'inputModalities':['text','image'],'serviceTiers':[{'id':'priority','name':'Fast'}],'isDefault':True}],'nextCursor':None}});continue
   if method in ('initialize','thread/start','thread/resume','thread/fork'):
    send({'id':d['id'],'result':{'thread':{'id':session}}});continue
   if method=='turn/interrupt':send({'id':d['id'],'result':{}});finish('STOPPED','interrupted');continue
@@ -53,5 +74,5 @@ for line in sys.stdin:
   else:send({'id':42,'method':'item/commandExecution/requestApproval','params':{'threadId':session,'turnId':turn,'command':'echo fixture','reason':'Fixture approval'}})
  elif 'pause' in message.lower():pending=True
  else:
-  config=('model='+next((x.split('=',1)[1] for x in sys.argv if x.startswith('--model=')),'inherit')+' effort='+next((x.split('=',1)[1] for x in sys.argv if x.startswith('--effort=')),'inherit')) if claude else ('model='+params.get('model','inherit')+' effort='+params.get('effort','inherit'))
+  config=('model='+next((x.split('=',1)[1] for x in sys.argv if x.startswith('--model=')),'inherit')+' effort='+next((x.split('=',1)[1] for x in sys.argv if x.startswith('--effort=')),'inherit')) if claude else ('model='+params.get('model','inherit')+' effort='+params.get('effort','inherit')+' speed='+params.get('serviceTier','inherit'))
   finish('RUNTIME_OK '+config if 'generation-check' in message else 'RUNTIME_OK')

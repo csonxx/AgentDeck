@@ -25,10 +25,22 @@ type Project struct {
 	Path string `json:"path"`
 }
 type Manager struct {
-	deliveryMu     sync.Mutex
-	deliveryLocks  map[string]*sync.Mutex
-	deliveryCancel context.CancelFunc
-	deliveryWG     sync.WaitGroup
+	// Legacy stdio adapter test seam; original Desktop input uses the separate
+	// owner-enabled debugger path and must never fall back to a replacement CLI.
+	ClaudeDesktopInput bool
+	// Owner opt-in to the official Desktop's local main-process debugger.
+	ClaudeDesktopDebugger bool
+	ClaudeDesktopSessions string
+	openClaudeDesktop     func(context.Context) (claudeDesktopClient, error)
+
+	ClaudeOwner           func(string, int) error
+	ClaudeProcesses       string
+	ClaudeProcessSnapshot func() (map[int]string, error)
+	claudeRelease         func(claudeProcessRecord) error // isolated process tests
+	deliveryMu            sync.Mutex
+	deliveryLocks         map[string]*sync.Mutex
+	deliveryCancel        context.CancelFunc
+	deliveryWG            sync.WaitGroup
 
 	desktopMu          sync.Mutex
 	desktopLeases      map[string]*desktopLease
@@ -38,6 +50,8 @@ type Manager struct {
 	desktopWG          sync.WaitGroup
 	Store              *store.Store
 	Normalizer         *Normalizer
+	ReadSettings       func(string) (SessionSettings, error)
+	LoadHistory        func(string) error
 	Roots              []string
 	Context            context.Context
 	Desktop            DesktopController
@@ -48,6 +62,15 @@ type Manager struct {
 	voiceWorker        *voiceWorker
 	catalogMu          sync.Mutex
 	catalogs           map[string]modelEntry
+	ClaudeGoalRoot     string
+	CodexGoalPath      string
+	goalFiles          map[string]claudeGoalFile
+	goalMu             sync.Mutex
+	goalCache          []Goal
+	goalChecked        time.Time
+	usageMu            sync.Mutex
+	usageCache         map[string]AccountUsage
+	ClaudeUsageFile    string
 	mu                 sync.Mutex
 	runs               map[string]*runtime
 }
@@ -57,19 +80,21 @@ type approval struct {
 	Params map[string]any
 }
 type runtime struct {
-	manager   *Manager
-	session   store.Session
-	cmd       *exec.Cmd
-	input     io.WriteCloser
-	writeMu   sync.Mutex
-	mu        sync.Mutex
-	pending   map[string]chan map[string]any
-	approvals map[string]approval
-	done      chan struct{}
-	turn      string
-	busy      bool
-	state     State
-	options   TurnOptions
+	manager      *Manager
+	session      store.Session
+	cmd          *exec.Cmd
+	input        io.WriteCloser
+	writeMu      sync.Mutex
+	mu           sync.Mutex
+	pending      map[string]chan map[string]any
+	approvals    map[string]approval
+	done         chan struct{}
+	turn         string
+	busy         bool
+	claudeInputs int
+	state        State
+	options      TurnOptions
+	settings     SessionSettings
 }
 
 func UUID() string {
@@ -155,6 +180,11 @@ func (m *Manager) Create(agent, project, parent string) (store.Session, error) {
 		if e := m.Store.Get("sessions", parent, &old); e != nil || old.Agent != agent || old.Project != path {
 			return store.Session{}, errors.New("会话与项目不匹配")
 		}
+		if old.Source == "claude-desktop" && m.LoadHistory != nil {
+			if err := m.LoadHistory(parent); err != nil {
+				return store.Session{}, err
+			}
+		}
 	}
 	if agent != "codex" && agent != "claude" {
 		connector := m.Connectors[agent]
@@ -166,7 +196,7 @@ func (m *Manager) Create(agent, project, parent string) (store.Session, error) {
 	// Desktop chats stay on their original ID and execute in the existing app.
 	// Never silently fall back to forking after a bridge error.
 	if parent != "" && agent == "codex" && m.Desktop != nil && (!old.Managed || old.Source == "desktop") {
-		thread, err := m.Desktop.Read(m.Context, parent)
+		thread, err := readDesktopForInput(m.Desktop, m.Context, parent)
 		if err != nil {
 			return old, err
 		}
@@ -176,6 +206,23 @@ func (m *Manager) Create(agent, project, parent string) (store.Session, error) {
 		old.Managed = true
 		old.Source = "desktop"
 		if err = m.Store.Put("sessions", old.ID, old); err != nil {
+			return old, err
+		}
+		return old, nil
+	}
+	// Continuing Claude retains the native ID and its history. There is no
+	// implicit fork, copied transcript or newly generated session ID.
+	if parent != "" && agent == "claude" {
+		if strings.HasPrefix(old.ID, "claude-desktop/") {
+			return old, errors.New("此 Claude 会话没有可恢复的本机 ID")
+		}
+		_, _, err := m.claudeInbox(old)
+		if err != nil {
+			return old, err
+		}
+		// Selecting a chat never interrupts its current executor.
+		old.Managed = true
+		if err := m.Store.Put("sessions", old.ID, old); err != nil {
 			return old, err
 		}
 		return old, nil
@@ -274,7 +321,12 @@ func (m *Manager) get(id string) (*runtime, error) {
 	}
 	// A newly created Claude chat has not written native history yet. Restart
 	// it with the same session-id; only a chat with a started turn can resume.
-	resume := !(ss.Agent == "claude" && ss.Status == "idle")
+	resume := !(ss.Agent == "claude" && ss.Status == "idle" && ss.Source == "stream" && ss.Parent == "")
+	if ss.Agent == "claude" && resume {
+		if e := m.acquireClaude(ss.ID); e != nil {
+			return nil, e
+		}
+	}
 	r, e := m.launch(ss, resume)
 	if e != nil {
 		return nil, e
@@ -303,6 +355,20 @@ func (m *Manager) SendInput(id, text, request string, o TurnOptions, files []Inp
 	ss, err = m.sessionForInput(id)
 	if err != nil {
 		return err
+	}
+	if ss.Agent == "claude" {
+		if !m.ClaudeDesktopInput {
+			if handled, err := m.sendClaudeRemote(ss, text, request, o, files); handled {
+				return err
+			}
+		}
+		owner, native, err := m.claudeInbox(ss)
+		if err != nil {
+			return err
+		}
+		if native {
+			return m.sendClaudeInbox(ss, owner, text, request, o, files)
+		}
 	}
 	o, err = m.setOptions(ss, o)
 	if err != nil {
@@ -355,7 +421,7 @@ func (m *Manager) SendInput(id, text, request string, o TurnOptions, files []Inp
 		if _, err := m.allowed(ss.Project); err != nil {
 			return err
 		}
-		thread, err := m.Desktop.Read(m.Context, id)
+		thread, err := readDesktopForInput(m.Desktop, m.Context, id)
 		if err != nil {
 			return err
 		}
@@ -392,20 +458,26 @@ func (m *Manager) SendInput(id, text, request string, o TurnOptions, files []Inp
 	if e != nil {
 		return e
 	}
+	if ss.Agent == "claude" {
+		if e := m.checkClaudeOwner(id, r.cmd.Process.Pid); e != nil {
+			return e
+		}
+	}
+	inputs, display, e := m.prepareInput(id, text, request, files)
+	if e != nil {
+		return &InputNotSentError{Err: e}
+	}
 	r.mu.Lock()
-	if r.busy {
+	wasBusy := r.busy
+	if wasBusy && ss.Agent != "claude" {
 		r.mu.Unlock()
-		return errors.New("正在执行，请等待或停止当前任务")
+		return &InputNotSentError{Err: errors.New("正在执行，请等待或停止当前任务")}
+	}
+	if ss.Agent == "claude" {
+		r.claudeInputs++
 	}
 	r.busy = true
 	r.mu.Unlock()
-	inputs, display, e := m.prepareInput(id, text, request, files)
-	if e != nil {
-		r.mu.Lock()
-		r.busy = false
-		r.mu.Unlock()
-		return e
-	}
 	r.emit(store.Event{Kind: "status", Status: "running"})
 	if r.session.Agent == "codex" {
 		var result map[string]any
@@ -416,6 +488,7 @@ func (m *Manager) SendInput(id, text, request string, o TurnOptions, files []Inp
 		if o.Effort != "" {
 			params["effort"] = o.Effort
 		}
+		applySpeed(params, o)
 		result, e = r.call("turn/start", params)
 		if e == nil {
 			r.mu.Lock()
@@ -423,12 +496,15 @@ func (m *Manager) SendInput(id, text, request string, o TurnOptions, files []Inp
 			r.mu.Unlock()
 		}
 	} else {
-		r.emit(store.Event{ID: "input/" + id + "/" + request, Kind: "message", Role: "user", Text: Redact(display), Item: request, Mode: "snapshot"})
-		e = r.write(map[string]any{"type": "user", "session_id": id, "message": map[string]any{"role": "user", "content": claudeInput(inputs)}, "parent_tool_use_id": nil})
+		r.emit(store.Event{ID: "input/" + id + "/" + request, Kind: "message", Role: "user", Text: Redact(display), Item: request + ":0", Mode: "snapshot"})
+		e = r.write(map[string]any{"type": "user", "uuid": request, "session_id": id, "message": map[string]any{"role": "user", "content": claudeInput(inputs)}, "parent_tool_use_id": nil})
 	}
 	if e != nil {
 		r.mu.Lock()
-		r.busy = false
+		if ss.Agent == "claude" {
+			r.claudeInputs--
+		}
+		r.busy = wasBusy
 		r.mu.Unlock()
 		r.emit(store.Event{Kind: "notice", Text: e.Error()})
 		r.emit(store.Event{Kind: "status", Status: "failed"})
@@ -437,6 +513,18 @@ func (m *Manager) SendInput(id, text, request string, o TurnOptions, files []Inp
 }
 func (m *Manager) Interrupt(id string) error {
 	var ss store.Session
+	if m.Store.Get("sessions", id, &ss) == nil && ss.Agent == "claude" {
+		if handled, err := m.controlClaudeDesktop(ss, "", "", ""); handled {
+			return err
+		}
+		_, native, err := m.claudeInbox(ss)
+		if err != nil {
+			return err
+		}
+		if native {
+			return errors.New("请在电脑 Claude 原会话中处理停止或工具审批")
+		}
+	}
 	if m.Store.Get("sessions", id, &ss) == nil && ss.Agent != "codex" && ss.Agent != "claude" {
 		c, ss, e := m.externalSession(id)
 		if e != nil {
@@ -467,6 +555,18 @@ func (m *Manager) Approve(id, key, decision, answer string) error {
 		return errors.New("无效审批决定")
 	}
 	var ss store.Session
+	if m.Store.Get("sessions", id, &ss) == nil && ss.Agent == "claude" {
+		if handled, err := m.controlClaudeDesktop(ss, key, decision, answer); handled {
+			return err
+		}
+		_, native, err := m.claudeInbox(ss)
+		if err != nil {
+			return err
+		}
+		if native {
+			return errors.New("请在电脑 Claude 原会话中处理停止或工具审批")
+		}
+	}
 	if m.Store.Get("sessions", id, &ss) == nil && ss.Agent != "codex" && ss.Agent != "claude" {
 		c, ss, e := m.externalSession(id)
 		if e != nil {
@@ -565,15 +665,15 @@ func (m *Manager) launch(ss store.Session, resume bool) (*runtime, error) {
 			args = append(args, "--resume="+ss.ID)
 		} else {
 			args = append(args, "--session-id="+ss.ID)
-			if ss.Parent != "" {
-				args = append(args, "--resume="+ss.Parent, "--fork-session")
-			}
 		}
 	}
 	opts := m.Options(ss.ID)
 	if ss.Agent == "claude" {
 		if opts.Model != "" {
 			args = append(args, "--model="+opts.Model)
+		}
+		if opts.Speed != "" {
+			args = append(args, "--settings", fmt.Sprintf(`{"fastMode":%t}`, opts.Speed == "fast"))
 		}
 		if opts.Effort != "" {
 			args = append(args, "--effort="+opts.Effort)
@@ -597,7 +697,7 @@ func (m *Manager) launch(ss store.Session, resume bool) (*runtime, error) {
 	if e = cmd.Start(); e != nil {
 		return nil, fmt.Errorf("%s 启动失败，请在工作站安装并登录 CLI", ss.Agent)
 	}
-	r := &runtime{manager: m, session: ss, cmd: cmd, input: input, pending: map[string]chan map[string]any{}, approvals: map[string]approval{}, done: make(chan struct{}), state: State{Session: ss.ID, CWD: ss.Project}, options: opts}
+	r := &runtime{manager: m, session: ss, cmd: cmd, input: input, pending: map[string]chan map[string]any{}, approvals: map[string]approval{}, done: make(chan struct{}), state: State{Session: ss.ID, CWD: ss.Project}, options: opts, settings: SessionSettings{Model: opts.Model, Effort: opts.Effort, Speed: opts.Speed, Source: "live"}}
 	go r.read(output)
 	var err error
 	if ss.Agent == "codex" {
@@ -734,6 +834,18 @@ func (r *runtime) read(reader io.Reader) {
 			}
 		}
 		r.mu.Lock()
+		if r.session.Agent == "claude" {
+			native := nativeSettings(d, "claude")
+			if native.Model != "" {
+				r.settings.Model = native.Model
+			}
+			if native.Effort != "" {
+				r.settings.Effort = native.Effort
+			}
+			if native.Speed != "" {
+				r.settings.Speed = native.Speed
+			}
+		}
 		events, err := r.manager.Normalizer.Parse(raw, r.session.Agent, "stream", &r.state)
 		r.mu.Unlock()
 		if err != nil {
@@ -743,7 +855,11 @@ func (r *runtime) read(reader io.Reader) {
 		if method == "turn/completed" || str(d["type"]) == "result" {
 			keys := []string{}
 			r.mu.Lock()
-			r.busy = false
+			if str(d["type"]) == "result" && r.claudeInputs > 0 {
+				r.claudeInputs--
+			}
+			r.busy = r.claudeInputs > 0
+			more := r.busy
 			for key := range r.approvals {
 				delete(r.approvals, key)
 				keys = append(keys, key)
@@ -751,6 +867,13 @@ func (r *runtime) read(reader io.Reader) {
 			r.mu.Unlock()
 			for _, key := range keys {
 				r.emit(store.Event{Kind: "approval", Item: key, Mode: "snapshot", Status: "resolved"})
+			}
+			if more {
+				for i := range events {
+					if events[i].Kind == "status" && events[i].Status == "completed" {
+						events[i].Status = "running"
+					}
+				}
 			}
 		}
 		for _, ev := range events {

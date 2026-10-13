@@ -1,23 +1,29 @@
 import 'dart:typed_data';
 
 class TurnOptions {
-  final String model, effort;
-  const TurnOptions({this.model = '', this.effort = ''});
+  final String model, effort, speed;
+  const TurnOptions({this.model = '', this.effort = '', this.speed = ''});
   factory TurnOptions.fromJson(Map<String, dynamic> v) => TurnOptions(
     model: v['model'] as String? ?? '',
     effort: v['effort'] as String? ?? '',
+    speed: v['speed'] as String? ?? '',
   );
-  Map<String, dynamic> toJson() => {'model': model, 'effort': effort};
-  bool get inherited => model.isEmpty && effort.isEmpty;
+  Map<String, dynamic> toJson() => {
+    'model': model,
+    'effort': effort,
+    'speed': speed,
+  };
+  bool get inherited => model.isEmpty && effort.isEmpty && speed.isEmpty;
 }
 
 class ModelChoice {
-  final String id, name, defaultEffort;
+  final String id, name, defaultEffort, fastTier;
   final List<String> efforts;
   final bool images, isDefault;
   ModelChoice.fromJson(Map<String, dynamic> v)
     : id = v['id'] as String,
       name = v['name'] as String,
+      fastTier = v['fast_tier'] as String? ?? '',
       defaultEffort = v['default_effort'] as String? ?? '',
       efforts = List<String>.from(v['efforts'] as List? ?? []),
       images = v['images'] == true,
@@ -89,4 +95,15 @@ Uint8List recordingWav(Uint8List pcm) {
         ..add(header.buffer.asUint8List())
         ..add(pcm))
       .takeBytes();
+}
+
+class SessionGeneration {
+  final TurnOptions options;
+  final String source;
+  const SessionGeneration(this.options, this.source);
+  factory SessionGeneration.fromJson(Map<String, dynamic> v) =>
+      SessionGeneration(
+        TurnOptions.fromJson(v),
+        v['source'] as String? ?? 'unknown',
+      );
 }

@@ -19,10 +19,11 @@ func TestLinkedAttachmentsScopeEncodingAndSourceLine(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(root, "readme.md"), []byte("first\nAPI_KEY=hidden\nlast\n"), 0600)
 	_ = os.WriteFile(filepath.Join(root, "unlinked.txt"), []byte("not linked"), 0600)
 	_ = os.WriteFile(filepath.Join(root, ".env"), []byte("private"), 0600)
+	_ = os.Symlink(filepath.Join(root, ".env"), filepath.Join(root, "alias.txt"))
 	outside := filepath.Join(t.TempDir(), "outside.md")
 	_ = os.WriteFile(outside, []byte("outside"), 0600)
 	_ = os.Symlink(outside, filepath.Join(root, "escape.md"))
-	text := "![图](<图 片.png>) [文件](readme.md:3) [逃逸](escape.md) [secret](.env)"
+	text := "![图](<图 片.png>) [文件](readme.md:3) [逃逸](escape.md) [secret](.env) [alias](alias.txt)"
 	_, _, _ = n.Store.Append(store.Event{ID: "m", Session: "s", Project: root, Agent: "codex", Kind: "message", Text: text})
 	v, e := n.ReadAttachment("s", "%E5%9B%BE%20%E7%89%87.png")
 	if e != nil || v.MIME != "image/png" || string(v.Data) != string(png) {
@@ -32,7 +33,7 @@ func TestLinkedAttachmentsScopeEncodingAndSourceLine(t *testing.T) {
 	if e != nil || v.Line != 3 || string(v.Data) != "first\n[REDACTED]\nlast\n" {
 		t.Fatal("source link preview/redaction failed", e)
 	}
-	for _, href := range []string{"unlinked.txt", "escape.md", ".env", "https://example.com/x", "file://other/readme.md"} {
+	for _, href := range []string{"unlinked.txt", "escape.md", ".env", "alias.txt", "https://example.com/x", "file://other/readme.md"} {
 		if _, e = n.ReadAttachment("s", href); e == nil {
 			t.Fatal("unsafe link accepted")
 		}

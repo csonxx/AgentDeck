@@ -22,6 +22,7 @@ func (g *Server) Admin(ctx context.Context, dir string) error {
 		return e
 	}
 	m := http.NewServeMux()
+	g.releaseAdminRoutes(m)
 	m.HandleFunc("POST /locals", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Tenant string `json:"tenant"`

@@ -17,7 +17,31 @@ class DeviceVault {
               accessibility: KeychainAccessibility.first_unlock_this_device,
             ),
           );
+  Future<Map<String, dynamic>?> loadAppLock() async {
+    final value = await storage.read(key: 'agentdeck.app.lock');
+    return value == null
+        ? null
+        : Map<String, dynamic>.from(jsonDecode(value) as Map);
+  }
+
+  Future<void> saveAppLock(Map<String, dynamic> value) =>
+      storage.write(key: 'agentdeck.app.lock', value: jsonEncode(value));
+  Future<void> removeAppLock() => storage.delete(key: 'agentdeck.app.lock');
   Future<String?> loadLanguage() => storage.read(key: 'agentdeck.language');
+  Future<Map<String, dynamic>?> loadDeviceName() async {
+    final value = await storage.read(key: 'agentdeck.device.name');
+    return value == null ? null : Map<String, dynamic>.from(jsonDecode(value));
+  }
+
+  Future<void> saveDeviceName(Map<String, dynamic> value) =>
+      storage.write(key: 'agentdeck.device.name', value: jsonEncode(value));
+  Future<Map<String, dynamic>?> loadAppUpdate() async {
+    final value = await storage.read(key: 'agentdeck.app.update');
+    return value == null ? null : Map<String, dynamic>.from(jsonDecode(value));
+  }
+
+  Future<void> saveAppUpdate(Map<String, dynamic> value) =>
+      storage.write(key: 'agentdeck.app.update', value: jsonEncode(value));
   Future<void> saveLanguage(String code) =>
       storage.write(key: 'agentdeck.language', value: code);
 
@@ -54,6 +78,14 @@ class DeviceVault {
     key: 'agentdeck.agents.visibility',
     value: jsonEncode(value),
   );
+
+  Future<List<dynamic>> loadDownloads() async {
+    final value = await storage.read(key: 'agentdeck.downloads');
+    return value == null ? [] : jsonDecode(value) as List;
+  }
+
+  Future<void> saveDownloads(List<dynamic> value) =>
+      storage.write(key: 'agentdeck.downloads', value: jsonEncode(value));
 
   Future<Map<String, dynamic>> loadGeneration() async {
     final v = await storage.read(key: 'agentdeck.generation');
@@ -104,6 +136,7 @@ class DeviceVault {
     await storage.delete(key: 'agentdeck.cache.key');
     await storage.delete(key: 'agentdeck.project.layout');
     await storage.delete(key: 'agentdeck.generation');
+    await storage.delete(key: 'agentdeck.downloads');
     if (!keepGateway) {
       await storage.delete(key: 'agentdeck.gateway.account');
     }

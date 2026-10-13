@@ -6,13 +6,15 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart'
     show LicenseRegistry, LicenseEntryWithLineBreaks;
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart'
+    show rootBundle, Clipboard, ClipboardData;
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'core/client.dart';
 import 'gateway_page.dart';
 import 'core/model.dart';
 import 'attachment_page.dart';
+import 'download_page.dart';
 import 'media_preview.dart';
 import 'conversation_outline.dart';
 import 'dart:typed_data';
@@ -23,6 +25,15 @@ import 'core/input.dart';
 import 'input_composer.dart';
 import 'message_queue.dart';
 import 'running_indicator.dart';
+import 'usage_sheet.dart';
+import 'goal_panel.dart';
+import 'app_lock.dart';
+import 'activity_group.dart';
+import 'app_update_page.dart';
+import 'progressive_text.dart';
+import 'approval_details.dart';
+import 'reading_scroll_view.dart';
+import 'core/conversation_presentation.dart';
 export 'running_indicator.dart';
 
 const ink = DeckColors.ink;
@@ -75,6 +86,7 @@ class _AgentDeckAppState extends State<AgentDeckApp>
   @override
   void initState() {
     super.initState();
+    unawaited(client.appLock.load());
     if (widget.languages == null) unawaited(languages.load());
     WidgetsBinding.instance.addObserver(this);
     if (widget.client == null) {
@@ -92,8 +104,14 @@ class _AgentDeckAppState extends State<AgentDeckApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) client.suspend();
-    if (state == AppLifecycleState.resumed) client.resume();
+    if (state == AppLifecycleState.paused) {
+      client.suspend();
+      client.updates.background();
+    }
+    if (state == AppLifecycleState.resumed) {
+      client.resume();
+      unawaited(client.updates.foreground());
+    }
   }
 
   @override
@@ -108,6 +126,10 @@ class _AgentDeckAppState extends State<AgentDeckApp>
         locale: languages.language.locale,
         supportedLocales: UiStrings.supportedLocales,
         localizationsDelegates: UiStrings.delegates,
+        builder: (context, child) => AppLockScope(
+          controller: client.appLock,
+          child: AppLockGate(controller: client.appLock, child: child!),
+        ),
         home: DeckHome(client: client),
       ),
     ),
@@ -353,6 +375,14 @@ class _DeckHomeState extends State<DeckHome> {
                           height: 1.45,
                         ),
                       ),
+                      if (c.goals
+                              .where((g) => g.session == session.id)
+                              .firstOrNull
+                          case final goal?)
+                        Text(
+                          context.tr(goal.label),
+                          style: const TextStyle(fontSize: 10, color: muted),
+                        ),
                       if (!grouped) ...[
                         const SizedBox(height: 6),
                         Text(
@@ -373,6 +403,15 @@ class _DeckHomeState extends State<DeckHome> {
                     if (session.status == 'running' ||
                         session.status == 'pending')
                       const RunningIndicator()
+                    else if (session.status == 'waiting')
+                      Tooltip(
+                        message: context.tr('等待确认'),
+                        child: const Icon(
+                          Icons.hourglass_top,
+                          size: 17,
+                          color: muted,
+                        ),
+                      )
                     else
                       Text(
                         _updatedLabel(session.updated),
@@ -584,6 +623,22 @@ class _DeckHomeState extends State<DeckHome> {
     );
   }
 
+  Future<void> _refreshHome() async {
+    try {
+      await c.refreshSessions();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.trError(e is TimeoutException ? '刷新超时，请检查连接后重试' : e),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
   Widget _sessions() {
     if (!c.visibleAgents.any((a) => a.id == filter)) {
       filter = c.visibleAgents.firstOrNull?.id ?? '';
@@ -606,6 +661,7 @@ class _DeckHomeState extends State<DeckHome> {
     final allHidden = !recent && ss.isNotEmpty && visiblePaths.isEmpty;
     return Column(
       children: [
+        UpdateNotice(updater: c.updates),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 12, 0),
           child: Row(
@@ -629,6 +685,16 @@ class _DeckHomeState extends State<DeckHome> {
                     ),
                   ],
                 ),
+              ),
+              IconButton(
+                tooltip: context.tr('下载列表'),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => DownloadPage(client: c),
+                  ),
+                ),
+                icon: const Icon(Icons.downloading_outlined, size: 20),
               ),
               IconButton(
                 tooltip: context.tr('设置'),
@@ -783,18 +849,108 @@ class _DeckHomeState extends State<DeckHome> {
                 onChanged: (value) => setState(() => recent = value),
               ),
               Padding(
-                padding: const EdgeInsets.only(top: 8, bottom: 2),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    context.strings.count(
-                      recent ? ss.length : visiblePaths.length,
-                      chats: recent,
+                padding: const EdgeInsets.only(top: 2, bottom: 2),
+                child: Row(
+                  key: const ValueKey('session-meta-row'),
+                  children: [
+                    if (filter == 'codex' || filter == 'claude')
+                      TextButton.icon(
+                        key: const ValueKey('account-usage'),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: const Size(0, 36),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          textStyle: const TextStyle(fontSize: 11),
+                          foregroundColor: muted,
+                        ),
+                        onPressed: !c.connected
+                            ? null
+                            : () => showModalBottomSheet<void>(
+                                context: context,
+                                isScrollControlled: true,
+                                showDragHandle: true,
+                                builder: (_) => FractionallySizedBox(
+                                  heightFactor: .72,
+                                  child: UsageSheet(client: c, agent: filter),
+                                ),
+                              ),
+                        icon: const Icon(Icons.data_usage_rounded, size: 14),
+                        label: Text(context.tr('用量')),
+                      ),
+                    if (c.goals.any((g) => g.agent == filter) ||
+                        c.goalError.isNotEmpty)
+                      TextButton.icon(
+                        key: const ValueKey('agent-goals'),
+                        onPressed: () => showModalBottomSheet<void>(
+                          context: context,
+                          isScrollControlled: true,
+                          showDragHandle: true,
+                          builder: (_) => FractionallySizedBox(
+                            heightFactor: .75,
+                            child: ListenableBuilder(
+                              listenable: c,
+                              builder: (context, _) => ListView(
+                                children: [
+                                  ListTile(
+                                    title: Text(context.tr('目标')),
+                                    trailing: IconButton(
+                                      tooltip: context.tr('刷新目标'),
+                                      onPressed: c.connected
+                                          ? c.refreshGoals
+                                          : null,
+                                      icon: const Icon(Icons.refresh),
+                                    ),
+                                  ),
+                                  if (c.goalError.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.all(16),
+                                      child: Text(context.trError(c.goalError)),
+                                    ),
+                                  for (final g in c.goals.where(
+                                    (g) => g.agent == filter,
+                                  ))
+                                    GoalPanel(
+                                      client: c,
+                                      goal: g,
+                                      open: () {
+                                        final session = c.sessions
+                                            .where((s) => s.id == g.session)
+                                            .firstOrNull;
+                                        if (session != null) {
+                                          Navigator.pop(context);
+                                          _open(session);
+                                        }
+                                      },
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(0, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          foregroundColor: muted,
+                          textStyle: const TextStyle(fontSize: 11),
+                        ),
+                        icon: const Icon(Icons.flag_outlined, size: 14),
+                        label: Text(
+                          '${context.tr('目标')} · ${c.goals.where((g) => g.agent == filter && g.status == 'active').length}',
+                        ),
+                      ),
+                    const Spacer(),
+                    Text(
+                      key: const ValueKey('session-count'),
+                      context.strings.count(
+                        recent ? ss.length : visiblePaths.length,
+                        chats: recent,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 10, color: muted),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 10, color: muted),
-                  ),
+                  ],
                 ),
               ),
               if (c.error.isNotEmpty)
@@ -817,58 +973,74 @@ class _DeckHomeState extends State<DeckHome> {
           ),
         ),
         Expanded(
-          child: ss.isEmpty || allHidden
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          c.visibleAgents.isEmpty
-                              ? context.tr('请选择要显示的 Agent')
-                              : allHidden
-                              ? context.tr('当前项目已隐藏')
-                              : c.device == null && !c.connected
-                              ? context.tr('从连接开始')
-                              : context.tr('暂无会话'),
-                          style: const TextStyle(fontSize: 20),
+          child: RefreshIndicator(
+            key: const ValueKey('home-refresh'),
+            onRefresh: _refreshHome,
+            color: ink,
+            child: ss.isEmpty || allHidden
+                ? LayoutBuilder(
+                    builder: (context, constraints) => SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: constraints.maxHeight,
                         ),
-                        const SizedBox(height: 12),
-                        Text(
-                          allHidden
-                              ? context.tr('在项目管理中勾选要显示的项目。')
-                              : c.device == null && !c.connected
-                              ? context.tr('连接工作站后，按 Agent 和项目管理会话。')
-                              : context.tr('点击右上角 + 新建会话，发送消息开始工作。'),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: muted),
-                        ),
-                        if (allHidden)
-                          TextButton(
-                            onPressed: _sortProjects,
-                            child: Text(context.tr('管理项目')),
-                          )
-                        else if (c.device == null && !c.connected)
-                          TextButton(
-                            onPressed: _pair,
-                            child: Text(context.tr('连接工作站')),
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  c.visibleAgents.isEmpty
+                                      ? context.tr('请选择要显示的 Agent')
+                                      : allHidden
+                                      ? context.tr('当前项目已隐藏')
+                                      : c.device == null && !c.connected
+                                      ? context.tr('从连接开始')
+                                      : context.tr('暂无会话'),
+                                  style: const TextStyle(fontSize: 20),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  allHidden
+                                      ? context.tr('在项目管理中勾选要显示的项目。')
+                                      : c.device == null && !c.connected
+                                      ? context.tr('连接工作站后，按 Agent 和项目管理会话。')
+                                      : context.tr('点击右上角 + 新建会话，发送消息开始工作。'),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(color: muted),
+                                ),
+                                if (allHidden)
+                                  TextButton(
+                                    onPressed: _sortProjects,
+                                    child: Text(context.tr('管理项目')),
+                                  )
+                                else if (c.device == null && !c.connected)
+                                  TextButton(
+                                    onPressed: _pair,
+                                    child: Text(context.tr('连接工作站')),
+                                  ),
+                              ],
+                            ),
                           ),
-                      ],
-                    ),
-                  ),
-                )
-              : ListView.builder(
-                  key: ValueKey('sessions-$recent-$filter'),
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                  itemCount: recent ? ss.length : visiblePaths.length,
-                  itemBuilder: (_, i) => recent
-                      ? _sessionRow(ss[i])
-                      : _projectGroup(
-                          visiblePaths[i],
-                          groups[visiblePaths[i]]!,
                         ),
-                ),
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    key: ValueKey('sessions-$recent-$filter'),
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                    itemCount: recent ? ss.length : visiblePaths.length,
+                    itemBuilder: (_, i) => recent
+                        ? _sessionRow(ss[i])
+                        : _projectGroup(
+                            visiblePaths[i],
+                            groups[visiblePaths[i]]!,
+                          ),
+                  ),
+          ),
         ),
       ],
     );
@@ -1354,11 +1526,37 @@ class ConversationPage extends StatefulWidget {
 }
 
 class _ConversationPageState extends State<ConversationPage> {
-  final scroll = ScrollController();
+  final scroll = ReadingScrollController();
+  final readingView = GlobalKey<ReadingScrollViewState>();
+  bool userScrolling = false;
+  int pagingDirection =
+      0; // Positive offsets move into older records (reverse view).
+  bool pagingScheduled = false, pagingBusy = false;
+  int seekingDialogue = 0;
+  bool initialDialogueCheckDone = false;
+
   final prompt = TextEditingController();
   late AgentSession active;
   bool sending = false;
   String sendStage = '';
+  final List<InputReceipt> inputReceipts = [];
+  InputReceipt? get receipt => inputReceipts.lastOrNull;
+  set receipt(InputReceipt? value) {
+    if (value == null) {
+      if (inputReceipts.isNotEmpty) {
+        inputReceipts.removeLast();
+      }
+    } else {
+      inputReceipts.add(value);
+    }
+  }
+
+  Transcript? _sectionTranscript;
+  int _sectionRevision = -1;
+  List<TranscriptBlock> _sectionBlocks = [];
+  List<TranscriptSection> _sections = [];
+  bool expandAllActivities = false;
+  final activityOverrides = <String, bool>{};
   List<Object?> sendStageArgs = const [];
   bool follow = true;
   String? focusedRecord;
@@ -1375,16 +1573,108 @@ class _ConversationPageState extends State<ConversationPage> {
   }
 
   void _updated() {
+    _schedulePaging();
     if (follow) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && scroll.hasClients) {
-          if (scroll.offset != 0) {
-            scroll.jumpTo(0);
+        if (mounted &&
+            follow &&
+            !jumping &&
+            c.transcripts[active.id]?.detached != true &&
+            scroll.hasClients &&
+            !scroll.position.isScrollingNotifier.value) {
+          if (scroll.offset != scroll.position.minScrollExtent) {
+            scroll.jumpTo(scroll.position.minScrollExtent);
           }
         }
       });
     }
   }
+
+  void _schedulePaging() {
+    final current = c.transcripts[active.id];
+    // A first page may contain only folded execution records. Fill it with a
+    // real dialogue message without requiring a gesture on an empty viewport.
+    if (!initialDialogueCheckDone &&
+        current != null &&
+        current.blocks.isNotEmpty) {
+      initialDialogueCheckDone = true;
+      if (pagingDirection == 0 && !current.blocks.any(_isDialogue)) {
+        pagingDirection = current.hasMore ? 1 : (current.detached ? -1 : 0);
+        seekingDialogue = pagingDirection;
+      }
+    }
+    if (pagingScheduled || pagingBusy || pagingDirection == 0 || jumping) {
+      return;
+    }
+    pagingScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      pagingScheduled = false;
+      if (!mounted ||
+          !scroll.hasClients ||
+          jumping ||
+          pagingBusy ||
+          !c.connected) {
+        return;
+      }
+      final t = c.transcripts[active.id];
+      if (t == null || t.loadingOlder || t.loadingNewer) return;
+      final direction = pagingDirection;
+      final atEdge = direction > 0
+          ? t.hasMore && scroll.position.extentAfter < 200
+          : direction < 0 && t.detached && scroll.position.extentBefore < 200;
+      if (!atEdge && seekingDialogue != direction) return;
+      final dialogueBoundary = direction > 0
+          ? t.blocks.where(_isDialogue).firstOrNull?.first
+          : t.blocks.where(_isDialogue).lastOrNull?.first;
+      final before = (
+        t.before,
+        t.blocks.lastOrNull?.first,
+        t.hasMore,
+        t.detached,
+      );
+      pagingBusy = true;
+      try {
+        if (direction > 0) {
+          await _older();
+        } else {
+          await _newer();
+        }
+        final after = (
+          t.before,
+          t.blocks.lastOrNull?.first,
+          t.hasMore,
+          t.detached,
+        );
+        // A malformed or repeated page must not create an endless request loop.
+        if (before == after && pagingDirection == direction) {
+          pagingDirection = 0;
+          seekingDialogue = 0;
+        } else if (pagingDirection == direction) {
+          final reachedDialogue = t.blocks.any(
+            (b) =>
+                _isDialogue(b) &&
+                (dialogueBoundary == null ||
+                    (direction > 0
+                        ? b.first < dialogueBoundary
+                        : b.first > dialogueBoundary)),
+          );
+          // Raw pages contain tool events too. Continue past those pages even
+          // if their collapsed headers have pushed the scroll edge away.
+          seekingDialogue = reachedDialogue ? 0 : direction;
+        }
+      } finally {
+        pagingBusy = false;
+        if (mounted) _schedulePaging();
+      }
+    });
+    // Initial history can already be loaded before this page is mounted. A
+    // post-frame callback alone would otherwise wait for an unrelated tick.
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  bool _isDialogue(TranscriptBlock block) =>
+      block.kind == 'message' && block.text.trim().isNotEmpty ||
+      block.kind == 'image';
 
   @override
   void dispose() {
@@ -1413,6 +1703,7 @@ class _ConversationPageState extends State<ConversationPage> {
     if (record == null || !mounted) return;
     setState(() {
       jumping = true;
+      pagingDirection = 0;
       follow = false;
     });
     try {
@@ -1448,6 +1739,7 @@ class _ConversationPageState extends State<ConversationPage> {
   Future<void> _latest() async {
     setState(() {
       follow = true;
+      pagingDirection = 0;
       focusedRecord = null;
     });
     if (c.transcripts[active.id]?.detached == true) {
@@ -1465,9 +1757,13 @@ class _ConversationPageState extends State<ConversationPage> {
   }
 
   Future<void> _older() async {
+    final t = c.transcripts[active.id];
+    if (t == null || t.loadingOlder || t.loadingNewer || !t.hasMore) return;
+    readingView.currentState?.anchorReadingPosition();
     try {
       await c.loadOlder(active.id);
     } catch (_) {
+      pagingDirection = 0;
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -1476,22 +1772,105 @@ class _ConversationPageState extends State<ConversationPage> {
     }
   }
 
+  Future<void> _newer() async {
+    final t = c.transcripts[active.id];
+    if (t == null || t.loadingOlder || t.loadingNewer || !t.detached) return;
+    readingView.currentState?.anchorReadingPosition();
+    try {
+      await c.loadNewer(active.id);
+    } catch (_) {
+      pagingDirection = 0;
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.tr('历史加载失败，请重试'))));
+      }
+    }
+  }
+
+  String _rowKey(Object row) => switch (row) {
+    final TranscriptSection section => 'section/${section.blocks.first.key}',
+    final TranscriptBlock block => 'block/${block.key}',
+    _ => throw StateError('Unknown transcript row'),
+  };
+
+  Widget _block(TranscriptBlock block) => Container(
+    key: block.key == focusedRecord ? focusAnchor : null,
+    decoration: block.key == focusedRecord
+        ? BoxDecoration(
+            color: const Color(0x10EF633C),
+            border: Border(left: BorderSide(color: accent, width: 2)),
+          )
+        : null,
+    padding: block.key == focusedRecord
+        ? const EdgeInsets.only(left: 10)
+        : null,
+    child: TranscriptTile(
+      key: ValueKey('${block.key}-${block.key == focusedRecord}'),
+      initiallyExpanded: block.key == focusedRecord,
+      block: block,
+      session: active.id,
+      client: c,
+    ),
+  );
+
+  bool _activityExpanded(TranscriptSection section) =>
+      section.contains(focusedRecord) ||
+      (activityOverrides[section.key] ?? expandAllActivities);
+
+  Widget _section(TranscriptSection section) {
+    if (!section.activity) return _block(section.blocks.first);
+    final expanded = _activityExpanded(section);
+    return ActivityGroup(
+      key: ValueKey('activity-${section.key}'),
+      blocks: section.blocks,
+      expanded: expanded,
+      showChildren: false,
+      tile: _block,
+      onToggle: () => setState(() {
+        if (section.contains(focusedRecord)) focusedRecord = null;
+        activityOverrides[section.key] = !expanded;
+      }),
+    );
+  }
+
   Future<bool> submit(
     TurnOptions options,
     List<DraftFile> files, {
     String delivery = 'send',
   }) async {
+    final trackInput =
+        delivery == 'send' || delivery == 'queue' && active.agent == 'claude';
+    bool nativeSubmitted = false;
+    InputReceipt? submission;
     final text = prompt.text.trim();
     if (text.isEmpty && files.isEmpty || sending) return false;
     setState(() {
       sending = true;
+      if (trackInput) {
+        submission = InputReceipt(
+          id: AgentClient.requestID(),
+          matchText: text,
+          baselineUpdated:
+              c.sessions.where((s) => s.id == active.id).firstOrNull?.updated ??
+              active.updated,
+          text: [
+            text,
+            ...files.map((f) => f.name),
+          ].where((v) => v.isNotEmpty).join('\n'),
+          cursor: c.transcripts[active.id]?.cursor ?? 0,
+        );
+        receipt = submission;
+      }
       sendStageArgs = const [];
       sendStage = !active.managed
-          ? (active.agent == 'codex' && c.codexDesktop
+          ? ((active.agent == 'codex' && c.codexDesktop) ||
+                    active.agent == 'claude'
                 ? '正在连接电脑原会话…'
                 : '正在建立续聊会话…')
           : '正在发送…';
     });
+    bool requestStarted = false;
     try {
       if (files.any((file) => file.image)) {
         setState(() => sendStage = '正在检查图片支持…');
@@ -1509,6 +1888,9 @@ class _ConversationPageState extends State<ConversationPage> {
           projects.first.id,
           parent: active.id,
         );
+        if (trackInput) {
+          submission?.cursor = c.transcripts[active.id]?.cursor ?? 0;
+        }
       }
       if (mounted) {
         setState(
@@ -1542,8 +1924,40 @@ class _ConversationPageState extends State<ConversationPage> {
               sendStage = active.source == 'desktop' ? '正在发送到电脑原会话…' : '正在发送…',
         );
       }
-      await c.sendDelivery(active.id, text, options, uploads, delivery);
-      if (mounted && active.source == 'desktop') {
+      requestStarted = true;
+      await c.sendDelivery(
+        active.id,
+        text,
+        options,
+        uploads,
+        delivery,
+        requestId: submission?.id,
+      );
+      if (trackInput) {
+        nativeSubmitted = c.consumeSubmittedInput(submission!.id);
+        submission?.nativeMessageID = c.consumeSubmittedMessageID(
+          submission!.id,
+        );
+        final queued = c.consumeQueuedInput(submission!.id);
+        if (queued) {
+          inputReceipts.remove(submission);
+          try {
+            c.queues[active.id] = await c.queue(active.id);
+          } catch (_) {
+            // The encrypted stream will deliver the durable queue snapshot.
+          }
+        } else if (nativeSubmitted) {
+          submission?.phase = InputDeliveryPhase.submitted;
+        } else if (delivery == 'send') {
+          submission?.phase = InputDeliveryPhase.accepted;
+        } else {
+          inputReceipts.remove(submission);
+        }
+      }
+      if (mounted &&
+          active.source == 'desktop' &&
+          delivery != 'send' &&
+          !nativeSubmitted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -1564,6 +1978,13 @@ class _ConversationPageState extends State<ConversationPage> {
       follow = true;
       return true;
     } catch (e) {
+      if (trackInput) {
+        if (requestStarted && !(e is AgentRequestException && e.notSent)) {
+          submission?.phase = InputDeliveryPhase.uncertain;
+        } else {
+          inputReceipts.remove(submission);
+        }
+      }
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -1592,16 +2013,93 @@ class _ConversationPageState extends State<ConversationPage> {
     listenable: c,
     builder: (_, _) {
       final transcript = c.transcripts[active.id];
-      final blocks =
-          transcript?.blocks
-              .where((b) => b.kind != 'queued_message')
-              .toList() ??
-          <TranscriptBlock>[];
+      if (!identical(_sectionTranscript, transcript) ||
+          _sectionRevision != transcript?.revision) {
+        _sectionTranscript = transcript;
+        _sectionRevision = transcript?.revision ?? -1;
+        _sectionBlocks =
+            transcript?.blocks
+                .where((b) => b.kind != 'queued_message')
+                .toList() ??
+            [];
+        _sections = transcriptSections(_sectionBlocks);
+      }
+      final blocks = _sectionBlocks;
       final latest =
           c.sessions.where((s) => s.id == active.id).firstOrNull ?? active;
-      final pending = latest.status == 'pending';
-      final running = latest.status == 'running' || pending;
+      for (final r in inputReceipts) {
+        r.reconcile(blocks);
+      }
+      inputReceipts.removeWhere(
+        (r) =>
+            r.responded(blocks) ||
+            (r.observed(blocks) &&
+                !r.waiting(
+                  blocks,
+                  status: latest.status,
+                  updated: latest.updated,
+                )),
+      );
+      final waiting = inputReceipts.any(
+        (r) =>
+            r.waiting(blocks, status: latest.status, updated: latest.updated),
+      );
+      final pending =
+          latest.status == 'pending' || (waiting && latest.status != 'running');
+      final running =
+          latest.status == 'running' ||
+          latest.status == 'waiting' ||
+          pending ||
+          sending;
+      final sections = [..._sections];
+      for (final localReceipt in inputReceipts) {
+        if (transcript?.detached != true &&
+            !localReceipt.observed(blocks) &&
+            !localReceipt.responded(blocks)) {
+          sections.add(
+            TranscriptSection([
+              TranscriptBlock(
+                key: 'local-input-${localReceipt.id}',
+                kind: 'message',
+                role: 'user',
+                text: localReceipt.text,
+              ),
+            ]),
+          );
+        }
+      }
+      // Activity rows share the outer lazy viewport, including expand-all.
+      final rows = <Object>[];
+      for (final section in sections) {
+        rows.add(section);
+        if (section.activity && _activityExpanded(section)) {
+          rows.addAll(section.blocks);
+        }
+      }
+      final activityCount = sections.where((s) => s.activity).length;
+      final receiptLabel = sending
+          ? context.tr(sendStage, sendStageArgs)
+          : receipt?.phase == InputDeliveryPhase.uncertain &&
+                receipt?.observed(blocks) != true
+          ? context.tr('未确认送达，请先核对会话，避免重复发送')
+          : waiting
+          ? context.tr(
+              receipt?.phase == InputDeliveryPhase.submitted &&
+                      receipt?.observed(blocks) != true
+                  ? '已提交到电脑 Claude，等待原会话处理…'
+                  : '已送达，等待 Agent 响应…',
+            )
+          : '';
       final showRunningTail = running && transcript?.detached != true;
+      final rowByKey = {for (final row in rows) _rowKey(row): row};
+      final rowKeys = [
+        'padding-bottom',
+        if (transcript?.detached == true) 'newer',
+        if (showRunningTail) 'running',
+        ...rows.reversed.map(_rowKey),
+        if (transcript?.hasMore == true) 'older',
+        'padding-top',
+      ];
       return Scaffold(
         backgroundColor: Colors.white,
         appBar: AppBar(
@@ -1657,7 +2155,15 @@ class _ConversationPageState extends State<ConversationPage> {
                     const SizedBox(width: 7),
                     Flexible(
                       child: Text(
-                        context.tr(pending ? '等待电脑响应…' : '执行中'),
+                        sending
+                            ? context.tr('发送中')
+                            : context.tr(
+                                latest.status == 'waiting'
+                                    ? '等待确认'
+                                    : pending
+                                    ? '等待响应'
+                                    : '执行中',
+                              ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(color: muted, fontSize: 12),
@@ -1671,152 +2177,189 @@ class _ConversationPageState extends State<ConversationPage> {
                 ],
               ),
             ),
+            if (c.goals.where((g) => g.session == active.id).firstOrNull
+                case final goal?)
+              GoalPanel(client: c, goal: goal),
             const Divider(height: 1),
+            if (activityCount > 0)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  key: const ValueKey('all-activities-toggle'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: muted,
+                    minimumSize: const Size(0, 32),
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                  ),
+                  onPressed: () => setState(() {
+                    expandAllActivities = !expandAllActivities;
+                    activityOverrides.clear();
+                    focusedRecord = null;
+                  }),
+                  icon: Icon(
+                    expandAllActivities ? Icons.unfold_less : Icons.unfold_more,
+                    size: 16,
+                  ),
+                  label: Text(
+                    context.tr(expandAllActivities ? '全部折叠执行过程' : '全部展开执行过程'),
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+              ),
             Expanded(
               child: Stack(
                 children: [
-                  NotificationListener<ScrollNotification>(
+                  NotificationListener<ScrollMetricsNotification>(
                     onNotification: (notification) {
-                      if (notification.depth == 0 &&
-                          (notification is ScrollUpdateNotification &&
-                                  notification.dragDetails != null ||
-                              notification is UserScrollNotification)) {
-                        final v =
-                            !jumping && notification.metrics.extentBefore < 140;
-                        if (!v &&
-                            !jumping &&
-                            notification.metrics.extentAfter < 200 &&
-                            transcript?.hasMore == true) {
-                          _older();
-                        }
-                        if (v != follow) setState(() => follow = v);
-                      }
+                      if (notification.depth == 0) _schedulePaging();
                       return false;
                     },
-                    child: blocks.isEmpty && !running
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.chat_bubble_outline_rounded,
-                                  size: 30,
-                                  color: muted,
-                                ),
-                                const SizedBox(height: 14),
-                                Text(
-                                  active.managed
-                                      ? context.tr('发送消息，开始一起工作')
-                                      : context.tr('正在读取会话…'),
-                                  style: const TextStyle(
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: (notification) {
+                        if (notification.depth != 0) return false;
+                        if (notification is ScrollStartNotification &&
+                            notification.dragDetails != null) {
+                          readingView.currentState?.anchorReadingPosition();
+                          userScrolling = true;
+                        }
+                        if (userScrolling &&
+                            (notification is ScrollUpdateNotification ||
+                                notification is OverscrollNotification)) {
+                          final delta = notification is ScrollUpdateNotification
+                              ? notification.scrollDelta ?? 0
+                              : (notification as OverscrollNotification)
+                                    .overscroll;
+                          if (delta != 0 && !jumping) {
+                            pagingDirection = delta > 0 ? 1 : -1;
+                            _schedulePaging();
+                          }
+                          final v =
+                              !jumping &&
+                              transcript?.detached != true &&
+                              notification.metrics.extentBefore < 140 &&
+                              pagingDirection < 0;
+                          if (v != follow) {
+                            follow = v;
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (mounted) setState(() {});
+                            });
+                          }
+                        }
+                        if (notification is ScrollEndNotification) {
+                          userScrolling = false;
+                          if (follow) _updated();
+                        }
+                        return false;
+                      },
+                      child: sections.isEmpty && !running
+                          ? Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.chat_bubble_outline_rounded,
+                                    size: 30,
                                     color: muted,
-                                    fontSize: 14,
                                   ),
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListView.builder(
-                            key: ValueKey(
-                              'transcript-${active.id}-$focusGeneration',
-                            ),
-                            controller: scroll,
-                            reverse: true,
-                            keyboardDismissBehavior:
-                                ScrollViewKeyboardDismissBehavior.onDrag,
-                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-                            itemCount:
-                                blocks.length +
-                                (showRunningTail ? 1 : 0) +
-                                (transcript?.hasMore == true ? 1 : 0),
-                            itemBuilder: (_, index) {
-                              if (index ==
-                                  blocks.length + (showRunningTail ? 1 : 0)) {
-                                return Center(
-                                  child: TextButton.icon(
-                                    onPressed: transcript!.loadingOlder
-                                        ? null
-                                        : _older,
-                                    icon: transcript.loadingOlder
-                                        ? const RunningIndicator()
-                                        : const Icon(Icons.history, size: 18),
-                                    label: Text(
-                                      transcript.loadingOlder
-                                          ? context.tr('正在加载…')
-                                          : context.tr('加载更早消息'),
+                                  const SizedBox(height: 14),
+                                  Text(
+                                    active.managed
+                                        ? context.tr('发送消息，开始一起工作')
+                                        : context.tr('正在读取会话…'),
+                                    style: const TextStyle(
+                                      color: muted,
+                                      fontSize: 14,
                                     ),
                                   ),
-                                );
-                              }
-                              final i =
-                                  blocks.length -
-                                  1 -
-                                  index +
-                                  (showRunningTail ? 1 : 0);
-                              return Align(
-                                alignment: Alignment.topCenter,
-                                child: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 760,
-                                  ),
-                                  child: i == blocks.length
-                                      ? Padding(
-                                          padding: EdgeInsets.symmetric(
-                                            vertical: 12,
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              RunningIndicator(),
-                                              SizedBox(width: 10),
-                                              Expanded(
-                                                child: Text(
-                                                  context.tr(
-                                                    pending
-                                                        ? '等待电脑响应…'
-                                                        : '正在执行…',
-                                                  ),
-                                                  style: TextStyle(
-                                                    fontSize: 13,
-                                                    color: muted,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        )
-                                      : Container(
-                                          key: blocks[i].key == focusedRecord
-                                              ? focusAnchor
-                                              : null,
-                                          decoration:
-                                              blocks[i].key == focusedRecord
-                                              ? BoxDecoration(
-                                                  color: const Color(
-                                                    0x10EF633C,
-                                                  ),
-                                                  border: Border(
-                                                    left: BorderSide(
-                                                      color: accent,
-                                                      width: 2,
+                                ],
+                              ),
+                            )
+                          : ReadingScrollView(
+                              key: readingView,
+                              scrollKey: ValueKey(
+                                'transcript-${active.id}-$focusGeneration',
+                              ),
+                              controller: scroll,
+                              itemKeys: rowKeys,
+                              itemBuilder: (_, index) {
+                                final itemKey = rowKeys[index];
+                                if (itemKey == 'padding-bottom') {
+                                  return const SizedBox(height: 28);
+                                }
+                                if (itemKey == 'padding-top') {
+                                  return const SizedBox(height: 16);
+                                }
+                                if (itemKey == 'newer' || itemKey == 'older') {
+                                  final loading = itemKey == 'older'
+                                      ? transcript!.loadingOlder
+                                      : transcript!.loadingNewer;
+                                  return SizedBox(
+                                    height: 32,
+                                    child: loading
+                                        ? const Center(
+                                            child: RunningIndicator(),
+                                          )
+                                        : null,
+                                  );
+                                }
+                                return Align(
+                                  alignment: Alignment.topCenter,
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 760,
+                                    ),
+                                    child: itemKey == 'running'
+                                        ? Padding(
+                                            padding: EdgeInsets.symmetric(
+                                              vertical: 12,
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                RunningIndicator(),
+                                                SizedBox(width: 10),
+                                                Expanded(
+                                                  child: Text(
+                                                    sending
+                                                        ? context.tr(
+                                                            sendStage,
+                                                            sendStageArgs,
+                                                          )
+                                                        : context.tr(
+                                                            latest.status ==
+                                                                    'waiting'
+                                                                ? '等待电脑端确认…'
+                                                                : pending
+                                                                ? (receipt?.phase ==
+                                                                              InputDeliveryPhase.submitted &&
+                                                                          receipt?.observed(
+                                                                                blocks,
+                                                                              ) !=
+                                                                              true
+                                                                      ? '已提交到电脑 Claude，等待原会话处理…'
+                                                                      : '已送达，等待 Agent 响应…')
+                                                                : '正在执行…',
+                                                          ),
+                                                    style: TextStyle(
+                                                      fontSize: 13,
+                                                      color: muted,
                                                     ),
                                                   ),
-                                                )
-                                              : null,
-                                          padding:
-                                              blocks[i].key == focusedRecord
-                                              ? const EdgeInsets.only(left: 10)
-                                              : null,
-                                          child: TranscriptTile(
-                                            key: ValueKey(blocks[i].key),
-                                            block: blocks[i],
-                                            session: active.id,
-                                            client: c,
-                                          ),
-                                        ),
-                                ),
-                              );
-                            },
-                          ),
+                                                ),
+                                              ],
+                                            ),
+                                          )
+                                        : switch (rowByKey[itemKey]) {
+                                            final TranscriptSection section =>
+                                              _section(section),
+                                            final TranscriptBlock block =>
+                                              _block(block),
+                                            _ => const SizedBox.shrink(),
+                                          },
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
                   ),
                   if (jumping)
                     const Positioned(
@@ -1849,18 +2392,21 @@ class _ConversationPageState extends State<ConversationPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (sending ||
+                    if ((!sending && !waiting && receiptLabel.isNotEmpty) ||
                         !active.managed ||
-                        active.source == 'desktop')
+                        active.source == 'desktop' ||
+                        active.agent == 'claude')
                       Padding(
                         padding: EdgeInsets.only(bottom: 8),
                         child: Text(
-                          sending
-                              ? context.tr(sendStage, sendStageArgs)
+                          !sending && !waiting && receiptLabel.isNotEmpty
+                              ? receiptLabel
                               : (active.source == 'desktop' ||
                                         active.agent == 'codex' &&
                                             c.codexDesktop
                                     ? context.tr('发送到电脑 Codex 的同一个会话')
+                                    : active.agent == 'claude'
+                                    ? context.tr('继续 Claude 原会话 · 不创建分支')
                                     : context.tr('发送后复制电脑会话上下文，在手机继续')),
                           style: TextStyle(fontSize: 11, color: muted),
                         ),
@@ -1911,11 +2457,13 @@ class TranscriptTile extends StatefulWidget {
   final TranscriptBlock block;
   final AgentClient client;
   final String session;
+  final bool initiallyExpanded;
   const TranscriptTile({
     super.key,
     required this.block,
     required this.client,
     this.session = '',
+    this.initiallyExpanded = false,
   });
   @override
   State<TranscriptTile> createState() => _TranscriptTileState();
@@ -1928,6 +2476,16 @@ class _TranscriptTileState extends State<TranscriptTile> {
   Widget? _rendered;
   String? _text, _status, _session;
   bool? _connected;
+  late bool _expanded = widget.initiallyExpanded;
+  @override
+  void didUpdateWidget(covariant TranscriptTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initiallyExpanded != oldWidget.initiallyExpanded) {
+      _expanded = widget.initiallyExpanded;
+      _rendered = null;
+    }
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -1951,8 +2509,13 @@ class _TranscriptTileState extends State<TranscriptTile> {
     return _rendered!;
   }
 
-  Widget markdown(BuildContext context) => MarkdownBody(
-    data: block.text,
+  Widget markdown(BuildContext context) => ProgressiveText(
+    key: ValueKey('message-body-${block.key}'),
+    text: block.text,
+    builder: (text) => markdownBody(context, text),
+  );
+  Widget markdownBody(BuildContext context, String text) => MarkdownBody(
+    data: text,
     selectable: true,
     imageBuilder: (uri, title, alt) => mediaHref(uri.toString())
         ? ListTile(
@@ -2130,6 +2693,11 @@ class _TranscriptTileState extends State<TranscriptTile> {
           border: Border.all(color: DeckColors.line, width: .6),
         ),
         child: ExpansionTile(
+          initiallyExpanded: _expanded,
+          onExpansionChanged: (value) => setState(() {
+            _expanded = value;
+            _rendered = null;
+          }),
           shape: const Border(),
           collapsedShape: const Border(),
           dense: true,
@@ -2137,7 +2705,7 @@ class _TranscriptTileState extends State<TranscriptTile> {
           childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 16),
           title: Text(
             block.kind == 'tool_call'
-                ? '$title · ${block.text.split('\n').first}'
+                ? '$title · ${block.text.substring(0, block.text.length.clamp(0, 160)).split('\n').first}'
                 : title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -2152,21 +2720,28 @@ class _TranscriptTileState extends State<TranscriptTile> {
             size: 17,
             color: muted,
           ),
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: block.kind == 'thinking'
-                  ? markdown(context)
-                  : SelectableText(
-                      block.text,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                        height: 1.6,
-                      ),
-                    ),
-            ),
-          ],
+          children: _expanded
+              ? [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: block.kind == 'thinking'
+                        ? markdown(context)
+                        : ProgressiveText(
+                            key: ValueKey('tool-body-${block.key}'),
+                            text: block.text,
+                            step: 4000,
+                            builder: (text) => SelectableText(
+                              text,
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                                height: 1.6,
+                              ),
+                            ),
+                          ),
+                  ),
+                ]
+              : const [],
         ),
       );
     }
@@ -2242,6 +2817,24 @@ class _TranscriptTileState extends State<TranscriptTile> {
             )
           else
             markdown(context),
+          if (block.text.isNotEmpty)
+            TextButton.icon(
+              key: ValueKey('copy-message-${block.key}'),
+              style: TextButton.styleFrom(
+                foregroundColor: muted,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                textStyle: const TextStyle(fontSize: 12),
+              ),
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: block.text));
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text(context.tr('已复制'))));
+              },
+              icon: const Icon(Icons.copy_outlined, size: 15),
+              label: Text(context.tr('复制')),
+            ),
         ],
       ),
     );
@@ -2323,20 +2916,30 @@ class _ApprovalTileState extends State<ApprovalTile> {
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
-            SelectableText(
+            Text(
               title,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
             ),
             if (description.isNotEmpty)
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 200),
-                child: SingleChildScrollView(
-                  child: SelectableText(
-                    description,
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                ),
+              Text(
+                description,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12),
               ),
+            TextButton(
+              onPressed: () => showApprovalDetails(context, params, b.text),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.unfold_more, size: 18),
+                  const SizedBox(width: 6),
+                  Flexible(child: Text(context.tr('展开完整执行内容'))),
+                ],
+              ),
+            ),
             for (final q in questions)
               Padding(
                 padding: const EdgeInsets.only(top: 12),
@@ -2423,7 +3026,7 @@ class _EncryptedImageState extends State<EncryptedImage> {
       ? widget.client.image(widget.id)
       : widget.client
             .attachment(widget.session, widget.href)
-            .then((a) => a.bytes);
+            .then((a) => a.downloadRequired ? Uint8List(0) : a.bytes);
   late Future<Uint8List> data = load();
   @override
   void didUpdateWidget(EncryptedImage oldWidget) {
@@ -2454,6 +3057,22 @@ class _EncryptedImageState extends State<EncryptedImage> {
         return const SizedBox(
           height: 120,
           child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        );
+      }
+      if ((snap.data as Uint8List).isEmpty && widget.href.isNotEmpty) {
+        return TextButton.icon(
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => AttachmentPage(
+                client: widget.client,
+                session: widget.session,
+                href: widget.href,
+              ),
+            ),
+          ),
+          icon: const Icon(Icons.download_outlined),
+          label: Text(context.tr('下载原文件')),
         );
       }
       return GestureDetector(

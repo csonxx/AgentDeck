@@ -1,6 +1,6 @@
 'use strict';
 (() => {
-  let token='', bootstrapping;
+  let token='', bootstrapping, editingApp;
   // A plain bookmarked loopback URL works in fresh tabs and after restarts.
   // The process capability stays only in memory; nothing enters the URL/storage.
   function bootstrap(){
@@ -11,7 +11,7 @@
     return bootstrapping;
   }
   const $=id=>document.getElementById(id);
-  let refreshing=false, posting=false, requests=new Map(), previousLogin='', lastState='', unlinking=false;
+  let refreshing=false, posting=false, requests=new Map(), previousLogin='', lastState='', unlinking=false, connectionNotice='';
   const states={unlinked:'尚未关联',preparing:'正在联系网关',authorizing:'等待飞书授权',failed:'关联未完成',online:'已连接 · 加密隧道在线',reconnecting:'已关联 · 正在连接网关',direct:'直连模式',unlinking:'正在解除网关关联'};
   const connectionErrors={clock_unavailable:'无法校准网关时间，请检查网络及 HTTPS 证书。',clock_authentication_rejected:'网关拒绝工作站时间校准，请查看网关认证日志。',tunnel_authentication_rejected:'网关拒绝工作站认证，请查看网关日志。',workstation_already_connected:'同一工作站已有连接，请检查是否启动了重复的本地后端。',gateway_unavailable:'网关暂时不可用，后端会自动重试。',tunnel_network_or_tls_failed:'无法建立加密隧道，请检查网络、证书及代理 WebSocket 配置。',tunnel_identity_rejected:'网关隧道身份校验失败，请查看网关日志。'};
   function note(text){$('notice').textContent=text; $('notice').hidden=!text;}
@@ -26,7 +26,10 @@
   function updateStatus(s){
     const authorizing=['preparing','authorizing'].includes(s.state);
     $('connection-state').textContent=states[s.state]||s.state;
-    $('live').textContent=s.state==='unlinking'?'正在解除关联':s.online?'工作站在线':s.linked?'网关重连中':s.mode==='direct'?'本机已连接':'本机已就绪';
+    $('gateway-summary').textContent=s.mode==='direct'?'直连模式':s.online?'已连接':s.linked?'重连中':'未关联';
+    $('gateway-summary').className=s.online?'online-text':'';
+    $('gateway-summary-hint').textContent=s.mode==='direct'?'手机直接连接本机后端':'工作站与网关的连接';
+    $('live').textContent=s.state==='unlinking'?'正在解除关联':s.online?'网关已连接':s.linked?'网关重连中':s.mode==='direct'?'直连服务运行中':'本机已就绪';
     $('live').className='badge '+(s.state==='unlinking'?'busy':s.online?'online':s.linked||authorizing?'busy':'neutral');
     $('connection-detail').hidden=!s.linked; $('link-form').hidden=s.mode!=='relay'||s.linked||authorizing;
     $('direct-note').hidden=s.mode!=='direct'; $('authorization').hidden=!authorizing;
@@ -45,6 +48,35 @@
     }else{$('authorization-link').hidden=true;}
     if(s.linked&&lastState==='authorizing')note('工作站关联成功，正在自动建立加密连接。');
     lastState=s.state;
+  }
+  function renderApps(data){
+    $('apps-online').textContent=String(data.online);
+    $('apps-paired').textContent=String(data.paired);
+    $('app-connections').textContent=data.connections+' 个实时连接';
+    $('apps-error').hidden=true;
+    const list=$('apps-list');list.replaceChildren();
+    if(!data.devices.length){
+      const empty=document.createElement('p');empty.className='hint';empty.textContent='尚未配对手机。配对后，设备名称和在线状态会显示在这里。';list.append(empty);
+    }
+    for(const device of data.devices){
+      const row=document.createElement('div');row.className='app-device';
+      const info=document.createElement('div'),name=document.createElement('strong'),meta=document.createElement('p'),badge=document.createElement('span'),actions=document.createElement('div');
+      name.textContent=device.name||'未命名 App';
+      meta.className='hint';
+      meta.textContent=device.online?'本次连接：'+date(device.connected_at):'最后连接：'+(device.last_connected?date(device.last_connected):'暂无记录');
+      badge.className='badge '+(device.online?'online':'neutral');
+      badge.textContent=device.online?'在线'+(device.connections>1?' · '+device.connections+' 个连接':''):'离线';
+      const ip=document.createElement('p');ip.className='hint';ip.textContent=device.online?'连接 IP：'+(device.ips?.join('、')||'等待网关更新'):'配对时间：'+date(device.paired_at);
+      const rename=document.createElement('button'),revoke=document.createElement('button');
+      rename.className='quiet';rename.textContent='修改名称';rename.addEventListener('click',()=>{editingApp=device;$('app-name-input').value=device.name||'';$('app-name-error').hidden=true;$('app-name-dialog').showModal();});
+      revoke.className='quiet danger';revoke.textContent='删除配对';revoke.addEventListener('click',()=>{editingApp=device;$('app-revoke-name').textContent=device.name||'未命名 App';$('app-revoke-error').hidden=true;$('app-revoke-dialog').showModal();});
+      actions.className='app-actions';actions.append(badge,rename,revoke);
+      info.append(name,meta,ip);row.append(info,actions);list.append(row);
+    }
+  }
+  function appsUnavailable(message){
+    $('apps-online').textContent='—';$('apps-paired').textContent='—';$('app-connections').textContent='状态未知';
+    $('apps-list').replaceChildren();$('apps-error').textContent=message;$('apps-error').hidden=false;
   }
   function renderPending(rows,s){
     const ids=new Set(rows.map(r=>r.grant));
@@ -75,8 +107,14 @@
   }
   async function refresh(){
     if(refreshing)return;refreshing=true;
-    try{const s=await api('status');updateStatus(s);const rows=s.online&&s.state!=='unlinking'?await api('pending'):[];renderPending(rows,s);$('refreshed').textContent='状态更新于 '+new Date().toLocaleTimeString('zh-CN',{hour12:false});}
-    catch(e){$('live').textContent='本机连接异常';$('live').className='badge neutral';note(e.name==='TimeoutError'?'连接本地后端超时，请确认后端仍在运行。':e.message);}
+    try{
+      const [status,apps]=await Promise.allSettled([api('status'),api('apps')]);
+      if(apps.status==='fulfilled')renderApps(apps.value);else appsUnavailable('暂时无法读取 App 连接状态，正在自动重试。');
+      if(status.status==='rejected')throw status.reason;
+      const s=status.value;updateStatus(s);const rows=s.online&&s.state!=='unlinking'?await api('pending'):[];renderPending(rows,s);$('refreshed').textContent='状态更新于 '+new Date().toLocaleTimeString('zh-CN',{hour12:false});
+      if(connectionNotice && $('notice').textContent===connectionNotice)note('');connectionNotice='';
+    }
+    catch(e){$('live').textContent='本机连接异常';$('live').className='badge neutral';$('gateway-summary').textContent='状态未知';$('gateway-summary').className='';connectionNotice=e.name==='TimeoutError'?'连接本地后端超时，请确认后端仍在运行。':e.message;note(connectionNotice);}
     finally{refreshing=false;}
   }
   $('link-form').addEventListener('submit',async event=>{
@@ -95,5 +133,17 @@
     finally{unlinking=false;$('unlink-approve').disabled=false;$('unlink-cancel').disabled=false;$('unlink').disabled=false;}
   });
   $('refresh').addEventListener('click',refresh);
+  $('app-name-cancel').addEventListener('click',()=>$('app-name-dialog').close());
+  $('app-revoke-cancel').addEventListener('click',()=>$('app-revoke-dialog').close());
+  $('app-name-form').addEventListener('submit',async event=>{
+    event.preventDefault();const button=event.submitter;button.disabled=true;
+    try{await api('apps/name',{id:editingApp.id,name:$('app-name-input').value.trim()});$('app-name-dialog').close();note('设备名称已更新。');await refresh();}
+    catch(e){$('app-name-error').textContent=e.message;$('app-name-error').hidden=false;}finally{button.disabled=false;}
+  });
+  $('app-revoke-confirm').addEventListener('click',async()=>{
+    const button=$('app-revoke-confirm');button.disabled=true;
+    try{await api('apps/revoke',{id:editingApp.id});$('app-revoke-dialog').close();note('配对已删除，设备访问已撤销。');await refresh();}
+    catch(e){$('app-revoke-error').textContent=e.message;$('app-revoke-error').hidden=false;}finally{button.disabled=false;}
+  });
   refresh();setInterval(refresh,2000);
 })();

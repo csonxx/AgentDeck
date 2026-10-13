@@ -179,8 +179,10 @@ func TestRuntimeApprovalAndStop(t *testing.T) {
 			if e = m.Send(ss.ID, "pause", UUID()); e != nil {
 				t.Fatal(e)
 			}
-			if e = m.Send(ss.ID, "duplicate active turn", UUID()); e == nil {
-				t.Fatal("concurrent turn accepted")
+			if e = m.Send(ss.ID, "duplicate active turn", UUID()); e == nil && a != "claude" {
+				t.Fatal("concurrent Codex turn accepted")
+			} else if e != nil && a == "claude" {
+				t.Fatal("native streaming append rejected", e)
 			}
 			if e = m.Interrupt(ss.ID); e != nil {
 				t.Fatal(e)

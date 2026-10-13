@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'usage.dart';
+import 'goals.dart';
+import 'app_lock.dart';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
@@ -13,9 +16,79 @@ import 'model.dart';
 import 'vault.dart';
 import 'agents.dart';
 import 'input.dart';
+import 'download_manager.dart';
+import 'app_update.dart';
+
+class AgentRequestException extends HttpException {
+  final bool notSent;
+  AgentRequestException(super.message, {this.notSent = false});
+}
 
 class AgentClient extends ChangeNotifier {
   final DeviceVault vault;
+  String deviceName = 'AgentDeck ${Platform.operatingSystem}';
+  bool deviceNamePending = false;
+  Future<void> _acceptDeviceName(String? name) async {
+    if (name == null || name.isEmpty || deviceNamePending) return;
+    deviceName = name;
+    await vault.saveDeviceName({'name': name, 'pending': false});
+    notifyListeners();
+  }
+
+  Future<void> renameDevice(String name) async {
+    name = name.trim();
+    if (name.isEmpty ||
+        name.runes.length > 80 ||
+        RegExp(r'[\x00-\x1f\x7f]').hasMatch(name)) {
+      throw const FormatException('设备名称无效，请输入 1–80 个字符');
+    }
+    await vault.saveDeviceName({'name': name, 'pending': true});
+    deviceName = name;
+    deviceNamePending = true;
+    notifyListeners();
+    if (!connected) return;
+    final result = await request({'method': 'rename_device', 'text': name});
+    deviceNamePending = false;
+    await _acceptDeviceName((result as Map)['name'] as String);
+  }
+
+  AppUpdater? _updates;
+  AppUpdater get updates => _updates ??= AppUpdater(
+    vault,
+    gateway: () async {
+      if (device?['relay'] != null) return device!['url'] as String;
+      final account = await vault.loadGatewayAccount();
+      return account?['url'] as String? ?? defaultUpdateGateway;
+    },
+    createHttp: () => device?['relay'] != null
+        ? _transport(
+            device!['tls_trust'] as String? ?? 'pin',
+            device!['pin'] as String,
+          )
+        : HttpClient(context: trustedRoots),
+  );
+  DownloadManager? _downloads;
+  DownloadManager get downloads => _downloads ??= DownloadManager(this);
+  int _downloadLeases = 0;
+  bool _backgrounded = false;
+  void retainDownloadConnection() {
+    _downloadLeases++;
+    if (_suspended) {
+      final background = _backgrounded;
+      unawaited(
+        resume().then((_) {
+          _backgrounded = background;
+        }),
+      );
+    }
+  }
+
+  void releaseDownloadConnection() {
+    if (_downloadLeases > 0) _downloadLeases--;
+    if (_backgrounded && _downloadLeases == 0) suspend();
+  }
+
+  late final AppLockController appLock = AppLockController(vault);
   // Tests inject a local CA for the TLS-terminating proxy. Production relies on
   // platform roots and never accepts invalid certificates in system mode.
   @visibleForTesting
@@ -26,6 +99,71 @@ class AgentClient extends ChangeNotifier {
       clock = clock ?? ProtocolClock();
   Map<String, dynamic>? device;
   List<AgentSession> sessions = [];
+  List<AgentGoal> goals = [];
+  String goalError = '';
+  bool _goalsLoading = false;
+  Timer? _goalTimer;
+  Future<void> refreshGoals() async {
+    if (!connected || _goalsLoading) return;
+    _goalsLoading = true;
+    final generation = _generation;
+    try {
+      final value = await request({'method': 'goal_list'});
+      if (generation != _generation || _closed) return;
+      goals = (value as List)
+          .map((v) => AgentGoal(Map<String, dynamic>.from(v as Map)))
+          .toList();
+      goalError = '';
+    } catch (e) {
+      if (generation == _generation && !_closed) goalError = e.toString();
+    } finally {
+      _goalsLoading = false;
+      if (!_closed) notifyListeners();
+    }
+  }
+
+  Future<void> changeGoal(AgentGoal goal, String action) async {
+    try {
+      await request({
+        'method': 'goal_change',
+        'session': goal.session,
+        'goal_version': goal.version,
+        'goal_action': action,
+      });
+    } finally {
+      await refreshGoals();
+    }
+  }
+
+  final Set<String> submittedInputs = {};
+  final Map<String, String> submittedMessageIDs = {};
+  String? consumeSubmittedMessageID(String id) =>
+      submittedMessageIDs.remove(id);
+  final Set<String> queuedInputs = {};
+  bool consumeQueuedInput(String id) => queuedInputs.remove(id);
+  bool consumeSubmittedInput(String id) => submittedInputs.remove(id);
+  void _inputResult(String? id, dynamic result) {
+    if (id != null && result is Map && result['delivery'] == 'queued') {
+      queuedInputs.add(id);
+      if (queuedInputs.length > 100) queuedInputs.remove(queuedInputs.first);
+      return;
+    }
+    if (id == null || result is! Map || result['delivery'] != 'submitted') {
+      return;
+    }
+    submittedInputs.add(id);
+    if (result['message_id'] case final String nativeID
+        when nativeID.isNotEmpty) {
+      submittedMessageIDs[id] = nativeID;
+      if (submittedMessageIDs.length > 100) {
+        submittedMessageIDs.remove(submittedMessageIDs.keys.first);
+      }
+    }
+    if (submittedInputs.length > 100) {
+      submittedInputs.remove(submittedInputs.first);
+    }
+  }
+
   final Map<String, List<QueuedMessage>> queues = {};
   final Map<String, String> queueErrors = {};
   bool codexDesktop = false;
@@ -119,7 +257,11 @@ class AgentClient extends ChangeNotifier {
     await loadProjectLayout();
     await loadAgentVisibility();
     try {
+      final preference = await vault.loadDeviceName();
+      deviceName = preference?['name'] as String? ?? deviceName;
+      deviceNamePending = preference?['pending'] == true;
       device = await vault.loadDevice();
+      unawaited(downloads.restore());
       if (device != null) {
         final cache = await vault.readCache();
         sessions = (cache['sessions'] as List? ?? [])
@@ -142,6 +284,7 @@ class AgentClient extends ChangeNotifier {
     } catch (_) {
       error = '无法读取本机安全存储，请重试或重新配对';
     }
+    unawaited(updates.initialize());
     notifyListeners();
   }
 
@@ -250,7 +393,7 @@ class AgentClient extends ChangeNotifier {
         'pair-request/$invite',
         0,
         0,
-        {'token': b.token, 'name': 'AgentDeck ${Platform.operatingSystem}'},
+        {'token': b.token, 'name': deviceName},
       );
       final response = await _post(h, b.url, relayPath(b.relay, 'pair'), {
         'invite': invite,
@@ -264,6 +407,7 @@ class AgentClient extends ChangeNotifier {
       }
       ++_generation;
       _retry?.cancel();
+      _goalTimer?.cancel();
       _heartbeat?.cancel();
       _cacheTimer?.cancel();
       _cacheTimer = null;
@@ -273,6 +417,7 @@ class AgentClient extends ChangeNotifier {
       connected = false;
       await _saveQueue;
       await _layoutSaveQueue;
+      await _downloads?.reset();
       await vault.clear(keepGateway: true);
       projectLayout = ProjectLayout();
       _savedProjectLayout = projectLayout;
@@ -298,11 +443,19 @@ class AgentClient extends ChangeNotifier {
   }
 
   Future<void> connect() async {
+    if (_closed) return;
+    if (device?['revoked'] == true) {
+      state = '需要重新配对';
+      error = '设备配对已被工作站删除，请重新配对';
+      notifyListeners();
+      return;
+    }
     if (device == null || _closed || demo || _connecting || _suspended) return;
     _connecting = true;
     _retry?.cancel();
     final generation = ++_generation;
     connected = false;
+    _goalTimer?.cancel();
     _heartbeat?.cancel();
     state = '正在连接';
     error = '';
@@ -347,6 +500,7 @@ class AgentClient extends ChangeNotifier {
       if (welcome['challenge'] != challenge || welcome['clock_version'] != 1) {
         throw const FormatException('Connection challenge mismatch');
       }
+      await _acceptDeviceName(welcome['device_name'] as String?);
       _salt = base64Decode(welcome['salt'] as String);
       _rotation = (welcome['rotation_ms'] as num).toInt();
       if (_rotation < 1000 || _salt.length != 32) {
@@ -382,9 +536,18 @@ class AgentClient extends ChangeNotifier {
       notifyListeners();
       ws.listen(
         (data) {
+          // Validate expiry against arrival, not time spent decrypting earlier
+          // frames in our serial queue (large attachments can take seconds).
+          final arrivalEpoch = epoch;
           _receiveQueue = _receiveQueue
-              .then((_) => _receive(data, generation))
-              .catchError((Object _) {
+              .then((_) => _receive(data, generation, arrivalEpoch))
+              .catchError((Object failure) {
+                assert(() {
+                  debugPrint(
+                    'AgentDeck receive failed: ${failure.runtimeType}',
+                  );
+                  return true;
+                }());
                 if (generation == _generation) _lost();
               });
         },
@@ -392,14 +555,50 @@ class AgentClient extends ChangeNotifier {
           if (generation == _generation) _lost();
         },
         onDone: () {
-          if (generation == _generation) _lost();
+          if (generation == _generation) {
+            _lost();
+            if (ws.closeCode == 4003) {
+              _retry?.cancel();
+              device?['revoked'] = true;
+              state = '需要重新配对';
+              error = '设备配对已被工作站删除，请重新配对';
+              if (device != null) {
+                unawaited(vault.saveDevice(device!).catchError((Object _) {}));
+              }
+              notifyListeners();
+            }
+          }
         },
       );
+      _goalTimer?.cancel();
       _heartbeat?.cancel();
+      var heartbeatPending = false;
       _heartbeat = Timer.periodic(const Duration(seconds: 20), (_) {
-        send({'method': 'ping'}).catchError((Object _) {});
+        if (heartbeatPending) return;
+        heartbeatPending = true;
+        unawaited(
+          request({'method': 'ping'}, timeout: const Duration(seconds: 45))
+              .catchError((Object _) {
+                if (generation == _generation) _lost();
+                return null;
+              })
+              .whenComplete(() => heartbeatPending = false),
+        );
       });
+      unawaited(refreshGoals());
+      _goalTimer?.cancel();
+      _goalTimer = Timer.periodic(
+        const Duration(seconds: 5),
+        (_) => unawaited(refreshGoals()),
+      );
       if (selected.isNotEmpty) await watch(selected);
+      if (deviceNamePending) {
+        unawaited(
+          renameDevice(deviceName).catchError((Object _) {
+            notifyListeners();
+          }),
+        );
+      }
     } catch (e) {
       if (generation == _generation) {
         error = e is HandshakeException
@@ -425,6 +624,8 @@ class AgentClient extends ChangeNotifier {
   );
 
   void suspend() {
+    _backgrounded = true;
+    if (_downloadLeases > 0) return;
     if (_suspended || _closed) return;
     _suspended = true;
     _lost();
@@ -434,6 +635,7 @@ class AgentClient extends ChangeNotifier {
   }
 
   Future<void> resume() async {
+    _backgrounded = false;
     if (!_suspended || _closed) return;
     _suspended = false;
     // A cancelled handshake must finish before a fresh one can start.
@@ -448,12 +650,15 @@ class AgentClient extends ChangeNotifier {
     ++_generation;
     connected = false;
     state = '连接中断 · 自动重连';
+    _goalTimer?.cancel();
     _heartbeat?.cancel();
     _socket?.close();
     _socket = null;
     _retry?.cancel();
     final delay = min(30, 1 << min(_attempt++, 5));
-    if (!_suspended) _retry = Timer(Duration(seconds: delay), connect);
+    if (!_suspended && device != null) {
+      _retry = Timer(Duration(seconds: delay), connect);
+    }
     notifyListeners();
     for (final c in _media.values) {
       if (!c.isCompleted) c.completeError(const HttpException('连接中断'));
@@ -485,14 +690,21 @@ class AgentClient extends ChangeNotifier {
     return task;
   }
 
-  Future<void> _receive(dynamic raw, int generation) async {
+  Future<void> _receive(dynamic raw, int generation, int arrivalEpoch) async {
     if (generation != _generation) return;
     if (raw is! String || raw.length > 24 << 20) {
       throw const FormatException('Invalid frame');
     }
     final b = Map<String, dynamic>.from(jsonDecode(raw) as Map);
     final ep = b['epoch'] as int;
-    if (b['seq'] != _received + 1 || (ep - epoch).abs() > 1) {
+    if (b['seq'] != _received + 1 || (ep - arrivalEpoch).abs() > 1) {
+      assert(() {
+        debugPrint(
+          'AgentDeck frame rejected: sequence=${b['seq']}, '
+          'expected=${_received + 1}, epoch_delta=${ep - arrivalEpoch}',
+        );
+        return true;
+      }());
       throw const FormatException('Replay or expired frame');
     }
     final m = await WireCrypto.open(
@@ -503,6 +715,8 @@ class AgentClient extends ChangeNotifier {
     if (generation != _generation) return;
     _received = b['seq'] as int;
     switch (m['type']) {
+      case 'device':
+        await _acceptDeviceName(m['name'] as String?);
       case 'sessions':
         codexDesktop = m['codex_desktop'] == true;
         _updateAgents(m);
@@ -514,6 +728,7 @@ class AgentClient extends ChangeNotifier {
               (e) => AgentSession.fromJson(Map<String, dynamic>.from(e as Map)),
             )
             .toList();
+        _requests.remove(m['id'])?.complete(m);
       case 'agents':
         _updateAgents(m);
       case 'queue':
@@ -548,6 +763,8 @@ class AgentClient extends ChangeNotifier {
         final t = transcripts.putIfAbsent(id, Transcript.new);
         for (final ev in m['events'] as List) {
           final event = Map<String, dynamic>.from(ev as Map);
+          final seq = (event['seq'] as num).toInt();
+          if (seq > t.latestLiveCursor) t.latestLiveCursor = seq;
           if (!t.detached || t.containsEvent(event)) t.add(event);
         }
       case 'media':
@@ -561,12 +778,19 @@ class AgentClient extends ChangeNotifier {
         }
         images[mediaID] = bytes;
         _media.remove(m['id'])?.complete(bytes);
+      case 'pong':
+        _requests.remove(m['id'])?.complete();
       case 'result':
         _requests.remove(m['id'])?.complete(m['result']);
       case 'error':
         _requests
             .remove(m['id'])
-            ?.completeError(HttpException(m['message'] as String));
+            ?.completeError(
+              AgentRequestException(
+                m['message'] as String,
+                notSent: m['not_sent'] == true,
+              ),
+            );
         error = m['message'] as String;
         _media
             .remove(m['id'])
@@ -583,16 +807,56 @@ class AgentClient extends ChangeNotifier {
     }
   }
 
-  Future<dynamic> request(Map<String, dynamic> data) async {
-    final id = List.generate(
-      16,
-      (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
-    ).join();
+  Future<AccountUsage> accountUsage(String agent) async => AccountUsage(
+    Map<String, dynamic>.from(
+      await request({'method': 'usage', 'agent': agent}),
+    ),
+  );
+
+  static String requestID() => List.generate(
+    16,
+    (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
+  ).join();
+
+  Future<void>? _sessionsRefresh;
+  Future<void> refreshSessions() {
+    return _sessionsRefresh ??= _refreshSessions().whenComplete(() {
+      _sessionsRefresh = null;
+    });
+  }
+
+  Future<void> _refreshSessions() async {
+    if (!connected) {
+      if (device == null) throw const HttpException('请先连接工作站');
+      await (() async {
+        while (_connecting && !connected && !_closed && !_suspended) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        if (!connected) await connect();
+      })().timeout(const Duration(seconds: 20));
+    }
+    if (!connected) throw const HttpException('连接失败，请检查域名、网络或设备授权');
+    try {
+      await request({
+        'method': 'sessions',
+      }, timeout: const Duration(seconds: 12));
+    } on TimeoutException {
+      _lost();
+      rethrow;
+    }
+    unawaited(refreshGoals());
+  }
+
+  Future<dynamic> request(
+    Map<String, dynamic> data, {
+    Duration timeout = const Duration(seconds: 70),
+  }) async {
+    final id = data['id'] as String? ?? requestID();
     final result = Completer<dynamic>();
     _requests[id] = result;
     try {
       await send({...data, 'id': id});
-      return await result.future.timeout(const Duration(seconds: 70));
+      return await result.future.timeout(timeout);
     } finally {
       _requests.remove(id);
     }
@@ -615,26 +879,39 @@ class AgentClient extends ChangeNotifier {
     return session;
   }
 
-  Future<void> sendPrompt(String session, String text) async {
-    await request({'method': 'send', 'session': session, 'text': text});
+  Future<void> sendPrompt(
+    String session,
+    String text, {
+    String? requestId,
+  }) async {
+    final result = await request({
+      'method': 'send',
+      'session': session,
+      'text': text,
+      'id': ?requestId,
+    });
+    _inputResult(requestId, result);
   }
 
   Future<void> sendInput(
     String session,
     String text,
     TurnOptions options,
-    List<String> files,
-  ) async {
+    List<String> files, {
+    String? requestId,
+  }) async {
     if (options.inherited && files.isEmpty) {
-      return sendPrompt(session, text);
+      return sendPrompt(session, text, requestId: requestId);
     }
-    await request({
+    final result = await request({
       'method': 'send',
       'session': session,
       'text': text,
       ...options.toJson(),
       'attachments': files,
+      'id': ?requestId,
     });
+    _inputResult(requestId, result);
   }
 
   Future<void> sendDelivery(
@@ -642,17 +919,22 @@ class AgentClient extends ChangeNotifier {
     String text,
     TurnOptions options,
     List<String> files,
-    String delivery,
-  ) async {
-    if (delivery == 'send') return sendInput(session, text, options, files);
-    await request({
+    String delivery, {
+    String? requestId,
+  }) async {
+    if (delivery == 'send') {
+      return sendInput(session, text, options, files, requestId: requestId);
+    }
+    final result = await request({
       'method': 'send',
       'session': session,
       'text': text,
       ...options.toJson(),
       'attachments': files,
       'delivery': delivery,
+      'id': ?requestId,
     });
+    _inputResult(requestId, result);
   }
 
   Future<List<QueuedMessage>> queue(String session) async {
@@ -726,6 +1008,13 @@ class AgentClient extends ChangeNotifier {
 
   String _turnKey(String session) =>
       '${device?['device'] ?? 'unpaired'}/$session';
+  Future<SessionGeneration> sessionGeneration(String session) async =>
+      SessionGeneration.fromJson(
+        Map<String, dynamic>.from(
+          await request({'method': 'session_settings', 'session': session})
+              as Map,
+        ),
+      );
   Future<TurnOptions> loadTurnOptions(String session) async {
     final v = await vault.loadGeneration();
     return TurnOptions.fromJson(
@@ -884,7 +1173,13 @@ class AgentClient extends ChangeNotifier {
 
   Future<void> loadOlder(String id) async {
     final t = transcripts[id];
-    if (t == null || !t.hasMore || t.loadingOlder || !connected) return;
+    if (t == null ||
+        !t.hasMore ||
+        t.loadingOlder ||
+        t.loadingNewer ||
+        !connected) {
+      return;
+    }
     t.loadingOlder = true;
     notifyListeners();
     try {
@@ -903,10 +1198,53 @@ class AgentClient extends ChangeNotifier {
     }
   }
 
+  Future<void> loadNewer(String id) async {
+    final t = transcripts[id];
+    if (t == null ||
+        !t.detached ||
+        t.blocks.isEmpty ||
+        t.loadingOlder ||
+        t.loadingNewer ||
+        !connected) {
+      return;
+    }
+    t.loadingNewer = true;
+    notifyListeners();
+    try {
+      final page = await request({
+        'method': 'history_after',
+        'session': id,
+        'after': t.blocks.last.first,
+      });
+      if (identical(transcripts[id], t)) {
+        t.history(Map<String, dynamic>.from(page as Map), newer: true);
+        _scheduleCache();
+      }
+    } finally {
+      t.loadingNewer = false;
+      if (!_closed) notifyListeners();
+    }
+  }
+
   Future<void> unwatch(String id) async {
     if (selected != id) return;
     selected = '';
     if (connected) await send({'method': 'watch', 'session': ''});
+  }
+
+  // A document picker may return before the resumed lifecycle and handshake.
+  HttpClient attachmentHttpClient() => HttpClient(context: trustedRoots);
+
+  Future<void> prepareAttachmentTransfer() async {
+    if (connected) return;
+    if (device == null) throw const HttpException('当前未连接工作站');
+    await (() async {
+      while (_suspended && !_closed) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      if (_closed) throw const HttpException('当前未连接工作站');
+      if (!connected) await refreshSessions();
+    })().timeout(const Duration(seconds: 30));
   }
 
   Future<void> reload(String id) async {
@@ -985,16 +1323,26 @@ class AgentClient extends ChangeNotifier {
       );
     }
     if (uri.scheme == 'data') {
-      if (href.length > 12 << 20) throw const FormatException('图片超过 8 MiB');
+      if (href.length > 12 << 20) {
+        return SessionAttachment(
+          name: 'image',
+          mime: uri.data!.mimeType,
+          bytes: Uint8List(0),
+          size: -1,
+          downloadRequired: true,
+        );
+      }
       final data = uri.data!;
       final bytes = data.contentAsBytes();
-      if (!data.mimeType.startsWith('image/') || bytes.length > 8 << 20) {
+      if (!data.mimeType.startsWith('image/')) {
         throw const FormatException('图片超过 8 MiB');
       }
       return SessionAttachment(
         name: '会话图片',
         generatedName: true,
         mime: data.mimeType,
+        size: bytes.length,
+        downloadRequired: bytes.length > 8 << 20,
         bytes: bytes,
       );
     }
@@ -1022,13 +1370,30 @@ class AgentClient extends ChangeNotifier {
             target = target.resolve(location);
             continue;
           }
-          if (res.statusCode != 200 || res.contentLength > 8 << 20) {
+          if (res.statusCode != 200) {
             throw const HttpException('图片加载失败');
+          }
+          final remoteMime =
+              res.headers.contentType?.mimeType ?? 'application/octet-stream';
+          if (res.contentLength > 8 << 20) {
+            return SessionAttachment(
+              name: target.pathSegments.lastOrNull ?? 'attachment',
+              mime: remoteMime,
+              bytes: Uint8List(0),
+              size: res.contentLength,
+              downloadRequired: true,
+            );
           }
           final bytes = BytesBuilder(copy: false);
           await for (final chunk in res.timeout(const Duration(seconds: 12))) {
             if (bytes.length + chunk.length > 8 << 20) {
-              throw const FormatException('图片超过 8 MiB');
+              return SessionAttachment(
+                name: target.pathSegments.lastOrNull ?? 'attachment',
+                mime: remoteMime,
+                bytes: Uint8List(0),
+                size: -1,
+                downloadRequired: true,
+              );
             }
             bytes.add(chunk);
           }
@@ -1058,8 +1423,10 @@ class AgentClient extends ChangeNotifier {
     return SessionAttachment(
       name: result['name'] as String,
       mime: result['mime'] as String,
-      bytes: Uint8List.fromList(base64Decode(result['bytes'] as String)),
+      bytes: Uint8List.fromList(base64Decode(result['bytes'] as String? ?? '')),
       line: (result['line'] as num?)?.toInt() ?? 0,
+      size: (result['size'] as num?)?.toInt() ?? 0,
+      downloadRequired: result['download_required'] == true,
       truncated: result['truncated'] == true,
     );
   }
@@ -1152,6 +1519,7 @@ class AgentClient extends ChangeNotifier {
   Future<void> forget() async {
     ++_generation;
     _retry?.cancel();
+    _goalTimer?.cancel();
     _heartbeat?.cancel();
     _cacheTimer?.cancel();
     _cacheTimer = null;
@@ -1160,6 +1528,7 @@ class AgentClient extends ChangeNotifier {
     _http?.close(force: true);
     await _saveQueue;
     await _layoutSaveQueue;
+    await _downloads?.reset();
     await vault.clear();
     projectLayout = ProjectLayout();
     _savedProjectLayout = projectLayout;
@@ -1168,6 +1537,8 @@ class AgentClient extends ChangeNotifier {
     connected = false;
     selected = '';
     sessions = [];
+    goals = [];
+    goalError = '';
     transcripts.clear();
     queues.clear();
     queueErrors.clear();
@@ -1230,10 +1601,14 @@ class AgentClient extends ChangeNotifier {
 
   @override
   void dispose() {
+    _updates?.dispose();
     _closed = true;
+    _downloads?.dispose();
+    appLock.dispose();
     _notifyTimer?.cancel();
     ++_generation;
     _retry?.cancel();
+    _goalTimer?.cancel();
     _heartbeat?.cancel();
     _cacheTimer?.cancel();
     _socket?.close();

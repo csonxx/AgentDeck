@@ -91,7 +91,11 @@ class OperableClient extends AgentClient {
   }
 
   @override
-  Future<void> sendPrompt(String session, String text) async {
+  Future<void> sendPrompt(
+    String session,
+    String text, {
+    String? requestId,
+  }) async {
     sent = '$session:$text';
     transcripts[session]!.add({
       'id': 'reply',
@@ -109,7 +113,10 @@ class AttachmentGuardClient extends OperableClient {
   int uploads = 0;
   final capabilities = Completer<Map<String, dynamic>>();
   @override
-  Future<dynamic> request(Map<String, dynamic> data) async {
+  Future<dynamic> request(
+    Map<String, dynamic> data, {
+    Duration timeout = const Duration(seconds: 70),
+  }) async {
     if (data['method'] == 'input_capabilities') return capabilities.future;
     return null;
   }
@@ -130,7 +137,10 @@ class PagingClient extends OperableClient {
   final page = Completer<Map<String, dynamic>>();
   int requestedBefore = 0;
   @override
-  Future<dynamic> request(Map<String, dynamic> data) {
+  Future<dynamic> request(
+    Map<String, dynamic> data, {
+    Duration timeout = const Duration(seconds: 70),
+  }) {
     requestedBefore = data['before'] as int;
     return page.future;
   }
@@ -214,19 +224,35 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final list = find.byType(ListView);
+    final list = find.byKey(const ValueKey('transcript-a-0'));
     await tester.drag(list, const Offset(0, 300));
     await tester.pumpAndSettle();
     final state = tester.state<ScrollableState>(
       find.descendant(of: list, matching: find.byType(Scrollable)).first,
     );
     state.position.jumpTo(state.position.maxScrollExtent);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('加载更早消息'));
+    // Reaching the edge now starts paging immediately; its response is gated.
+    await tester.pump();
+    for (var i = 0; c.requestedBefore == 0 && i < 20; i++) {
+      await tester.drag(list, const Offset(0, 600));
+      await tester.pump();
+    }
     await tester.pump();
     expect(c.requestedBefore, 61);
-    expect(find.text('正在加载…'), findsOneWidget);
-    final before = state.position.pixels;
+    expect(t.loadingOlder, isTrue);
+    await tester.pump(const Duration(seconds: 1));
+    final visible = find
+        .textContaining('Historical message', findRichText: true)
+        .evaluate()
+        .where((e) {
+          final r = tester.getRect(find.byWidget(e.widget));
+          return r.overlaps(tester.getRect(list));
+        })
+        .first;
+    final label = visible.widget is Text
+        ? (visible.widget as Text).data!
+        : (visible.widget as RichText).text.toPlainText();
+    final before = tester.getTopLeft(find.text(label, findRichText: true)).dy;
     c.page.complete({
       'events': [for (var i = 21; i <= 60; i++) event(i)],
       'cursor': 100,
@@ -236,10 +262,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(t.blocks.length, 80);
     expect(t.blocks.first.text, 'Historical message 21');
-    expect(state.position.pixels, closeTo(before, 1));
+    expect(
+      tester.getTopLeft(find.text(label, findRichText: true)).dy,
+      closeTo(before, 1),
+    );
     await tester.tap(find.byTooltip('回到最新消息'));
     await tester.pumpAndSettle();
-    expect(state.position.pixels, 0);
+    expect(state.position.extentBefore, 0);
     expect(find.text('Historical message 100'), findsOneWidget);
     // Allow the periodic cache task to flush before widget-test teardown.
     await tester.pump(const Duration(seconds: 6));
@@ -653,7 +682,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      final list = find.byType(ListView);
+      final list = find.byKey(const ValueKey('transcript-a-0'));
       final scrollable = find
           .descendant(of: list, matching: find.byType(Scrollable))
           .first;
@@ -808,6 +837,9 @@ void main() {
     }
     await tester.ensureVisible(find.text('构建一个更好的移动会话体验'));
     await tester.tap(find.text('构建一个更好的移动会话体验'));
+    await tester.pumpAndSettle();
+    expect(find.text('思考摘要'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('all-activities-toggle')));
     await tester.pumpAndSettle();
     expect(find.text('思考摘要'), findsOneWidget);
     await tester.ensureVisible(find.text('工具输出'));

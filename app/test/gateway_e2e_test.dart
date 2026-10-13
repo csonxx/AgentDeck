@@ -1,12 +1,15 @@
 // Real Go gateway + outbound S-LOCAL CLI tunnel + native Dart client. Only the
 // external Feishu identity provider and human approval are simulated fixtures.
 import 'dart:convert';
+import 'package:crypto/crypto.dart';
+import 'package:agentdeck/core/download.dart';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:agentdeck/core/input.dart';
 import 'dart:ui' as ui;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:agentdeck/core/client.dart';
+import 'package:agentdeck/core/model.dart';
 import 'package:agentdeck/core/clock.dart';
 import 'package:agentdeck/core/gateway.dart';
 import 'package:agentdeck/core/relay.dart';
@@ -14,6 +17,14 @@ import 'package:agentdeck/core/transport.dart';
 import 'package:agentdeck/core/vault.dart';
 
 class GatewayVault extends DeviceVault {
+  List<dynamic> downloads = [];
+  @override
+  Future<List<dynamic>> loadDownloads() async => downloads;
+  @override
+  Future<void> saveDownloads(List<dynamic> value) async {
+    downloads = value;
+  }
+
   Map<String, dynamic>? value;
   Map<String, dynamic> cache = {};
   Map<String, dynamic>? layout;
@@ -140,6 +151,12 @@ void main() {
         lessThan(10000),
       );
       await until(() => c.sessions.any((s) => s.id == 'e2e-session'));
+      expect(
+        await c.request({
+          'method': 'ping',
+        }, timeout: const Duration(seconds: 5)),
+        isNull,
+      );
       await until(
         () =>
             c.sessions.any((s) => s.id == 'bridge-codex') &&
@@ -158,7 +175,11 @@ void main() {
       await c.sendInput(
         mobileSession.id,
         'generation-check',
-        const TurnOptions(model: 'fixture-model', effort: 'high'),
+        const TurnOptions(
+          model: 'fixture-model',
+          effort: 'high',
+          speed: 'fast',
+        ),
         [upload],
       );
       await until(
@@ -239,6 +260,26 @@ void main() {
       expect(paged.detached, true);
       await Future<void>.delayed(const Duration(milliseconds: 700));
       expect(paged.blocks.length, 40);
+      var lastIndex = 39;
+      while (paged.detached) {
+        await c.loadNewer('paged-session');
+        final nextIndex = int.parse(paged.blocks.last.text.split(' ').last);
+        expect(nextIndex, greaterThan(lastIndex));
+        expect(paged.blocks.length, lessThanOrEqualTo(Transcript.maxBlocks));
+        expect(
+          paged.blocks.map((b) => b.key).toSet().length,
+          paged.blocks.length,
+        );
+        lastIndex = nextIndex;
+      }
+      expect(lastIndex, 239);
+      expect(paged.blocks.length, 200);
+      expect(paged.hasMore, true);
+      await c.loadOlder('paged-session');
+      expect(paged.detached, true);
+      await c.loadNewer('paged-session');
+      expect(paged.blocks.last.text, 'Paged message 239');
+      expect(paged.detached, false);
       await c.reload('paged-session');
       await until(
         () => c.transcripts['paged-session']!.blocks.any(
@@ -260,6 +301,49 @@ void main() {
       expect(frame.image.width, greaterThan(0));
       frame.image.dispose();
       codec.dispose();
+      final large = await c.attachment('e2e-session', 'large.bin');
+      expect(large.downloadRequired, isTrue);
+      expect(large.bytes, isEmpty);
+      expect(large.size, 9 << 20);
+      final digestOutput = <Digest>[];
+      final hash = sha256.startChunkedConversion(
+        ChunkedConversionSink<Digest>.withCallback(digestOutput.addAll),
+      );
+      var downloaded = 0;
+      await c.downloadAttachment(
+        'e2e-session',
+        'large.bin',
+        control: DownloadControl(),
+        expectedSize: large.size,
+        write: (chunk) async {
+          expect(chunk.length, lessThanOrEqualTo(512 << 10));
+          hash.add(chunk);
+        },
+        progress: (done, total) {
+          downloaded = done;
+          expect(total, large.size);
+        },
+      );
+      hash.close();
+      expect(downloaded, large.size);
+      expect(
+        digestOutput.single.toString(),
+        sha256.convert(List.generate(9 << 20, (i) => i % 256)).toString(),
+      );
+      // Cancel after one chunk: later reads stop and the descriptor is closed.
+      final cancelDownload = DownloadControl();
+      await expectLater(
+        c.downloadAttachment(
+          'e2e-session',
+          'large.bin',
+          control: cancelDownload,
+          write: (_) async {
+            cancelDownload.cancelled = true;
+          },
+          progress: (_, _) {},
+        ),
+        throwsA(isA<DownloadCancelled>()),
+      );
       final linked = await c.attachment('e2e-session', 'linked.md:2');
       expect(linked.line, 2);
       expect(utf8.decode(linked.bytes), contains('Encrypted linked text'));
@@ -286,7 +370,15 @@ void main() {
         throwsA(isA<HttpException>()),
       );
       final epoch = c.epoch;
-      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      await Future<void>.delayed(
+        Duration(
+          milliseconds:
+              int.parse(
+                Platform.environment['AGENTDECK_E2E_ROTATION_MS'] ?? '1000',
+              ) +
+              200,
+        ),
+      );
       expect(c.epoch, greaterThan(epoch));
       await c.send({'method': 'ping'});
       final before = c.transcripts['e2e-session']!.cursor;
@@ -359,6 +451,6 @@ void main() {
     skip: dir == null
         ? 'Run scripts/verify.sh for real gateway integration'
         : false,
-    timeout: const Timeout(Duration(seconds: 90)),
+    timeout: const Timeout(Duration(seconds: 180)),
   );
 }

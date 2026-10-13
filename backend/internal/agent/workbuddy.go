@@ -398,6 +398,9 @@ func (m *Manager) Hydrate(id string) error {
 	if m.Store.Get("sessions", id, &s) != nil {
 		return nil
 	}
+	if s.Source == "claude-desktop" && m.LoadHistory != nil {
+		return m.LoadHistory(id)
+	}
 	if s.Source != "acp" {
 		return nil
 	}
