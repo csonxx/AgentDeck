@@ -781,3 +781,21 @@ The README now covers installation, gateway/USB connection, pairing, agent setup
 提交前重新运行 `scripts/verify.sh`：Go race/vet、Flutter analysis、直连 HTTPS、TLS 代理、加密网关集成和 221 项 App 回归全部通过，2 项跳过。发布 APK 的冻结产品源码校验仍匹配；文档变更不改变现有包哈希。GitLab `origin` 保持不变，新增 `github` 远程用于同步原仓库；使用正常 main 分支推送，不强推。源代码同步不表示新网关已经部署，双通道公网更新链路仍需独立发布验收。
 
 A fresh `scripts/verify.sh` passed Go race/vet, Flutter analysis, direct HTTPS, TLS proxy, encrypted gateway integration and 221 App regression tests (2 skipped). Frozen product sources still match the published APKs. GitLab remains origin; the github remote synchronizes the original repository through normal main pushes without force. Source synchronization does not deploy the new gateway or accept its pending public dual-channel update path.
+
+
+## 2026-10-16 0.4.41 测试网关双通道与 App 内安装验收 / Dual-channel testing rollout and in-app installation
+
+本节取代前面 0.4.41 记录中的“尚未发布/等待发布验收”状态，保留早先记录以区分历史阶段。 / This section supersedes the earlier 0.4.41 pending-rollout/in-app-acceptance status; earlier entries remain historical evidence.
+
+- CICD project 83 / agent-desk 8209 / pipeline 460370 run **574075**（build 7），main 源码 **1a2eac8**。构建、镜像和测试部署阶段成功；生产阶段保持未推进，不能把父流水线标为全流程成功。 / Build, image and testing deployment succeeded; production remains unadvanced, so the entire parent pipeline is not claimed successful.
+- 测试变更记录 **655717**；镜像 `cr.ttyuyin.com/devops/overseas/83/agent-desk:V20261016164315-1a2eac8`；实际 Pod 镜像摘要 `sha256:1b92a7a264968f2aa3e8f25aa91564c028351171f126d569ba3821cf0ac0349e`。`k8s-hs-bj-1-test / ai-social` 的 `agent-desk-0` service 容器 Ready、零重启，StatefulSet 1/1 且 current/update revision 一致。 / The actual service container is ready with no restarts; StatefulSet revisions agree at 1/1.
+- 既有部署配置 **206997 / V6** 未变；继续使用 `pvc-nas-test-hs-bj-ai-socail-dify-plugin-daemon-ai-social`、`subPath: agentdeck-gateway`、挂载 `/data/agentdeck`，未新建 PVC。 / The existing configuration and isolated PVC mount are unchanged; no PVC was created.
+- 两份 0.4.41 / native 9058 清单经运行中网关 owner socket 发布。公网 `edition=lite` / `edition=voice` 清单的版本、字节数、SHA-256 和 URL 均与各自已验证 APK 一致；两条 `/apk` 路由返回正确 307，默认通道仍为 voice，无效 edition 返回 400。 / Both manifests were published through the running gateway's owner socket. Public metadata and redirects match each APK; default voice compatibility and invalid-edition rejection passed.
+- 已有飞书配置仍生效，公网健康检查 `feishu_configured=true`，S-LOCAL 自动重连后状态 `online`；本次未重新登录或扩大飞书授权。 / Feishu configuration remains active and Local reconnected online without new login/scopes.
+- **GM1900 / OnePlus 7** 在生产 App 的更新页选择带语音版，显示 273.1 MB，经 Android DownloadManager 下载；返回桌面后继续，强停并重开 App 恢复原任务（恢复时显示 232.2 / 273.1 MB）。完成后全文件 SHA-256 匹配，App 校验并调起系统安装器，同版本从 Lite 切到 Voice，安装后 APK 哈希匹配。 / The real app downloaded and installed Voice at the same version, retaining the background job across an app-process restart. Completed download and installed APK hashes match.
+- 随后在同一 App 选择 Lite，显示 33.0 MB，后台完成下载、全文件 SHA-256 验证，App 再次调起系统安装器完成同版本 Voice → Lite。安装器来源显示 AgentDeck；本次两个安装均未使用 `adb install` 替代 App 更新流程。 / The app then downloaded, verified and installed Lite via the system installer at the same version. Neither installation used adb install as a substitute for the update path.
+- 最终手机保留 **0.4.41 Lite**，安装 SHA-256 `a6b8b882fe3eb55dc1ad0c0ddb37903ec3eaa4e932e93d21d39101738a58b88a`；原配对保留、实时连接恢复，更新页正确显示当前轻量版和 33.0 MB。原手机电源偏好恢复，未操作另一台 PKM110。 / Final state is Lite with pairing/live connection retained, correct update-page identity/size and restored phone power preference; PKM110 was untouched.
+
+证据 / Evidence: `.run/editions-gateway-release.json`, `.run/editions-public-manifests-verified.json`, `.run/editions-phone-update-acceptance.json`, `.run/editions-{voice,lite}-installed-from-app.json`，以及既有公网 APK 全量下载回执。This acceptance covers this gateway/device/build. It does not extend the unresolved Codex reverse-read-receipt or paused Claude Desktop acceptance.
+
+[CICD build 7](https://cicd.ttyuyin.com/#/pipeline/single/detail/460370?buildNumber=7&projectId=83)

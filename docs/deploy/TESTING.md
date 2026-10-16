@@ -2,7 +2,7 @@
 
 本指南记录 AgentDeck 的测试部署配置；部署是否成功及真实飞书登录是否通过，以验收记录为准。
 
-当前验收：[2026-10-10 测试验收记录](ACCEPTANCE-2026-10-10.md)。
+当前验收：0.4.41 双包更新网关已部署并完成 OnePlus 7 App 内双向换包，见[验收记录](../ACCEPTANCE.md)。早期环境搭建记录见 [2026-10-10 测试验收](ACCEPTANCE-2026-10-10.md)。 / Current acceptance: the 0.4.41 gateway and both in-app edition switches passed on OnePlus 7; see the acceptance log.
 
 This guide describes the testing deployment configuration. Deployment and real Feishu sign-in acceptance must be verified separately.
 

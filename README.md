@@ -15,7 +15,7 @@ View and continue workstation coding-agent chats on your phone. A Go backend run
 
 Both editions share text, image, attachment and chat features, application ID and signing certificate. They replace one another while retaining pairing/settings; they cannot coexist. Public downloads were fully SHA-256 verified. Distributed APKs currently use a development signing key. Maintain a stable signing identity for your own builds; a locally generated debug key will not necessarily replace these APKs.
 
-**发布状态（2026-10-16） / Release status:** 双包及更新页已完成构建、测试和 OnePlus 7 安装；双通道网关代码尚未发布到现有测试网关，当前请使用上方固定版本下载。/ Both editions and the picker are built/tested and installed on OnePlus 7. The dual-channel gateway code has not yet been deployed to the existing testing gateway; use the versioned links above for now. [验证范围 / Acceptance scope](docs/ACCEPTANCE.md)
+**发布状态（2026-10-16） / Release status:** 测试网关已部署双通道代码并发布两份 0.4.41 清单，两个公网更新查询及 APK 跳转已验证。App 可在设置 → 应用更新选择安装类型；各阶段实机证据见验收记录。/ The testing gateway now serves both 0.4.41 editions. Public manifests and APK redirects are verified; choose an edition in Settings → App updates. Device acceptance is recorded separately. [验证范围 / Acceptance scope](docs/ACCEPTANCE.md)
 
 ## 从哪里开始 / Start here
 
