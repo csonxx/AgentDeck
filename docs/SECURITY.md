@@ -79,10 +79,21 @@ Local enrollment key、App routing grant 和会话 root 相互独立。飞书登
 
 The S-LOCAL owner controls `--agents-config`: regular file, mode 0600, maximum 64 KiB and no symlinks. It holds endpoints, fixed executables and environment-variable names, not provider secret values. The phone catalog exposes names, capabilities, configuration state and generic hints. Gateways do not load adapters.
 
-OpenCode 使用工作站 HTTP/SSE（HTTP 仅回环，远端 HTTPS），不跟随重定向；可用环境变量 Basic authentication。ACP 使用固定命令的 stdio，权限不绕过；单次审批不自动提升为永久允许。ACP 文件操作使用 Go `os.Root` 限定当前项目，客户端终端另需手机单次确认及大小/数量限制。CLI 本身有其自己的模型网络与账号存储边界。
+OpenCode 使用工作站 HTTP/SSE（HTTP 仅回环，远端 HTTPS），不跟随重定向；可用环境变量 Basic authentication。新建、发送不覆盖 provider 的权限配置。Codex/Claude 在手机没有明确选择权限时，新建与恢复会话不强制设置 approval/sandbox/permission mode，交由原生配置解析；这会遵循所有者已设置的自动允许模式。ACP 使用所有者配置的固定命令和原生权限模式，转发真实权限请求，不为客户端终端另加重复审批；单次审批不自动提升为永久允许。ACP 文件操作通过 Go `os.Root` 限定当前项目，终端保留会话身份、工作目录及输出/数量限制。CLI 本身有其自己的模型网络与账号存储边界。
 
-OpenCode uses workstation HTTP/SSE (HTTP on loopback only, HTTPS remotely), rejects redirects and optionally uses Basic authentication from an environment variable. ACP runs fixed commands over stdio without bypassing permissions or promoting one-time approval to permanent approval. Client file operations use Go `os.Root` within the current project; client-executed terminals require explicit one-time phone approval and output/count limits. Each CLI also has its own model-network and account-storage boundary.
+OpenCode uses workstation HTTP/SSE (HTTP on loopback only, HTTPS remotely), rejects redirects and optionally uses Basic authentication from an environment variable. Creation and prompts do not override provider permissions. Codex/Claude creation and resume omit approval/sandbox/permission-mode overrides, delegating to native settings, including owner-configured automatic permission modes. ACP uses the owner's fixed commands and native policy, forwards real permission requests and adds no duplicate terminal approval; one-time approval is never promoted to permanent approval. Client file operations remain within the project through Go `os.Root`; terminals retain session identity, working-directory and output/count bounds. Each CLI also has its own model-network and account-storage boundary.
 
 WorkBuddy client secret 仅留在 Local 环境。OAuth code/state 回调仅用于一次性授权，不回传手机；响应禁止缓存/Referer。令牌及每账号同步游标在 Local vault 加密保存。provider 下行只导入 user/assistant 展示记录，不导入账户/认证/系统提示。WorkBuddy 的官方服务会处理其本地助理通信，因此这一路不作“官方服务也无法看到内容”的端到端声明；AgentDeck 的 Local/App AEAD 和网关密文隔离仍成立。
 
 WorkBuddy's client secret stays in the Local environment. OAuth callbacks consume code/state once without returning codes to the phone; responses disable caching and Referer propagation. Tokens and account-specific cursors are encrypted in the Local vault. Only user/assistant presentation records are imported. WorkBuddy's official service handles Local Assistant communication; no claim is made that its service cannot read content. AgentDeck's Local/App AEAD and gateway ciphertext isolation still apply.
+
+
+## 手机修改原生会话权限 / Native session permission changes
+
+权限读取及修改均通过已经配对、AEAD 认证的会话协议，继续校验当前会话、授权项目和原生执行端身份。修改只接受服务器提供的模式列表，并携带当前权限版本，过期选择被拒绝。Codex/Claude Desktop 使用原会话的原生 setter，不修改全局配置或创建分支；OpenCode 追加当前会话规则并按原生末项优先语义读回；ACP 只接受 Agent 声明的会话模式。
+
+Permission reads and changes use the paired AEAD-authenticated protocol with session/project/native-owner checks. Only advertised modes and the current permission version are accepted. Desktop setters operate on the original chat without changing global config or creating branches. OpenCode rules remain session-scoped; ACP accepts only agent-advertised modes.
+
+Managed CLI 会话的明确选择保存在现有加密 `agentconfig` 数据中；只为这些明确选择在重连时恢复权限。Claude 的 `--allow-dangerously-skip-permissions` 仅允许用户通过原生 setter 明确切换到 bypass，并不启用 bypass，也不覆盖默认权限。原生账号、组织及沙箱策略仍可拒绝修改；AgentDeck 不自行回答已有工具审批。没有取得确认时，App 显示失败或未提供，而不是伪造已生效状态。
+
+Explicit managed-CLI choices are encrypted in existing agent configuration and replayed only for those sessions. Claude's allow-bypass flag makes the native user-selectable mode available; it does not activate bypass or override defaults. Native account, organization and sandbox restrictions remain enforced. AgentDeck does not answer existing tool requests as a side effect of its setter. Missing acknowledgement is not presented as success.

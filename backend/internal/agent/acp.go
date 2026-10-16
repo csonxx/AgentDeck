@@ -40,6 +40,7 @@ type acpRuntime struct {
 	conn                    *acp.ClientSideConnection
 	caps                    acp.AgentCapabilities
 	configOptions           []map[string]any
+	modes                   *acp.SessionModeState
 	mu                      sync.Mutex
 	busy, loading, suppress bool
 	turn, lastKind          string
@@ -150,6 +151,7 @@ func (c *acpConnector) get(ctx context.Context, s store.Session) (*acpRuntime, e
 	loaded, e := r.conn.LoadSession(loadCtx, acp.LoadSessionRequest{SessionId: acp.SessionId(nativeID(s)), Cwd: s.Project, McpServers: []acp.McpServer{}})
 	r.mu.Lock()
 	r.configOptions = configMaps(loaded.ConfigOptions)
+	r.modes = loaded.Modes
 	r.loading = false
 	r.suppress = false
 	r.lastKind = ""
@@ -212,6 +214,7 @@ func (c *acpConnector) Create(ctx context.Context, path, parent string) (store.S
 	r.mu.Lock()
 	r.s = s
 	r.configOptions = configMaps(v.ConfigOptions)
+	r.modes = v.Modes
 	r.mu.Unlock()
 	if e = c.m.Store.Put("sessions", s.ID, s); e != nil {
 		r.close()
@@ -447,6 +450,10 @@ func (r *acpRuntime) SessionUpdate(ctx context.Context, n acp.SessionNotificatio
 	defer r.mu.Unlock()
 	if !r.valid(n.SessionId) {
 		return errors.New("wrong session")
+	}
+	if n.Update.CurrentModeUpdate != nil && r.modes != nil {
+		r.modes.CurrentModeId = n.Update.CurrentModeUpdate.CurrentModeId
+		return nil
 	}
 	if n.Update.ConfigOptionUpdate != nil {
 		r.configOptions = configMaps(n.Update.ConfigOptionUpdate.ConfigOptions)

@@ -1,3 +1,5 @@
+import 'permissions.dart';
+import 'session_reads.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -18,6 +20,8 @@ import 'agents.dart';
 import 'input.dart';
 import 'download_manager.dart';
 import 'app_update.dart';
+import 'client_health.dart';
+export 'client_health.dart';
 
 class AgentRequestException extends HttpException {
   final bool notSent;
@@ -31,7 +35,12 @@ class AgentClient extends ChangeNotifier {
   Future<void> _acceptDeviceName(String? name) async {
     if (name == null || name.isEmpty || deviceNamePending) return;
     deviceName = name;
-    await vault.saveDeviceName({'name': name, 'pending': false});
+    try {
+      await vault.saveDeviceName({'name': name, 'pending': false});
+      health.resolve(LocalIssueKind.deviceName);
+    } catch (_) {
+      health.report(LocalIssueKind.deviceName, '设备名称保存失败，请重试');
+    }
     notifyListeners();
   }
 
@@ -43,6 +52,7 @@ class AgentClient extends ChangeNotifier {
       throw const FormatException('设备名称无效，请输入 1–80 个字符');
     }
     await vault.saveDeviceName({'name': name, 'pending': true});
+    health.resolve(LocalIssueKind.deviceName);
     deviceName = name;
     deviceNamePending = true;
     notifyListeners();
@@ -99,6 +109,39 @@ class AgentClient extends ChangeNotifier {
       clock = clock ?? ProtocolClock();
   Map<String, dynamic>? device;
   List<AgentSession> sessions = [];
+  SessionReads sessionReads = SessionReads();
+  bool isUnread(AgentSession session) => sessionReads.isUnread(session);
+  void setReadingSession(String id) {
+    sessionReads.visible = id;
+    if (sessionReads.foreground && sessionReads.markRead(id)) {
+      _scheduleCache(immediately: true);
+      notifyListeners();
+    }
+  }
+
+  void setReadingForeground(bool foreground) {
+    sessionReads.foreground = foreground;
+    if (foreground) setReadingSession(sessionReads.visible);
+  }
+
+  void updateSessions(List<AgentSession> value) {
+    final before = jsonEncode(sessionReads.toJson());
+    sessions = value;
+    sessionReads.observe(value);
+    if (jsonEncode(sessionReads.toJson()) != before) {
+      _scheduleCache(immediately: true);
+    }
+  }
+
+  void updateNativeReadState(Map<String, dynamic> state) {
+    final before = jsonEncode(sessionReads.toJson());
+    sessionReads.applyNative(state);
+    sessionReads.observe(sessions);
+    if (jsonEncode(sessionReads.toJson()) != before) {
+      _scheduleCache(immediately: true);
+    }
+  }
+
   List<AgentGoal> goals = [];
   String goalError = '';
   bool _goalsLoading = false;
@@ -112,6 +155,7 @@ class AgentClient extends ChangeNotifier {
       if (generation != _generation || _closed) return;
       goals = (value as List)
           .map((v) => AgentGoal(Map<String, dynamic>.from(v as Map)))
+          .where((g) => g.isCurrent)
           .toList();
       goalError = '';
     } catch (e) {
@@ -182,8 +226,9 @@ class AgentClient extends ChangeNotifier {
         await vault.loadAgentVisibility() ?? {},
       );
       _savedAgentVisibility = agentVisibility;
+      health.resolve(LocalIssueKind.agentVisibility);
     } catch (_) {
-      error = 'Agent 显示设置读取失败';
+      health.report(LocalIssueKind.agentVisibility, 'Agent 显示设置读取失败');
     }
     if (!_closed) notifyListeners();
   }
@@ -194,6 +239,7 @@ class AgentClient extends ChangeNotifier {
     final save = _agentSaveQueue.then((_) async {
       await vault.saveAgentVisibility(value.toJson());
       _savedAgentVisibility = value;
+      health.resolve(LocalIssueKind.agentVisibility);
     });
     _agentSaveQueue = save.catchError((Object _) {});
     try {
@@ -233,7 +279,7 @@ class AgentClient extends ChangeNotifier {
   final Map<String, Completer<Uint8List>> _media = {};
   WebSocket? _socket;
   HttpClient? _http;
-  Timer? _retry, _heartbeat, _cacheTimer, _notifyTimer;
+  Timer? _retry, _heartbeat, _cacheTimer, _notifyTimer, _syncTimer;
   bool _cacheWriting = false;
   List<int> _salt = [];
   int _rotation = 900000,
@@ -244,12 +290,13 @@ class AgentClient extends ChangeNotifier {
   Future<void> _receiveQueue = Future.value(),
       _sendQueue = Future.value(),
       _saveQueue = Future.value();
-  String state = '尚未配对', error = '', selected = '';
-  bool connected = false,
-      demo = false,
-      _closed = false,
-      _connecting = false,
-      _suspended = false;
+  final ClientHealth health = ClientHealth();
+  String get state => health.label;
+  String get error => health.connectionFailure;
+  bool get connected => health.connected;
+  bool get live => health.live;
+  String selected = '';
+  bool demo = false, _closed = false, _connecting = false, _suspended = false;
   int get epoch => clock.millis ~/ _rotation;
   List<int> get _root => base64Decode(device!['root'] as String);
 
@@ -257,18 +304,32 @@ class AgentClient extends ChangeNotifier {
     await loadProjectLayout();
     await loadAgentVisibility();
     try {
+      device = await vault.loadDevice();
+      health.resolve(LocalIssueKind.deviceStorage);
+    } catch (_) {
+      health.report(LocalIssueKind.deviceStorage, '无法读取本机安全存储，请重试或重新配对');
+    }
+    try {
       final preference = await vault.loadDeviceName();
       deviceName = preference?['name'] as String? ?? deviceName;
       deviceNamePending = preference?['pending'] == true;
-      device = await vault.loadDevice();
-      unawaited(downloads.restore());
-      if (device != null) {
+      health.resolve(LocalIssueKind.deviceName);
+    } catch (_) {
+      health.report(LocalIssueKind.deviceName, '设备名称读取失败，请重试');
+    }
+    unawaited(downloads.restore());
+    if (device != null) {
+      try {
         final cache = await vault.readCache();
+        sessionReads.restore(
+          Map<String, dynamic>.from(cache['session_reads'] as Map? ?? {}),
+        );
         sessions = (cache['sessions'] as List? ?? [])
             .map(
               (e) => AgentSession.fromJson(Map<String, dynamic>.from(e as Map)),
             )
             .toList();
+        sessionReads.observe(sessions);
         for (final e in Map<String, dynamic>.from(
           cache['version'] == 3 ? cache['transcripts'] as Map? ?? {} : {},
         ).entries.take(3)) {
@@ -279,10 +340,13 @@ class AgentClient extends ChangeNotifier {
           }
           transcripts[e.key] = t;
         }
-        await connect();
+        health.resolve(LocalIssueKind.cacheRead);
+      } catch (_) {
+        health.report(LocalIssueKind.cacheRead, '本机会话缓存读取失败，将从工作站同步');
       }
-    } catch (_) {
-      error = '无法读取本机安全存储，请重试或重新配对';
+      // Corrupt/unavailable history is recoverable from Local, and must never
+      // prevent reading valid pairing keys or establishing a fresh connection.
+      await connect();
     }
     unawaited(updates.initialize());
     notifyListeners();
@@ -294,8 +358,9 @@ class AgentClient extends ChangeNotifier {
         await vault.loadProjectLayout() ?? {},
       );
       _savedProjectLayout = projectLayout;
+      health.resolve(LocalIssueKind.projectLayout);
     } catch (_) {
-      error = '项目布局读取失败';
+      health.report(LocalIssueKind.projectLayout, '项目布局读取失败');
     }
     if (!_closed) notifyListeners();
   }
@@ -306,6 +371,7 @@ class AgentClient extends ChangeNotifier {
     final save = _layoutSaveQueue.then((_) async {
       await vault.saveProjectLayout(value.toJson());
       _savedProjectLayout = value;
+      health.resolve(LocalIssueKind.projectLayout);
     });
     // A failed write must not prevent subsequent writes from running.
     _layoutSaveQueue = save.catchError((Object _) {});
@@ -317,6 +383,58 @@ class AgentClient extends ChangeNotifier {
         notifyListeners();
       }
       throw const FileSystemException('项目布局保存失败，请重试');
+    }
+  }
+
+  final Set<LocalIssueKind> retryingIssues = {};
+  void dismissIssue(LocalIssueKind kind) {
+    health.dismiss(kind);
+    notifyListeners();
+  }
+
+  Future<void> retryIssue(LocalIssueKind kind) async {
+    if (_closed || !retryingIssues.add(kind)) return;
+    final generation = _generation;
+    notifyListeners();
+    try {
+      switch (kind) {
+        case LocalIssueKind.deviceStorage:
+          final saved = await vault.loadDevice();
+          if (generation != _generation || _closed) return;
+          device ??= saved;
+          health.resolve(kind);
+          if (device != null) await connect();
+        case LocalIssueKind.projectLayout:
+          await loadProjectLayout();
+        case LocalIssueKind.agentVisibility:
+          await loadAgentVisibility();
+        case LocalIssueKind.deviceName:
+          final issue = health.issues.where((i) => i.kind == kind).firstOrNull;
+          if (issue?.message == '设备名称读取失败，请重试') {
+            final saved = await vault.loadDeviceName();
+            if (saved?['pending'] == true || !connected) {
+              deviceName = saved?['name'] as String? ?? deviceName;
+              deviceNamePending = saved?['pending'] == true;
+            }
+          }
+          await vault.saveDeviceName({
+            'name': deviceName,
+            'pending': deviceNamePending,
+          });
+          health.resolve(kind);
+          if (connected && deviceNamePending) await renameDevice(deviceName);
+        case LocalIssueKind.cacheRead:
+        case LocalIssueKind.cacheWrite:
+          if (kind == LocalIssueKind.cacheRead && !live) {
+            await refreshSessions();
+          }
+          await _queueCacheWrite();
+      }
+    } catch (_) {
+      // Keep the existing scoped issue until its own recovery succeeds.
+    } finally {
+      retryingIssues.remove(kind);
+      if (!_closed) notifyListeners();
     }
   }
 
@@ -406,6 +524,7 @@ class AgentClient extends ChangeNotifier {
         throw const FormatException('工作站配对身份不一致');
       }
       ++_generation;
+      _failPending();
       _retry?.cancel();
       _goalTimer?.cancel();
       _heartbeat?.cancel();
@@ -414,7 +533,7 @@ class AgentClient extends ChangeNotifier {
       await _socket?.close();
       _socket = null;
       _http?.close(force: true);
-      connected = false;
+      health.transition(ConnectionPhase.unpaired);
       await _saveQueue;
       await _layoutSaveQueue;
       await _downloads?.reset();
@@ -430,8 +549,10 @@ class AgentClient extends ChangeNotifier {
         'root': base64Encode(root),
       };
       await vault.saveDevice(device!);
+      health.resolve(LocalIssueKind.deviceStorage);
       demo = false;
       sessions = [];
+      sessionReads = SessionReads();
       transcripts.clear();
       queues.clear();
       queueErrors.clear();
@@ -445,8 +566,7 @@ class AgentClient extends ChangeNotifier {
   Future<void> connect() async {
     if (_closed) return;
     if (device?['revoked'] == true) {
-      state = '需要重新配对';
-      error = '设备配对已被工作站删除，请重新配对';
+      health.transition(ConnectionPhase.revoked, failure: '设备配对已被工作站删除，请重新配对');
       notifyListeners();
       return;
     }
@@ -454,11 +574,11 @@ class AgentClient extends ChangeNotifier {
     _connecting = true;
     _retry?.cancel();
     final generation = ++_generation;
-    connected = false;
+    _failPending();
+    health.transition(ConnectionPhase.connecting);
+    _syncTimer?.cancel();
     _goalTimer?.cancel();
     _heartbeat?.cancel();
-    state = '正在连接';
-    error = '';
     notifyListeners();
     await _socket?.close();
     _socket = null;
@@ -531,8 +651,13 @@ class AgentClient extends ChangeNotifier {
       _attempt = 0;
       _receiveQueue = Future.value();
       _sendQueue = Future.value();
-      connected = true;
-      state = '实时连接';
+      health.transition(ConnectionPhase.synchronizing);
+      // Opening a socket does not prove that the displayed catalog is current.
+      _syncTimer = Timer(const Duration(seconds: 12), () {
+        if (generation == _generation && !live) {
+          _lost(failure: '会话同步超时，正在重新连接');
+        }
+      });
       notifyListeners();
       ws.listen(
         (data) {
@@ -556,17 +681,13 @@ class AgentClient extends ChangeNotifier {
         },
         onDone: () {
           if (generation == _generation) {
-            _lost();
             if (ws.closeCode == 4003) {
-              _retry?.cancel();
               device?['revoked'] = true;
-              state = '需要重新配对';
-              error = '设备配对已被工作站删除，请重新配对';
               if (device != null) {
                 unawaited(vault.saveDevice(device!).catchError((Object _) {}));
               }
-              notifyListeners();
             }
+            _lost();
           }
         },
       );
@@ -601,10 +722,11 @@ class AgentClient extends ChangeNotifier {
       }
     } catch (e) {
       if (generation == _generation) {
-        error = e is HandshakeException
-            ? '证书校验失败，请检查后端证书或重新配对'
-            : '连接失败，请检查域名、网络或设备授权';
-        _lost();
+        _lost(
+          failure: e is HandshakeException
+              ? '证书校验失败，请检查后端证书或重新配对'
+              : '连接失败，请检查域名、网络或设备授权',
+        );
       }
     } finally {
       _connecting = false;
@@ -624,13 +746,13 @@ class AgentClient extends ChangeNotifier {
   );
 
   void suspend() {
+    setReadingForeground(false);
     _backgrounded = true;
     if (_downloadLeases > 0) return;
     if (_suspended || _closed) return;
     _suspended = true;
     _lost();
     _http?.close(force: true);
-    state = device == null ? '尚未配对' : '已暂停连接';
     if (!_closed) notifyListeners();
   }
 
@@ -645,21 +767,39 @@ class AgentClient extends ChangeNotifier {
     if (!_closed && !_suspended) await connect();
   }
 
-  void _lost() {
+  void _lost({String? failure}) {
     if (_closed || demo) return;
     ++_generation;
-    connected = false;
-    state = '连接中断 · 自动重连';
+    final revoked = device?['revoked'] == true;
+    health.transition(
+      revoked
+          ? ConnectionPhase.revoked
+          : device == null
+          ? ConnectionPhase.unpaired
+          : _suspended
+          ? ConnectionPhase.suspended
+          : ConnectionPhase.reconnecting,
+      failure: revoked
+          ? '设备配对已被工作站删除，请重新配对'
+          : _suspended || device == null
+          ? ''
+          : failure ?? '连接中断',
+    );
+    _syncTimer?.cancel();
     _goalTimer?.cancel();
     _heartbeat?.cancel();
     _socket?.close();
     _socket = null;
     _retry?.cancel();
     final delay = min(30, 1 << min(_attempt++, 5));
-    if (!_suspended && device != null) {
+    if (!_suspended && device != null && !revoked) {
       _retry = Timer(Duration(seconds: delay), connect);
     }
     notifyListeners();
+    _failPending();
+  }
+
+  void _failPending() {
     for (final c in _media.values) {
       if (!c.isCompleted) c.completeError(const HttpException('连接中断'));
     }
@@ -676,13 +816,13 @@ class AgentClient extends ChangeNotifier {
     final generation = _generation;
     final task = _sendQueue.then((_) async {
       if (!connected || _socket == null || generation != _generation) {
-        throw const HttpException('未连接');
+        throw AgentRequestException('未连接', notSent: true);
       }
       final ep = epoch;
       final key = await WireCrypto.traffic(_root, _salt, 'c2s', ep);
       final b = await WireCrypto.seal(key, 'c2s', ep, ++_sent, data);
       if (generation != _generation || !connected) {
-        throw const HttpException('连接已更新');
+        throw AgentRequestException('连接已更新', notSent: true);
       }
       _socket!.add(jsonEncode(b));
     });
@@ -723,14 +863,28 @@ class AgentClient extends ChangeNotifier {
         projects = (m['projects'] as List? ?? [])
             .map((p) => AgentProject.fromJson(Map<String, dynamic>.from(p)))
             .toList();
-        sessions = (m['sessions'] as List)
-            .map(
-              (e) => AgentSession.fromJson(Map<String, dynamic>.from(e as Map)),
-            )
-            .toList();
+        updateSessions(
+          (m['sessions'] as List)
+              .map(
+                (e) =>
+                    AgentSession.fromJson(Map<String, dynamic>.from(e as Map)),
+              )
+              .toList(),
+        );
+        updateNativeReadState(
+          Map<String, dynamic>.from(m['native_reads'] as Map? ?? {}),
+        );
+        health.synchronized();
+        _syncTimer?.cancel();
         _requests.remove(m['id'])?.complete(m);
       case 'agents':
         _updateAgents(m);
+      case 'native_reads':
+        if (m['agent'] == 'codex') {
+          updateNativeReadState(
+            Map<String, dynamic>.from(m['state'] as Map? ?? {}),
+          );
+        }
       case 'queue':
         final id = m['session'] as String;
         if (id == selected) {
@@ -752,10 +906,7 @@ class AgentClient extends ChangeNotifier {
         if (id == selected) {
           transcripts
               .putIfAbsent(id, Transcript.new)
-              .history(
-                Map<String, dynamic>.from(m['page'] as Map),
-                replace: true,
-              );
+              .liveSnapshot(Map<String, dynamic>.from(m['page'] as Map));
         }
       case 'events':
         final id = m['session'] as String;
@@ -765,7 +916,15 @@ class AgentClient extends ChangeNotifier {
           final event = Map<String, dynamic>.from(ev as Map);
           final seq = (event['seq'] as num).toInt();
           if (seq > t.latestLiveCursor) t.latestLiveCursor = seq;
-          if (!t.detached || t.containsEvent(event)) t.add(event);
+          final retained = t.containsEvent(event);
+          if (t.readingHistory &&
+              !retained &&
+              event['kind'] != 'status' &&
+              ((event['first'] ?? seq) as num).toInt() >
+                  (t.blocks.lastOrNull?.first ?? 0)) {
+            t.detached = true;
+          }
+          if ((!t.detached && !t.readingHistory) || retained) t.add(event);
         }
       case 'media':
         final bytes = Uint8List.fromList(base64Decode(m['bytes'] as String));
@@ -791,7 +950,8 @@ class AgentClient extends ChangeNotifier {
                 notSent: m['not_sent'] == true,
               ),
             );
-        error = m['message'] as String;
+        // Only the matching caller owns this failure (send, file, usage,
+        // permissions, etc). A late error must not become a global outage.
         _media
             .remove(m['id'])
             ?.completeError(HttpException(m['message'] as String));
@@ -841,7 +1001,7 @@ class AgentClient extends ChangeNotifier {
         'method': 'sessions',
       }, timeout: const Duration(seconds: 12));
     } on TimeoutException {
-      _lost();
+      _lost(failure: '会话同步超时，正在重新连接');
       rethrow;
     }
     unawaited(refreshGoals());
@@ -854,11 +1014,18 @@ class AgentClient extends ChangeNotifier {
     final id = data['id'] as String? ?? requestID();
     final result = Completer<dynamic>();
     _requests[id] = result;
+    final response = result.future.timeout(timeout);
+    // A disconnect can complete the request while crypto/send is still
+    // awaited. Attach an error listener immediately; still propagate it below.
+    unawaited(
+      response.then<void>((_) {}, onError: (Object _, StackTrace _) {}),
+    );
     try {
       await send({...data, 'id': id});
-      return await result.future.timeout(timeout);
+      return await response;
     } finally {
       _requests.remove(id);
+      if (!result.isCompleted) result.complete();
     }
   }
 
@@ -866,9 +1033,11 @@ class AgentClient extends ChangeNotifier {
     String agent,
     String project, {
     String parent = '',
+    String permissionMode = '',
   }) async {
     final result = await request({
       'method': 'create',
+      if (permissionMode.isNotEmpty) 'permission_mode': permissionMode,
       'agent': agent,
       'project': project,
       'session': parent,
@@ -1008,6 +1177,32 @@ class AgentClient extends ChangeNotifier {
 
   String _turnKey(String session) =>
       '${device?['device'] ?? 'unpaired'}/$session';
+  Future<SessionPermissions> sessionPermissions(String session) async =>
+      SessionPermissions.fromJson(
+        Map<String, dynamic>.from(
+          await request({
+                'method': 'session_permissions',
+                'session': session,
+              }, timeout: const Duration(seconds: 12))
+              as Map,
+        ),
+      );
+  Future<SessionPermissions> changePermissions(
+    String session,
+    String version,
+    String mode,
+  ) async => SessionPermissions.fromJson(
+    Map<String, dynamic>.from(
+      await request({
+            'method': 'session_permissions_change',
+            'session': session,
+            'permission_version': version,
+            'permission_mode': mode,
+          }, timeout: const Duration(seconds: 20))
+          as Map,
+    ),
+  );
+
   Future<SessionGeneration> sessionGeneration(String session) async =>
       SessionGeneration.fromJson(
         Map<String, dynamic>.from(
@@ -1181,6 +1376,7 @@ class AgentClient extends ChangeNotifier {
       return;
     }
     t.loadingOlder = true;
+    final windowVersion = t.windowVersion;
     notifyListeners();
     try {
       final page = await request({
@@ -1188,7 +1384,7 @@ class AgentClient extends ChangeNotifier {
         'session': id,
         'before': t.before,
       });
-      if (identical(transcripts[id], t)) {
+      if (identical(transcripts[id], t) && t.windowVersion == windowVersion) {
         t.history(Map<String, dynamic>.from(page as Map));
         _scheduleCache();
       }
@@ -1209,6 +1405,7 @@ class AgentClient extends ChangeNotifier {
       return;
     }
     t.loadingNewer = true;
+    final windowVersion = t.windowVersion;
     notifyListeners();
     try {
       final page = await request({
@@ -1216,7 +1413,7 @@ class AgentClient extends ChangeNotifier {
         'session': id,
         'after': t.blocks.last.first,
       });
-      if (identical(transcripts[id], t)) {
+      if (identical(transcripts[id], t) && t.windowVersion == windowVersion) {
         t.history(Map<String, dynamic>.from(page as Map), newer: true);
         _scheduleCache();
       }
@@ -1248,8 +1445,15 @@ class AgentClient extends ChangeNotifier {
   }
 
   Future<void> reload(String id) async {
-    transcripts[id] = Transcript();
-    await watch(id);
+    // Commit a refresh only after a successful reply; failed/late refreshes
+    // leave the current transcript and its reading position intact.
+    final page = await request({'method': 'history', 'session': id});
+    if (selected != id) return;
+    transcripts
+        .putIfAbsent(id, Transcript.new)
+        .refreshLatest(Map<String, dynamic>.from(page as Map));
+    _scheduleCache();
+    notifyListeners();
   }
 
   Future<SessionAttachment> attachment(String session, String href) async {
@@ -1440,37 +1644,54 @@ class AgentClient extends ChangeNotifier {
     if (_media[id] != null) return _media[id]!.future;
     final c = Completer<Uint8List>();
     _media[id] = c;
+    final response = c.future.timeout(const Duration(seconds: 15));
+    unawaited(
+      response.then<void>((_) {}, onError: (Object _, StackTrace _) {}),
+    );
     try {
       await send({'method': 'media', 'id': id, 'media': id});
-      return await c.future.timeout(const Duration(seconds: 15));
+      return await response;
+    } catch (e, stack) {
+      if (!c.isCompleted) c.completeError(e, stack);
+      rethrow;
     } finally {
       _media.remove(id);
     }
   }
 
-  void _scheduleCache() {
+  void _scheduleCache({bool immediately = false}) {
     // Coalesce periodic writes: one pending save, one small recent transcript.
-    _cacheTimer ??= Timer(const Duration(seconds: 5), () {
+    if (immediately) {
+      _cacheTimer?.cancel();
       _cacheTimer = null;
-      if (_cacheWriting) {
-        _scheduleCache();
-        return;
-      }
-      _cacheWriting = true;
-      _saveQueue = _saveQueue
-          .then((_) => _persist())
-          .catchError((Object _) {
-            error = '加密缓存写入失败';
-            notifyListeners();
-          })
-          .whenComplete(() => _cacheWriting = false);
+    }
+    _cacheTimer ??= Timer(
+      immediately ? Duration.zero : const Duration(seconds: 5),
+      () {
+        _cacheTimer = null;
+        if (_cacheWriting) {
+          _scheduleCache();
+          return;
+        }
+        _cacheWriting = true;
+        _queueCacheWrite().whenComplete(() => _cacheWriting = false);
+      },
+    );
+  }
+
+  Future<void> _queueCacheWrite() {
+    _saveQueue = _saveQueue.then((_) => _persist()).catchError((Object _) {
+      health.report(LocalIssueKind.cacheWrite, '加密缓存写入失败');
+      if (!_closed) notifyListeners();
     });
+    return _saveQueue;
   }
 
   Future<void> _persist() async {
     if (demo || device == null) return;
     await vault.writeCache({
       'version': 3,
+      'session_reads': sessionReads.toJson(),
       'sessions': sessions
           .map(
             (s) => {
@@ -1482,6 +1703,8 @@ class AgentClient extends ChangeNotifier {
               'updated': s.updated,
               'project': s.project,
               'managed': s.managed,
+              'completion': s.completion,
+              'completed_at': s.completedAt,
             },
           )
           .toList(),
@@ -1514,13 +1737,23 @@ class AgentClient extends ChangeNotifier {
             ),
           ),
     });
+    final hadIssue = health.issues.any(
+      (i) =>
+          i.kind == LocalIssueKind.cacheRead ||
+          i.kind == LocalIssueKind.cacheWrite,
+    );
+    health.resolve(LocalIssueKind.cacheRead);
+    health.resolve(LocalIssueKind.cacheWrite);
+    if (hadIssue && !_closed) notifyListeners();
   }
 
   Future<void> forget() async {
     ++_generation;
+    _failPending();
     _retry?.cancel();
     _goalTimer?.cancel();
     _heartbeat?.cancel();
+    _syncTimer?.cancel();
     _cacheTimer?.cancel();
     _cacheTimer = null;
     await _socket?.close();
@@ -1534,23 +1767,22 @@ class AgentClient extends ChangeNotifier {
     _savedProjectLayout = projectLayout;
     device = null;
     demo = false;
-    connected = false;
     selected = '';
     sessions = [];
+    sessionReads = SessionReads();
     goals = [];
     goalError = '';
     transcripts.clear();
     queues.clear();
     queueErrors.clear();
     images.clear();
-    state = '尚未配对';
-    error = '';
+    health.reset();
     notifyListeners();
   }
 
   void showDemo() {
     demo = true;
-    state = '界面示例';
+    health.transition(ConnectionPhase.demo);
     sessions = [
       AgentSession(
         id: 'sample-codex',
@@ -1607,9 +1839,11 @@ class AgentClient extends ChangeNotifier {
     appLock.dispose();
     _notifyTimer?.cancel();
     ++_generation;
+    _failPending();
     _retry?.cancel();
     _goalTimer?.cancel();
     _heartbeat?.cancel();
+    _syncTimer?.cancel();
     _cacheTimer?.cancel();
     _socket?.close();
     _http?.close(force: true);

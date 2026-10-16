@@ -411,6 +411,9 @@ func run() error {
 	s.Manager.ClaudeDesktopSessions = claudeIndex
 	s.Manager.ClaudeGoalRoot = *claude
 	s.Manager.CodexGoalPath = *codexGoals
+	if *codex != "" {
+		s.Manager.CodexReadHome = filepath.Dir(*codex)
+	}
 	if s.Manager.CodexGoalPath == "" && *codex != "" {
 		s.Manager.CodexGoalPath = filepath.Join(filepath.Dir(*codex), "goals_1.sqlite")
 	}

@@ -62,3 +62,24 @@ func TestDesktopOriginalIDAndProjectGuard(t *testing.T) {
 		t.Fatal("unsupported desktop interrupt pretended success")
 	}
 }
+
+func TestPhoneCreatedChatFollowsExistingDesktopOwnerOnSend(t *testing.T) {
+	m := connectorManager(t)
+	project := m.Projects()[0].Path
+	ss := store.Session{ID: "original-phone-chat", Agent: "codex", Project: project, Source: "stream", Managed: true, Status: "completed"}
+	m.Store.Put("sessions", ss.ID, ss)
+	f := &desktopFixture{thread: DesktopThread{ID: ss.ID, Kind: "codex", Host: "local"}}
+	m.Desktop = f
+	t.Setenv("PATH", t.TempDir())
+	if e := m.Send(ss.ID, "Fixture user input", "same-thread-request"); e != nil {
+		t.Fatal(e)
+	}
+	if f.sentID != ss.ID || len(m.runs) != 0 {
+		t.Fatal("phone input resumed a second executor instead of Desktop")
+	}
+	var got store.Session
+	m.Store.Get("sessions", ss.ID, &got)
+	if got.Source != "desktop" {
+		t.Fatal("existing Desktop owner not retained")
+	}
+}

@@ -94,3 +94,16 @@ func TestInspectorExceptionsNeverExposeSessionOrCredentialText(t *testing.T) {
 		t.Fatal("exception leaked", e)
 	}
 }
+
+func TestNativePermissionChangeUsesOwnerSessionAPI(t *testing.T) {
+	b, expressions := rpcFixture(t, map[string]any{"result": map[string]any{"value": "acceptEdits"}})
+	target := Target{Host: "local_original", Native: "native-id", CWD: "/project", Project: "/project"}
+	actual, e := b.SetPermissionMode(context.Background(), target, "acceptEdits")
+	if e != nil || actual != "acceptEdits" {
+		t.Fatal(e)
+	}
+	expr := <-expressions
+	if !strings.Contains(expr, "setPermissionMode") || !strings.Contains(expr, "getSession") || !strings.Contains(expr, "wrong session") {
+		t.Fatal("missing native policy or identity checks")
+	}
+}

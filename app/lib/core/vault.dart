@@ -28,6 +28,10 @@ class DeviceVault {
       storage.write(key: 'agentdeck.app.lock', value: jsonEncode(value));
   Future<void> removeAppLock() => storage.delete(key: 'agentdeck.app.lock');
   Future<String?> loadLanguage() => storage.read(key: 'agentdeck.language');
+  Future<String?> loadDisplaySize() =>
+      storage.read(key: 'agentdeck.display.size');
+  Future<void> saveDisplaySize(String value) =>
+      storage.write(key: 'agentdeck.display.size', value: value);
   Future<Map<String, dynamic>?> loadDeviceName() async {
     final value = await storage.read(key: 'agentdeck.device.name');
     return value == null ? null : Map<String, dynamic>.from(jsonDecode(value));

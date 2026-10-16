@@ -6,7 +6,7 @@ Use **Settings** at the upper right of Home to show or hide Codex, Claude Code, 
 
 | Agent | 接入 / Interface | 能力与边界 / Capabilities and boundaries |
 | --- | --- | --- |
-| Codex | JSONL + CLI + 可选桌面原生实时 IPC / optional native desktop live IPC | 原桌面 ID 发送须显式配置 IPC，并且电脑已打开会话。手机创建会话由 CLI 执行。 / Sending to the original desktop ID requires explicit IPC configuration and an open desktop chat. Mobile-created chats run through the CLI. |
+| Codex | JSONL + CLI + 可选桌面原生实时 IPC / optional native desktop live IPC | 原桌面 ID 发送须显式配置 IPC，并且 Desktop 正常运行、协议兼容；macOS 可在明确无持有者时打开原 ID。手机创建会话由 CLI 执行。 / Original desktop IDs require explicit IPC and a running compatible Desktop. On macOS an explicitly unowned chat can open at its original ID. Mobile-created chats run through the CLI. |
 | Claude Code | 桌面目录 + JSONL + 可选本机原生调试器 / opt-in local native debugger；自有 stream-json CLI | 真实 OnePlus 7 ↔ Desktop 原会话普通用户收发已通过，保持原 UUID/PID，无 peer 提示和分支。依赖所有者通过官方菜单开启的本机调试器；开关默认关闭，9229 禁止公网暴露。 / Real OnePlus 7 round trips to the original Desktop chat passed as ordinary human input, preserving UUID/PID without peer messages or forks. Requires the owner-enabled official loopback debugger; opt-in defaults off and 9229 must never be public. |
 | OpenCode | REST + `/global/event` SSE | 列举、原 ID 发送、创建、停止、单次审批、消息/思考/工具/图片。首次或重连修复最近 200 条 provider 消息；首次列举每项目最近 100 个会话。 / List, send to original IDs, create, stop, one-time permission replies, messages/thoughts/tools/images. Initial/reconnect recovery fetches 200 recent provider messages and 100 recent sessions per project. |
 | Qoder | 官方 CLI ACP，stdio / official CLI ACP over stdio | 在 Agent 广告 `session/list`、`session/load` 时列举及恢复原 ACP ID；不虚构 IDE 私有历史。 / List and restore native ACP IDs when the agent advertises `session/list` and `session/load`; private IDE histories are not fabricated. |
@@ -60,7 +60,7 @@ opencode serve --hostname 127.0.0.1 --port 4096
 
 ### Qoder / TRAE
 
-安装官方 CLI 并在后端运行用户下完成登录。在配置中填写可执行文件绝对路径可避免服务 PATH 差异。AgentDeck 使用 `qoder --acp` 和 `traecli acp serve`；默认权限保持开启。某些 CLI 登录需要用户在浏览器确认，该步骤不能用安装成功代替。
+安装官方 CLI 并在后端运行用户下完成登录。在配置中填写可执行文件绝对路径可避免服务 PATH 差异。AgentDeck 使用 `qoder --acp` 和 `traecli acp serve`，沿用 Agent 的原生权限配置，不额外设置询问或自动允许模式。某些 CLI 登录需要用户在浏览器确认，该步骤不能用安装成功代替。
 
 Install the official CLIs and sign in as the backend's operating-system user. Absolute executable paths avoid service PATH differences. AgentDeck uses `qoder --acp` and `traecli acp serve`, retaining default permission handling. Browser-confirmed CLI login is a separate step from installation.
 
@@ -69,9 +69,9 @@ qoder login
 traecli login
 ```
 
-ACP 单次工具审批只选择 `allow_once`，不接受 `allow_always` 替代。Agent 发起的文件读写限定在当前会话项目，解析符号链接并通过 Go 的目录作用域文件操作防止越界。Agent 请求由客户端执行终端时必须额外经过手机单次确认，输出最多 256 KiB，进程随会话连接关闭清理。
+ACP 单次工具审批只选择 `allow_once`，不接受 `allow_always` 替代。Agent 按自己的权限模式决定是否发出 `session/request_permission`；AgentDeck 转发真实请求，不为 `terminal/create` 再增加一次审批。Agent 发起的文件读写和终端工作目录限定在当前会话项目，解析符号链接并通过 Go 的目录作用域文件操作防止越界。终端输出最多 256 KiB，进程随会话连接关闭清理。
 
-ACP permission replies select `allow_once`, never `allow_always`. Agent-initiated file access is confined to the current chat project, with symlink checks and Go directory-scoped operations. Client-executed terminal requests require an additional explicit phone approval, retain at most 256 KiB of output, and are cleaned up when their ACP connection closes.
+ACP permission replies select `allow_once`, never `allow_always`. The native agent decides whether its policy requires `session/request_permission`; AgentDeck forwards that request without adding another approval for `terminal/create`. File access and terminal working directories remain confined to the chat project, with symlink checks and Go directory-scoped operations. Terminals retain at most 256 KiB of output and are cleaned up when their ACP connection closes.
 
 官方文档 / Official documentation: [Qoder ACP](https://docs.qoder.com/cli/acp), [TRAE CLI ACP](https://docs.trae.cn/cli_agent-client-protocol).
 
@@ -97,3 +97,20 @@ OAuth state is random, expires after ten minutes and is consumed once. Codes are
 WorkBuddy 这一路经过官方服务，不能称为只在电脑和手机之间传输；Local → 手机的 AgentDeck 通道及缓存仍加密，网关仍只中继密文。 / This adapter communicates through WorkBuddy's official service. AgentDeck's Local-to-phone channel and caches remain encrypted, and its gateway relays ciphertext.
 
 官方文档 / Official documentation: [WorkBuddy OpenAPI](https://open.workbuddy.cn/docs/openapi).
+
+
+## 手机查看和修改权限 / Phone permission controls
+
+会话输入框旁的盾牌按钮显示原生权限，点击查看标识、说明和可选模式。Codex 的 Auto review 显示 `auto_review`（兼容旧 `guardian_subagent`）；Claude 分别显示 `default`、`acceptEdits`、`auto`、`bypassPermissions`、`plan`、`dontAsk`，不套用 Codex 档位。新建 Codex / Claude 会话可保留工作站默认权限或显式选择。
+
+The shield next to the composer shows native permissions and opens identifiers, descriptions and supported choices. Codex and Claude keep their own mode names. New chats can keep workstation defaults or explicitly select a mode.
+
+OpenCode 显示当前会话规则，可设置 Ask / Allow / Deny；原生 API 会追加规则，最终通配规则按末项优先生效，旧规则保留。Qoder / TRAE 的 ACP 模式由 Agent 声明，其 Plan / Build 等会话模式并不等于 Bypass。WorkBuddy 没有提供权限修改接口时展示由 Agent 管理。修改需要在线原生确认；服务器策略拒绝会直接显示，用户可刷新核对，不必新建支线会话。
+
+OpenCode exposes session rules with Ask / Allow / Deny; native updates append ordered rules and preserve earlier entries. ACP modes are agent-defined, and Plan / Build must not be mistaken for Bypass. WorkBuddy remains agent-managed when no permission API is available. Updates require native online acknowledgement, surface policy rejections, and do not create branches.
+
+## Codex 未读状态 / Codex unread state
+
+电脑端原生未读状态通过账号及本机连接身份匹配后，经加密连接同步到 App；电脑标记已读后，App 会清除对应蓝点。App 本地查看也会清除手机蓝点，回执保存在手机加密缓存中。**App 回写 Desktop 已读暂未打通**：当前 Desktop 拒绝外部客户端调用原生已读工具；没有直接改写 Desktop 状态文件、关闭校验或重启 Desktop。
+
+Native Desktop unread state is matched to the current account and local execution host, then sent over the encrypted connection. Desktop marking a chat read clears its App dot. Reading on the phone stores a local receipt in its encrypted cache. **Phone-to-Desktop read receipts are not accepted yet**: the installed Desktop rejects external native read-tool clients. No native state file is modified, authorization check disabled, or Desktop restarted.

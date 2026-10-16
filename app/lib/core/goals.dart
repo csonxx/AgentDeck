@@ -16,6 +16,13 @@ class AgentGoal {
       iterations = (v['iterations'] as num?)?.toInt() ?? 0,
       budget = (v['token_budget'] as num?)?.toInt(),
       actions = (v['actions'] as List? ?? []).whereType<String>().toList();
+  bool get isCurrent => const {
+    'active',
+    'paused',
+    'blocked',
+    'usageLimited',
+    'budgetLimited',
+  }.contains(status);
   String get label => switch (status) {
     'active' => '目标执行中',
     'paused' => '目标已暂停',

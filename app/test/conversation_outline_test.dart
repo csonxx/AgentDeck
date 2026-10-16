@@ -10,7 +10,7 @@ class DirectoryClient extends AgentClient {
   int requestedFirst = 0;
   bool fail = false;
   DirectoryClient() {
-    connected = true;
+    health.transition(ConnectionPhase.live);
     selected = 's';
     sessions = [
       AgentSession(

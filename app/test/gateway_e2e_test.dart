@@ -164,6 +164,17 @@ void main() {
       );
       expect(c.projects, isNotEmpty);
       final mobileSession = await c.createSession('codex', c.projects.first.id);
+      final permissions = await c.sessionPermissions(mobileSession.id);
+      final changed = await c.changePermissions(
+        mobileSession.id,
+        permissions.version,
+        'auto_review',
+      );
+      expect(changed.mode, 'auto_review');
+      expect(
+        (await c.sessionPermissions(mobileSession.id)).mode,
+        'auto_review',
+      );
       final catalog = await c.inputCatalog('codex', mobileSession.id);
       expect(catalog.models.single.id, 'fixture-model');
       final file = DraftFile(

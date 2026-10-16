@@ -25,6 +25,11 @@ type Project struct {
 	Path string `json:"path"`
 }
 type Manager struct {
+	CodexReadHome      string
+	readStateMu        sync.Mutex
+	readStateChecked   time.Time
+	readStateAvailable bool
+	readStateIDs       map[string]bool
 	// Legacy stdio adapter test seam; original Desktop input uses the separate
 	// owner-enabled debugger path and must never fall back to a replacement CLI.
 	ClaudeDesktopInput bool
@@ -94,6 +99,7 @@ type runtime struct {
 	claudeInputs int
 	state        State
 	options      TurnOptions
+	permissions  map[string]any
 	settings     SessionSettings
 }
 
@@ -162,6 +168,13 @@ func (m *Manager) Projects() []Project {
 	return out
 }
 func (m *Manager) Create(agent, project, parent string) (store.Session, error) {
+	return m.CreatePermission(agent, project, parent, "")
+}
+
+func (m *Manager) CreatePermission(agent, project, parent, mode string) (store.Session, error) {
+	if mode != "" && (agent != "codex" && agent != "claude" || !validPermissionMode(agent, mode)) {
+		return store.Session{}, errors.New("不支持此权限模式")
+	}
 	if !KnownAgent(agent) {
 		return store.Session{}, errors.New("未知 Agent")
 	}
@@ -249,10 +262,21 @@ func (m *Manager) Create(agent, project, parent string) (store.Session, error) {
 	}
 	if agent == "codex" {
 		method := "thread/start"
-		params := map[string]any{"cwd": path, "approvalPolicy": "on-request", "sandbox": "workspace-write"}
+		// Let the native runtime resolve project/global permissions. Explicit
+		// values here override the owner's defaults, including on forks.
+		params := map[string]any{"cwd": path}
 		if parent != "" {
 			method = "thread/fork"
 			params["threadId"] = parent
+		}
+		if mode != "" {
+			for k, v := range codexPermissionParams(mode, path) {
+				if k == "sandboxPolicy" {
+					params["sandbox"] = sandboxConfigName(str(obj(v)["type"]))
+				} else {
+					params[k] = v
+				}
+			}
 		}
 		response, err := r.call(method, params)
 		if err != nil {
@@ -267,6 +291,16 @@ func (m *Manager) Create(agent, project, parent string) (store.Session, error) {
 		r.mu.Lock()
 		r.session = ss
 		r.state.Session = ss.ID
+		r.permissions = codexPermissionState(response)
+		r.mu.Unlock()
+	}
+	if agent == "claude" && mode != "" {
+		if _, e = r.call("set_permission_mode", map[string]any{"subtype": "set_permission_mode", "mode": mode}); e != nil {
+			r.close()
+			return ss, e
+		}
+		r.mu.Lock()
+		r.permissions = map[string]any{"mode": mode}
 		r.mu.Unlock()
 	}
 	if e = m.Store.Put("sessions", ss.ID, ss); e != nil {
@@ -297,6 +331,12 @@ func (m *Manager) Create(agent, project, parent string) (store.Session, error) {
 		ss.Status = "idle"
 		ss.Updated = time.Now().UTC().Format(time.RFC3339Nano)
 		_ = m.Store.Put("sessions", ss.ID, ss)
+	}
+	if mode != "" {
+		if e = m.Store.Put("agentconfig", "permission-choice/"+ss.ID, mode); e != nil {
+			r.close()
+			return ss, e
+		}
 	}
 	m.runs[ss.ID] = r
 	return ss, nil
@@ -332,7 +372,18 @@ func (m *Manager) get(id string) (*runtime, error) {
 		return nil, e
 	}
 	if ss.Agent == "codex" {
-		if _, e = r.call("thread/resume", map[string]any{"threadId": id, "cwd": ss.Project, "approvalPolicy": "on-request", "sandbox": "workspace-write"}); e != nil {
+		var resumed map[string]any
+		if resumed, e = r.call("thread/resume", map[string]any{"threadId": id, "cwd": ss.Project}); e != nil {
+			r.close()
+			return nil, e
+		}
+		r.mu.Lock()
+		r.permissions = codexPermissionState(resumed)
+		r.mu.Unlock()
+	}
+	var saved string
+	if m.Store.Get("agentconfig", "permission-choice/"+id, &saved) == nil && validPermissionMode(ss.Agent, saved) {
+		if e = r.applyPermissionMode(saved); e != nil {
 			r.close()
 			return nil, e
 		}
@@ -342,6 +393,20 @@ func (m *Manager) get(id string) (*runtime, error) {
 	}
 	m.runs[id] = r
 	return r, nil
+}
+
+func (m *Manager) liveRuntime(id string) *runtime {
+	m.mu.Lock()
+	r := m.runs[id]
+	m.mu.Unlock()
+	if r != nil {
+		select {
+		case <-r.done:
+			return nil
+		default:
+		}
+	}
+	return r
 }
 func (m *Manager) Send(id, text, request string) error {
 	return m.SendInput(id, text, request, TurnOptions{}, nil)
@@ -413,6 +478,21 @@ func (m *Manager) SendInput(id, text, request string, o TurnOptions, files []Inp
 			text = display
 		}
 		return c.Send(m.Context, ss, text, request)
+	}
+	// A chat originally created by the phone can later be opened in Desktop.
+	// Follow that existing owner instead of resuming a competing app-server.
+	if ss.Agent == "codex" && ss.Source != "desktop" && m.Desktop != nil {
+		localRun := m.liveRuntime(id)
+		if localRun == nil {
+			ctx, cancel := context.WithTimeout(nonNil(m.Context), 2*time.Second)
+			thread, e := m.Desktop.Read(ctx, id)
+			cancel()
+			if e == nil && thread.ID == id && thread.Kind == "codex" && thread.Host == "local" && (thread.Project == "" || thread.Project == ss.Project) {
+				if e = m.Store.AdoptCodexDesktop(id, ss.Project); e != nil {
+					return e
+				}
+			}
+		}
 	}
 	if m.Store.Get("sessions", id, &ss) == nil && ss.Source == "desktop" {
 		if m.Desktop == nil {
@@ -660,7 +740,9 @@ func (m *Manager) Close() {
 func (m *Manager) launch(ss store.Session, resume bool) (*runtime, error) {
 	args := []string{"app-server"}
 	if ss.Agent == "claude" {
-		args = []string{"--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "default", "--permission-prompt-tool", "stdio"}
+		// Omit permission-mode so Claude resolves its own session/settings
+		// policy. The stdio callback only forwards native permission requests.
+		args = []string{"--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio", "--allow-dangerously-skip-permissions"}
 		if resume {
 			args = append(args, "--resume="+ss.ID)
 		} else {
@@ -701,12 +783,16 @@ func (m *Manager) launch(ss store.Session, resume bool) (*runtime, error) {
 	go r.read(output)
 	var err error
 	if ss.Agent == "codex" {
-		_, err = r.call("initialize", map[string]any{"clientInfo": map[string]any{"name": "agentdeck", "title": "AgentDeck", "version": "0.4.1"}})
+		_, err = r.call("initialize", map[string]any{"clientInfo": map[string]any{"name": "agentdeck", "title": "AgentDeck", "version": "0.4.1"}, "capabilities": map[string]any{"experimentalApi": true}})
 		if err == nil {
 			err = r.write(map[string]any{"method": "initialized"})
 		}
 	} else {
-		_, err = r.call("initialize", map[string]any{"subtype": "initialize", "hooks": nil})
+		var init map[string]any
+		init, err = r.call("initialize", map[string]any{"subtype": "initialize", "hooks": nil})
+		r.mu.Lock()
+		r.permissions = map[string]any{"mode": str(init["current_permission_mode"])}
+		r.mu.Unlock()
 	}
 	if err != nil {
 		r.close()
@@ -834,7 +920,13 @@ func (r *runtime) read(reader io.Reader) {
 			}
 		}
 		r.mu.Lock()
+		if method == "thread/settings/updated" {
+			r.permissions = codexPermissionState(obj(params["threadSettings"]))
+		}
 		if r.session.Agent == "claude" {
+			if mode := str(d["permissionMode"]); mode != "" {
+				r.permissions = map[string]any{"mode": mode}
+			}
 			native := nativeSettings(d, "claude")
 			if native.Model != "" {
 				r.settings.Model = native.Model

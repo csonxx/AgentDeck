@@ -1,3 +1,4 @@
+import 'core/permissions.dart';
 import 'language.dart';
 import 'dart:io';
 import 'dart:async';
@@ -20,6 +21,8 @@ import 'conversation_outline.dart';
 import 'dart:typed_data';
 import 'design.dart';
 import 'agent_settings.dart';
+import 'core/display.dart';
+import 'display_setting.dart';
 import 'core/agents.dart';
 import 'core/input.dart';
 import 'input_composer.dart';
@@ -34,12 +37,31 @@ import 'progressive_text.dart';
 import 'approval_details.dart';
 import 'reading_scroll_view.dart';
 import 'core/conversation_presentation.dart';
+import 'client_status.dart';
+import 'loading_image.dart';
 export 'running_indicator.dart';
 
 const ink = DeckColors.ink;
 const paper = DeckColors.paper;
 const muted = DeckColors.muted;
 const accent = DeckColors.accent;
+final deckRoutes = RouteObserver<ModalRoute<dynamic>>();
+
+Widget unreadDot(BuildContext context, String id) => Semantics(
+  label: context.tr('执行完成，未读'),
+  child: Tooltip(
+    message: context.tr('执行完成，未读'),
+    child: Container(
+      key: ValueKey('unread-$id'),
+      width: 8,
+      height: 8,
+      decoration: const BoxDecoration(
+        color: Color(0xFF3884FF),
+        shape: BoxShape.circle,
+      ),
+    ),
+  ),
+);
 
 String sessionDisplayTitle(BuildContext context, AgentSession session) {
   final title = session.title.isEmpty
@@ -73,7 +95,8 @@ void main() {
 class AgentDeckApp extends StatefulWidget {
   final AgentClient? client;
   final LanguageController? languages;
-  const AgentDeckApp({super.key, this.client, this.languages});
+  final DisplayController? display;
+  const AgentDeckApp({super.key, this.client, this.languages, this.display});
   @override
   State<AgentDeckApp> createState() => _AgentDeckAppState();
 }
@@ -83,11 +106,14 @@ class _AgentDeckAppState extends State<AgentDeckApp>
   late final AgentClient client = widget.client ?? AgentClient();
   late final LanguageController languages =
       widget.languages ?? LanguageController(client.vault);
+  late final DisplayController display =
+      widget.display ?? DisplayController(client.vault);
   @override
   void initState() {
     super.initState();
     unawaited(client.appLock.load());
     if (widget.languages == null) unawaited(languages.load());
+    if (widget.display == null) unawaited(display.load());
     WidgetsBinding.instance.addObserver(this);
     if (widget.client == null) {
       client.initialize();
@@ -98,12 +124,14 @@ class _AgentDeckAppState extends State<AgentDeckApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     if (widget.languages == null) languages.dispose();
+    if (widget.display == null) display.dispose();
     if (widget.client == null) client.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    client.setReadingForeground(state == AppLifecycleState.resumed);
     if (state == AppLifecycleState.paused) {
       client.suspend();
       client.updates.background();
@@ -119,18 +147,25 @@ class _AgentDeckAppState extends State<AgentDeckApp>
     listenable: languages,
     builder: (context, _) => LanguageScope(
       controller: languages,
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: 'AgentDeck',
-        theme: deckTheme(),
-        locale: languages.language.locale,
-        supportedLocales: UiStrings.supportedLocales,
-        localizationsDelegates: UiStrings.delegates,
-        builder: (context, child) => AppLockScope(
-          controller: client.appLock,
-          child: AppLockGate(controller: client.appLock, child: child!),
+      child: DisplayScope(
+        controller: display,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'AgentDeck',
+          navigatorObservers: [deckRoutes],
+          theme: deckTheme(),
+          locale: languages.language.locale,
+          supportedLocales: UiStrings.supportedLocales,
+          localizationsDelegates: UiStrings.delegates,
+          builder: (context, child) => DisplayScale(
+            controller: display,
+            child: AppLockScope(
+              controller: client.appLock,
+              child: AppLockGate(controller: client.appLock, child: child!),
+            ),
+          ),
+          home: DeckHome(client: client),
         ),
-        home: DeckHome(client: client),
       ),
     ),
   );
@@ -226,41 +261,69 @@ class _DeckHomeState extends State<DeckHome> {
     String agent = selectable.any((a) => a.id == filter)
         ? filter
         : selectable.first.id;
+    String permissionMode = '';
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, set) => AlertDialog(
           title: Text(context.tr('新建会话')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<String>(
-                initialValue: selected,
-                isExpanded: true,
-                decoration: InputDecoration(labelText: context.tr('项目')),
-                items: choices
-                    .map(
-                      (p) => DropdownMenuItem(
-                        value: p.id,
-                        child: Text(p.name, overflow: TextOverflow.ellipsis),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: selected,
+                  isExpanded: true,
+                  decoration: InputDecoration(labelText: context.tr('项目')),
+                  items: choices
+                      .map(
+                        (p) => DropdownMenuItem(
+                          value: p.id,
+                          child: Text(p.name, overflow: TextOverflow.ellipsis),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) => set(() => selected = v!),
+                ),
+                const SizedBox(height: 20),
+                DropdownButtonFormField<String>(
+                  initialValue: agent,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Agent'),
+                  items: selectable
+                      .map(
+                        (a) =>
+                            DropdownMenuItem(value: a.id, child: Text(a.name)),
+                      )
+                      .toList(),
+                  onChanged: (v) => set(() {
+                    agent = v!;
+                    permissionMode = '';
+                  }),
+                ),
+                if (creationPermissions(agent).isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  DropdownButtonFormField<String>(
+                    key: ValueKey('create-permission-$agent'),
+                    initialValue: permissionMode,
+                    isExpanded: true,
+                    decoration: InputDecoration(labelText: context.tr('权限')),
+                    items: [
+                      DropdownMenuItem(
+                        value: '',
+                        child: Text(context.tr('工作站默认权限')),
                       ),
-                    )
-                    .toList(),
-                onChanged: (v) => set(() => selected = v!),
-              ),
-              const SizedBox(height: 20),
-              DropdownButtonFormField<String>(
-                initialValue: agent,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Agent'),
-                items: selectable
-                    .map(
-                      (a) => DropdownMenuItem(value: a.id, child: Text(a.name)),
-                    )
-                    .toList(),
-                onChanged: (v) => set(() => agent = v!),
-              ),
-            ],
+                      for (final choice in creationPermissions(agent))
+                        DropdownMenuItem(
+                          value: choice.id,
+                          child: Text(choice.label),
+                        ),
+                    ],
+                    onChanged: (v) => set(() => permissionMode = v ?? ''),
+                  ),
+                ],
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -278,7 +341,11 @@ class _DeckHomeState extends State<DeckHome> {
     if (ok != true || !mounted) return;
     setState(() => creating = true);
     try {
-      final session = await c.createSession(agent, selected);
+      final session = await c.createSession(
+        agent,
+        selected,
+        permissionMode: permissionMode,
+      );
       if (mounted) {
         setState(() {
           project = session.project;
@@ -303,7 +370,15 @@ class _DeckHomeState extends State<DeckHome> {
   }
 
   void _open(AgentSession session) {
-    c.watch(session.id);
+    unawaited(
+      c.watch(session.id).catchError((Object e) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(context.trError(e))));
+        }
+      }),
+    );
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -376,7 +451,9 @@ class _DeckHomeState extends State<DeckHome> {
                         ),
                       ),
                       if (c.goals
-                              .where((g) => g.session == session.id)
+                              .where(
+                                (g) => g.session == session.id && g.isCurrent,
+                              )
                               .firstOrNull
                           case final goal?)
                         Text(
@@ -400,10 +477,11 @@ class _DeckHomeState extends State<DeckHome> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    if (session.status == 'running' ||
-                        session.status == 'pending')
+                    if (c.live &&
+                        (session.status == 'running' ||
+                            session.status == 'pending'))
                       const RunningIndicator()
-                    else if (session.status == 'waiting')
+                    else if (c.live && session.status == 'waiting')
                       Tooltip(
                         message: context.tr('等待确认'),
                         child: const Icon(
@@ -412,6 +490,8 @@ class _DeckHomeState extends State<DeckHome> {
                           color: muted,
                         ),
                       )
+                    else if (c.isUnread(session))
+                      unreadDot(context, session.id)
                     else
                       Text(
                         _updatedLabel(session.updated),
@@ -458,7 +538,7 @@ class _DeckHomeState extends State<DeckHome> {
     final collapsed = layout.collapsed.contains(path);
     final expanded = layout.expanded.contains(path);
     final canCreate =
-        c.connected && !creating && c.projects.any((p) => p.path == path);
+        c.live && !creating && c.projects.any((p) => p.path == path);
     final name = projectDisplayName(context, path);
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -542,6 +622,10 @@ class _DeckHomeState extends State<DeckHome> {
                       (s) => s.status == 'running' || s.status == 'pending',
                     )) ...[
                   const RunningIndicator(),
+                  const SizedBox(width: 8),
+                ],
+                if (sessions.any(c.isUnread)) ...[
+                  unreadDot(context, 'project-$path'),
                   const SizedBox(width: 8),
                 ],
                 Container(
@@ -715,7 +799,7 @@ class _DeckHomeState extends State<DeckHome> {
               const SizedBox(width: 4),
               IconButton.filled(
                 onPressed:
-                    c.connected &&
+                    c.live &&
                         !creating &&
                         c.agentInfo(filter).canCreate &&
                         c.agentInfo(filter).configured
@@ -752,24 +836,7 @@ class _DeckHomeState extends State<DeckHome> {
                 ),
               ),
               Flexible(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 3),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ConnectionDot(connected: c.connected),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          context.tr(c.state),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: muted, fontSize: 10),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                child: ClientStatusButton(client: c, onPair: _pair),
               ),
             ],
           ),
@@ -877,7 +944,7 @@ class _DeckHomeState extends State<DeckHome> {
                         icon: const Icon(Icons.data_usage_rounded, size: 14),
                         label: Text(context.tr('用量')),
                       ),
-                    if (c.goals.any((g) => g.agent == filter) ||
+                    if (c.goals.any((g) => g.agent == filter && g.isCurrent) ||
                         c.goalError.isNotEmpty)
                       TextButton.icon(
                         key: const ValueKey('agent-goals'),
@@ -907,7 +974,7 @@ class _DeckHomeState extends State<DeckHome> {
                                       child: Text(context.trError(c.goalError)),
                                     ),
                                   for (final g in c.goals.where(
-                                    (g) => g.agent == filter,
+                                    (g) => g.agent == filter && g.isCurrent,
                                   ))
                                     GoalPanel(
                                       client: c,
@@ -936,7 +1003,7 @@ class _DeckHomeState extends State<DeckHome> {
                         ),
                         icon: const Icon(Icons.flag_outlined, size: 14),
                         label: Text(
-                          '${context.tr('目标')} · ${c.goals.where((g) => g.agent == filter && g.status == 'active').length}',
+                          '${context.tr('目标')} · ${c.goals.where((g) => g.agent == filter && g.isCurrent).length}',
                         ),
                       ),
                     const Spacer(),
@@ -953,22 +1020,7 @@ class _DeckHomeState extends State<DeckHome> {
                   ],
                 ),
               ),
-              if (c.error.isNotEmpty)
-                Container(
-                  margin: const EdgeInsets.only(top: 8, bottom: 8),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFEEEB),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    context.trError(c.error),
-                    style: const TextStyle(
-                      color: Color(0xFFBA3F38),
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
+              ClientBlockingNotice(client: c, onPair: _pair),
             ],
           ),
         ),
@@ -1092,21 +1144,7 @@ class _DeckHomeState extends State<DeckHome> {
               ),
             ),
             const SizedBox(height: 14),
-            Row(
-              children: [
-                ConnectionDot(connected: c.connected),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    context.tr(c.state),
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFFB8BDC6),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            ClientStatusButton(client: c, onPair: _pair, light: true),
             if (c.device?['relay'] != null)
               Padding(
                 padding: EdgeInsets.only(top: 12),
@@ -1525,7 +1563,40 @@ class ConversationPage extends StatefulWidget {
   State<ConversationPage> createState() => _ConversationPageState();
 }
 
-class _ConversationPageState extends State<ConversationPage> {
+class _ConversationPageState extends State<ConversationPage> with RouteAware {
+  ModalRoute<dynamic>? readingRoute;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (readingRoute != route) {
+      deckRoutes.unsubscribe(this);
+      readingRoute = route;
+      if (route != null) deckRoutes.subscribe(this, route);
+    }
+    _becameVisible();
+  }
+
+  void _becameVisible() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && readingRoute?.isCurrent == true) {
+        c.setReadingSession(active.id);
+      }
+    });
+  }
+
+  void _becameHidden() {
+    if (c.sessionReads.visible == active.id) c.setReadingSession('');
+  }
+
+  @override
+  void didPush() => _becameVisible();
+  @override
+  void didPopNext() => _becameVisible();
+  @override
+  void didPushNext() => _becameHidden();
+  @override
+  void didPop() => _becameHidden();
   final scroll = ReadingScrollController();
   final readingView = GlobalKey<ReadingScrollViewState>();
   bool userScrolling = false;
@@ -1557,6 +1628,11 @@ class _ConversationPageState extends State<ConversationPage> {
   List<TranscriptSection> _sections = [];
   bool expandAllActivities = false;
   final activityOverrides = <String, bool>{};
+  bool get _foldedPaging =>
+      !expandAllActivities &&
+      !_sections.any(
+        (section) => section.activity && _activityExpanded(section),
+      );
   List<Object?> sendStageArgs = const [];
   bool follow = true;
   String? focusedRecord;
@@ -1598,7 +1674,9 @@ class _ConversationPageState extends State<ConversationPage> {
         current != null &&
         current.blocks.isNotEmpty) {
       initialDialogueCheckDone = true;
-      if (pagingDirection == 0 && !current.blocks.any(_isDialogue)) {
+      if (pagingDirection == 0 &&
+          _foldedPaging &&
+          !current.blocks.any(_isDialogue)) {
         pagingDirection = current.hasMore ? 1 : (current.detached ? -1 : 0);
         seekingDialogue = pagingDirection;
       }
@@ -1619,10 +1697,11 @@ class _ConversationPageState extends State<ConversationPage> {
       final t = c.transcripts[active.id];
       if (t == null || t.loadingOlder || t.loadingNewer) return;
       final direction = pagingDirection;
+      final wasSeekingDialogue = seekingDialogue == direction;
       final atEdge = direction > 0
           ? t.hasMore && scroll.position.extentAfter < 200
           : direction < 0 && t.detached && scroll.position.extentBefore < 200;
-      if (!atEdge && seekingDialogue != direction) return;
+      if (!atEdge && (seekingDialogue != direction || !_foldedPaging)) return;
       final dialogueBoundary = direction > 0
           ? t.blocks.where(_isDialogue).firstOrNull?.first
           : t.blocks.where(_isDialogue).lastOrNull?.first;
@@ -1660,7 +1739,19 @@ class _ConversationPageState extends State<ConversationPage> {
           );
           // Raw pages contain tool events too. Continue past those pages even
           // if their collapsed headers have pushed the scroll edge away.
-          seekingDialogue = reachedDialogue ? 0 : direction;
+          seekingDialogue = reachedDialogue || !_foldedPaging ? 0 : direction;
+          if (wasSeekingDialogue && reachedDialogue && _foldedPaging) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && !jumping && pagingDirection == direction) {
+                scroll.revealPagingEdge(older: direction > 0);
+                if (direction < 0 && !t.detached) {
+                  t.readingHistory = false;
+                  setState(() => follow = true);
+                }
+              }
+            });
+            WidgetsBinding.instance.ensureVisualUpdate();
+          }
         }
       } finally {
         pagingBusy = false;
@@ -1678,6 +1769,8 @@ class _ConversationPageState extends State<ConversationPage> {
 
   @override
   void dispose() {
+    deckRoutes.unsubscribe(this);
+    _becameHidden();
     c.removeListener(_updated);
     c.unwatch(active.id).catchError((Object _) {});
     prompt.dispose();
@@ -1737,6 +1830,7 @@ class _ConversationPageState extends State<ConversationPage> {
   }
 
   Future<void> _latest() async {
+    c.transcripts[active.id]?.readingHistory = false;
     setState(() {
       follow = true;
       pagingDirection = 0;
@@ -1754,6 +1848,19 @@ class _ConversationPageState extends State<ConversationPage> {
       }
     }
     _updated();
+  }
+
+  Future<void> _reloadHistory() async {
+    try {
+      readingView.currentState?.anchorReadingPosition();
+      await c.reload(active.id);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.tr('历史加载失败，请重试'))));
+      }
+    }
   }
 
   Future<void> _older() async {
@@ -1789,7 +1896,7 @@ class _ConversationPageState extends State<ConversationPage> {
   }
 
   String _rowKey(Object row) => switch (row) {
-    final TranscriptSection section => 'section/${section.blocks.first.key}',
+    final TranscriptSection section => 'section/${section.key}',
     final TranscriptBlock block => 'block/${block.key}',
     _ => throw StateError('Unknown transcript row'),
   };
@@ -2022,7 +2129,7 @@ class _ConversationPageState extends State<ConversationPage> {
                 .where((b) => b.kind != 'queued_message')
                 .toList() ??
             [];
-        _sections = transcriptSections(_sectionBlocks);
+        _sections = transcriptSections(_sectionBlocks, previous: _sections);
       }
       final blocks = _sectionBlocks;
       final latest =
@@ -2047,9 +2154,11 @@ class _ConversationPageState extends State<ConversationPage> {
       final pending =
           latest.status == 'pending' || (waiting && latest.status != 'running');
       final running =
-          latest.status == 'running' ||
-          latest.status == 'waiting' ||
-          pending ||
+          c.live &&
+              (latest.status == 'running' ||
+                  latest.status == 'waiting' ||
+                  pending ||
+                  waiting) ||
           sending;
       final sections = [..._sections];
       for (final localReceipt in inputReceipts) {
@@ -2129,7 +2238,7 @@ class _ConversationPageState extends State<ConversationPage> {
             ),
             IconButton(
               tooltip: context.tr('重新载入历史'),
-              onPressed: () => c.reload(active.id),
+              onPressed: _reloadHistory,
               icon: const Icon(Icons.refresh, size: 21),
             ),
           ],
@@ -2171,13 +2280,38 @@ class _ConversationPageState extends State<ConversationPage> {
                     ),
                   ] else
                     Text(
-                      c.connected ? context.tr('就绪') : context.tr('连接中'),
+                      c.live ? context.tr('就绪') : context.tr('状态待同步'),
                       style: const TextStyle(color: muted, fontSize: 12),
                     ),
                 ],
               ),
             ),
-            if (c.goals.where((g) => g.session == active.id).firstOrNull
+            if (!c.live && !c.demo)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        context.tr('当前显示上次同步的内容，执行状态待确认'),
+                        style: const TextStyle(fontSize: 11, color: muted),
+                      ),
+                    ),
+                    ClientStatusButton(
+                      client: c,
+                      onPair: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => PairPage(client: c),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (c.goals
+                    .where((g) => g.session == active.id && g.isCurrent)
+                    .firstOrNull
                 case final goal?)
               GoalPanel(client: c, goal: goal),
             const Divider(height: 1),
@@ -2230,6 +2364,12 @@ class _ConversationPageState extends State<ConversationPage> {
                               : (notification as OverscrollNotification)
                                     .overscroll;
                           if (delta != 0 && !jumping) {
+                            // Keep newly streamed items out of the window being
+                            // read. Existing items can still receive updates;
+                            // forward paging rejoins the live tail.
+                            if (delta > 0 && transcript != null) {
+                              transcript.readingHistory = true;
+                            }
                             pagingDirection = delta > 0 ? 1 : -1;
                             _schedulePaging();
                           }
@@ -2238,6 +2378,7 @@ class _ConversationPageState extends State<ConversationPage> {
                               transcript?.detached != true &&
                               notification.metrics.extentBefore < 140 &&
                               pagingDirection < 0;
+                          if (v) transcript?.readingHistory = false;
                           if (v != follow) {
                             follow = v;
                             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2281,6 +2422,7 @@ class _ConversationPageState extends State<ConversationPage> {
                               ),
                               controller: scroll,
                               itemKeys: rowKeys,
+                              anchorKeys: rowByKey.keys.toSet(),
                               itemBuilder: (_, index) {
                                 final itemKey = rowKeys[index];
                                 if (itemKey == 'padding-bottom') {
@@ -3028,6 +3170,10 @@ class _EncryptedImageState extends State<EncryptedImage> {
             .attachment(widget.session, widget.href)
             .then((a) => a.downloadRequired ? Uint8List(0) : a.bytes);
   late Future<Uint8List> data = load();
+  void retry() => setState(() {
+    if (widget.id.isNotEmpty) widget.client.images.remove(widget.id);
+    data = load();
+  });
   @override
   void didUpdateWidget(EncryptedImage oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -3040,26 +3186,24 @@ class _EncryptedImageState extends State<EncryptedImage> {
   }
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<dynamic>(
+  Widget build(BuildContext context) => FutureBuilder<Uint8List>(
     future: data,
     builder: (_, snap) {
+      if (snap.connectionState != ConnectionState.done) {
+        return const ImageLoading();
+      }
       if (snap.hasError) {
         return TextButton(
-          onPressed: () => setState(() {
-            data = load();
-          }),
+          onPressed: retry,
           child: Text(
             context.tr('{0}，点击重试', [context.tr(attachmentError(snap.error))]),
           ),
         );
       }
       if (!snap.hasData) {
-        return const SizedBox(
-          height: 120,
-          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        );
+        return const ImageLoading();
       }
-      if ((snap.data as Uint8List).isEmpty && widget.href.isNotEmpty) {
+      if (snap.data!.isEmpty && widget.href.isNotEmpty) {
         return TextButton.icon(
           onPressed: () => Navigator.push(
             context,
@@ -3091,9 +3235,9 @@ class _EncryptedImageState extends State<EncryptedImage> {
                 minScale: .5,
                 maxScale: 6,
                 child: Center(
-                  child: Image.memory(
-                    snap.data,
-                    errorBuilder: (_, _, _) => Text(context.tr('图片无法解码')),
+                  child: LoadingImage(
+                    image: MemoryImage(snap.data!),
+                    errorColor: Colors.white,
                   ),
                 ),
               ),
@@ -3111,10 +3255,21 @@ class _EncryptedImageState extends State<EncryptedImage> {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              child: Image.memory(
-                snap.data,
+              child: LoadingImage(
+                image: ResizeImage(
+                  MemoryImage(snap.data!),
+                  width:
+                      (MediaQuery.sizeOf(context).width *
+                              MediaQuery.devicePixelRatioOf(context))
+                          .ceil()
+                          .clamp(64, 2048),
+                  height: (320 * MediaQuery.devicePixelRatioOf(context))
+                      .ceil()
+                      .clamp(64, 2048),
+                  policy: ResizeImagePolicy.fit,
+                ),
                 fit: BoxFit.contain,
-                errorBuilder: (_, _, _) => Text(context.tr('图片无法解码')),
+                onRetry: retry,
               ),
             ),
           ),

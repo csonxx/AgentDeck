@@ -12,6 +12,7 @@ import (
 )
 
 type AndroidRelease struct {
+	Edition     string `json:"edition,omitempty"`
 	Version     string `json:"version"`
 	VersionCode int64  `json:"version_code"`
 	Package     string `json:"package"`
@@ -24,6 +25,9 @@ type AndroidRelease struct {
 }
 
 func (r AndroidRelease) Validate() error {
+	if r.Edition != "" && r.Edition != "voice" && r.Edition != "lite" {
+		return errors.New("invalid Android edition")
+	}
 	u, e := url.Parse(r.URL)
 	h, he := hex.DecodeString(r.SHA256)
 	if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" ||
@@ -34,6 +38,16 @@ func (r AndroidRelease) Validate() error {
 	return nil
 }
 
+func releaseKey(edition string) (string, error) {
+	switch edition {
+	case "", "voice":
+		return "android-release", nil
+	case "lite":
+		return "android-release-lite", nil
+	}
+	return "", errors.New("invalid Android edition")
+}
+
 func (g *Server) PublishAndroidRelease(r AndroidRelease) error {
 	if err := r.Validate(); err != nil {
 		return err
@@ -41,19 +55,25 @@ func (g *Server) PublishAndroidRelease(r AndroidRelease) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	var old AndroidRelease
-	if err := g.Store.Get("agentconfig", "android-release", &old); err != nil && !errors.Is(err, os.ErrNotExist) {
+	key, _ := releaseKey(r.Edition)
+	if err := g.Store.Get("agentconfig", key, &old); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if old.VersionCode > r.VersionCode || old.VersionCode == r.VersionCode && old.SHA256 != "" && old.SHA256 != r.SHA256 {
 		return errors.New("release cannot downgrade or replace an existing build")
 	}
-	return g.Store.Put("agentconfig", "android-release", r)
+	return g.Store.Put("agentconfig", key, r)
 }
 
 func (g *Server) releaseRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /v2/app/releases/android", func(w http.ResponseWriter, r *http.Request) {
+		key, e := releaseKey(r.URL.Query().Get("edition"))
+		if e != nil {
+			fail(w, 400)
+			return
+		}
 		var release AndroidRelease
-		if err := g.Store.Get("agentconfig", "android-release", &release); errors.Is(err, os.ErrNotExist) {
+		if err := g.Store.Get("agentconfig", key, &release); errors.Is(err, os.ErrNotExist) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		} else if err != nil || release.Validate() != nil {
@@ -67,8 +87,13 @@ func (g *Server) releaseRoutes(m *http.ServeMux) {
 		write(w, release)
 	})
 	m.HandleFunc("GET /v2/app/releases/android/apk", func(w http.ResponseWriter, r *http.Request) {
+		key, e := releaseKey(r.URL.Query().Get("edition"))
+		if e != nil {
+			fail(w, 400)
+			return
+		}
 		var release AndroidRelease
-		if g.Store.Get("agentconfig", "android-release", &release) != nil || release.Validate() != nil {
+		if g.Store.Get("agentconfig", key, &release) != nil || release.Validate() != nil {
 			fail(w, 404)
 			return
 		}

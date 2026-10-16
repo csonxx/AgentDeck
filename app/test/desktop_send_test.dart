@@ -12,7 +12,7 @@ class DesktopClient extends AgentClient {
   final ack = Completer<void>();
   String? parent, sent;
   DesktopClient() {
-    connected = true;
+    health.transition(ConnectionPhase.live);
     codexDesktop = true;
     projects = [AgentProject(id: 'p', name: 'fixture', path: '/fixture')];
     sessions = [
@@ -33,6 +33,7 @@ class DesktopClient extends AgentClient {
     String agent,
     String project, {
     String parent = '',
+    String permissionMode = '',
   }) {
     this.parent = parent;
     return adoption.future;

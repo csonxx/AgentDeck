@@ -342,39 +342,41 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 }
 
 type Request struct {
-	Version      string   `json:"version,omitempty"`
-	Speed        string   `json:"speed,omitempty"`
-	Download     string   `json:"download,omitempty"`
-	GoalVersion  string   `json:"goal_version,omitempty"`
-	GoalAction   string   `json:"goal_action,omitempty"`
-	Delivery     string   `json:"delivery,omitempty"`
-	QueueID      string   `json:"queue_id,omitempty"`
-	QueueVersion string   `json:"queue_version,omitempty"`
-	Model        string   `json:"model,omitempty"`
-	Effort       string   `json:"effort,omitempty"`
-	Attachments  []string `json:"attachments,omitempty"`
-	Upload       string   `json:"upload,omitempty"`
-	Name         string   `json:"name,omitempty"`
-	MIME         string   `json:"mime,omitempty"`
-	Kind         string   `json:"kind,omitempty"`
-	Bytes        string   `json:"bytes,omitempty"`
-	Size         int      `json:"size,omitempty"`
-	Offset       int      `json:"offset,omitempty"`
-	Limit        int      `json:"limit,omitempty"`
-	Project      string   `json:"project,omitempty"`
-	Agent        string   `json:"agent,omitempty"`
-	Text         string   `json:"text,omitempty"`
-	Approval     string   `json:"approval,omitempty"`
-	Decision     string   `json:"decision,omitempty"`
-	ID           string   `json:"id"`
-	Method       string   `json:"method"`
-	Session      string   `json:"session,omitempty"`
-	After        uint64   `json:"after,omitempty"`
-	Before       uint64   `json:"before,omitempty"`
-	First        uint64   `json:"first,omitempty"`
-	Recent       bool     `json:"recent,omitempty"`
-	Media        string   `json:"media,omitempty"`
-	Href         string   `json:"href,omitempty"`
+	PermissionMode    string   `json:"permission_mode,omitempty"`
+	PermissionVersion string   `json:"permission_version,omitempty"`
+	Version           string   `json:"version,omitempty"`
+	Speed             string   `json:"speed,omitempty"`
+	Download          string   `json:"download,omitempty"`
+	GoalVersion       string   `json:"goal_version,omitempty"`
+	GoalAction        string   `json:"goal_action,omitempty"`
+	Delivery          string   `json:"delivery,omitempty"`
+	QueueID           string   `json:"queue_id,omitempty"`
+	QueueVersion      string   `json:"queue_version,omitempty"`
+	Model             string   `json:"model,omitempty"`
+	Effort            string   `json:"effort,omitempty"`
+	Attachments       []string `json:"attachments,omitempty"`
+	Upload            string   `json:"upload,omitempty"`
+	Name              string   `json:"name,omitempty"`
+	MIME              string   `json:"mime,omitempty"`
+	Kind              string   `json:"kind,omitempty"`
+	Bytes             string   `json:"bytes,omitempty"`
+	Size              int      `json:"size,omitempty"`
+	Offset            int      `json:"offset,omitempty"`
+	Limit             int      `json:"limit,omitempty"`
+	Project           string   `json:"project,omitempty"`
+	Agent             string   `json:"agent,omitempty"`
+	Text              string   `json:"text,omitempty"`
+	Approval          string   `json:"approval,omitempty"`
+	Decision          string   `json:"decision,omitempty"`
+	ID                string   `json:"id"`
+	Method            string   `json:"method"`
+	Session           string   `json:"session,omitempty"`
+	After             uint64   `json:"after,omitempty"`
+	Before            uint64   `json:"before,omitempty"`
+	First             uint64   `json:"first,omitempty"`
+	Recent            bool     `json:"recent,omitempty"`
+	Media             string   `json:"media,omitempty"`
+	Href              string   `json:"href,omitempty"`
 }
 
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
@@ -481,12 +483,36 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	catalogState := ""
 	sessionRevision := s.Store.SessionCatalogRevision()
 	catalogCheck := time.Now()
+	var nativeReadSessions []store.Session
+	nativeReadState := ""
+	nativeReadCheck := time.Time{}
+	pushNativeReads := func(force bool) error {
+		if s.Manager == nil {
+			return nil
+		}
+		nativeReadCheck = time.Now()
+		state := s.Manager.CodexReadState(nativeReadSessions)
+		raw, _ := json.Marshal(state)
+		if !force && string(raw) == nativeReadState {
+			return nil
+		}
+		nativeReadState = string(raw)
+		return send(map[string]any{"type": "native_reads", "agent": "codex", "state": state})
+	}
 	sessions := func(id string) error {
 		ss, e := s.Store.Sessions()
 		if e != nil {
 			return e
 		}
-		return send(map[string]any{"type": "sessions", "id": id, "sessions": ss, "codex_desktop": s.Manager != nil && s.Manager.Desktop != nil, "agents": func() any {
+		nativeReadSessions = ss
+		state := agent.NativeReadState{States: map[string]bool{}}
+		if s.Manager != nil {
+			state = s.Manager.CodexReadState(ss)
+		}
+		raw, _ := json.Marshal(state)
+		nativeReadState = string(raw)
+		nativeReadCheck = time.Now()
+		return send(map[string]any{"type": "sessions", "id": id, "sessions": ss, "native_reads": state, "codex_desktop": s.Manager != nil && s.Manager.Desktop != nil, "agents": func() any {
 			if s.Manager != nil {
 				info := s.Manager.Catalog()
 				encoded, _ := json.Marshal(info)
@@ -532,7 +558,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			switch req.Method {
-			case "goal_list", "usage", "models", "session_settings", "input_capabilities", "transcribe", "transcribe_preview", "upload_preview":
+			case "goal_list", "usage", "models", "session_settings", "session_permissions", "input_capabilities", "transcribe", "transcribe_preview", "upload_preview":
 				select {
 				case asyncSlots <- struct{}{}:
 					go func(req Request, owner string) {
@@ -576,7 +602,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				if send(response) != nil {
 					return
 				}
-			case "goal_change", "create", "send", "interrupt", "approve", "queue_cancel", "queue_edit", "queue_steer", "queue_delete":
+			case "session_permissions_change", "goal_change", "create", "send", "interrupt", "approve", "queue_cancel", "queue_edit", "queue_steer", "queue_delete":
 				var result any
 				notSent := false
 				err := errors.New("工作站未启用项目操作")
@@ -615,10 +641,12 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 							return
 						}
 						switch req.Method {
+						case "session_permissions_change":
+							result, err = s.Manager.ChangePermissions(req.Session, req.PermissionVersion, req.PermissionMode)
 						case "goal_change":
 							err = s.Manager.ChangeGoal(req.Session, req.GoalVersion, req.GoalAction, req.ID)
 						case "create":
-							result, err = s.Manager.Create(req.Agent, req.Project, req.Session)
+							result, err = s.Manager.CreatePermission(req.Agent, req.Project, req.Session, req.PermissionMode)
 						case "send":
 							var files []agent.InputAttachment
 							files, err = s.inputFiles(tk.Device, req.Session, req.Attachments)
@@ -818,6 +846,11 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 			}
 		case <-ticker.C:
 			downloads.prune(false)
+			if time.Since(nativeReadCheck) >= 2*time.Second {
+				if pushNativeReads(false) != nil {
+					return
+				}
+			}
 			if time.Since(queueCheck) >= time.Second {
 				if pushQueue(false) != nil {
 					return

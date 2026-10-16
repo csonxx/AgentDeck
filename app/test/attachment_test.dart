@@ -146,7 +146,7 @@ void main() {
       await tester.pump();
       await tester.runAsync(
         () => precacheImage(
-          MemoryImage(bytes),
+          tester.widget<Image>(find.byType(Image)).image,
           tester.element(find.byType(EncryptedImage)),
         ),
       );
@@ -155,6 +155,12 @@ void main() {
       expect(Uri.decodeFull(c.requestedHref), '/workspace/a b.png');
       expect(find.byType(Image), findsOneWidget);
       expect(find.text('图片见独立预览'), findsNothing);
+      await tester.runAsync(
+        () => precacheImage(
+          MemoryImage(bytes),
+          tester.element(find.byType(EncryptedImage)),
+        ),
+      );
       await tester.tap(find.byType(Image));
       await tester.pumpAndSettle();
       expect(find.byType(InteractiveViewer), findsOneWidget);
@@ -280,9 +286,10 @@ void main() {
     c.unavailable = false;
     await tester.tap(find.textContaining('点击重试'));
     await tester.pump();
+    await tester.pump();
     await tester.runAsync(
       () => precacheImage(
-        MemoryImage(bytes),
+        tester.widget<Image>(find.byType(Image)).image,
         tester.element(find.byType(EncryptedImage)),
       ),
     );

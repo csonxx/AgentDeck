@@ -2,6 +2,9 @@
 """Protocol fixture for tests only. Never installed in production PATH."""
 import sys,json,uuid,os,pathlib
 claude=os.path.basename(sys.argv[0])=='claude'
+native_permissions=os.environ.get('AGENTDECK_FIXTURE_NATIVE_PERMISSIONS')=='1'
+if native_permissions and claude and '--no-session-persistence' not in sys.argv:
+ assert not any(x.startswith(('--permission-mode','--dangerously-skip-permissions')) for x in sys.argv)
 session=next((x.split('=',1)[1] for x in sys.argv if x.startswith('--session-id=') or x.startswith('--resume=')),str(uuid.uuid4()))
 strict=os.environ.get('AGENTDECK_FIXTURE_SESSION_DIR')
 if claude and strict and '--no-session-persistence' not in sys.argv:
@@ -10,6 +13,8 @@ if claude and strict and '--no-session-persistence' not in sys.argv:
  if resumed and not marker.exists():sys.exit(1)
  if not resumed and marker.exists():sys.exit(1)
 turn='';pending=False;message=''
+permission_mode='default'
+native_policy={'approvalPolicy':'on-request','approvalsReviewer':'user','sandboxPolicy':{'type':'workspaceWrite'}}
 def send(v):print(json.dumps(v),flush=True)
 def finish(text='RUNTIME_OK',status='completed'):
  global pending
@@ -27,9 +32,10 @@ for line in sys.stdin:
  d=json.loads(line)
  if claude:
   if d.get('type')=='control_request':
+   if d['request']['subtype']=='set_permission_mode':permission_mode=d['request']['mode']
    if d['request']['subtype']=='get_usage':
     send({'type':'control_response','response':{'subtype':'success','request_id':d['request_id'],'response':{'rate_limits_available':True,'rate_limits':{'five_hour':{'utilization':25,'resets_at':'2030-01-01T00:00:00Z'}}}}});continue
-   send({'type':'control_response','response':{'subtype':'success','request_id':d['request_id'],'response':{'models':[{'value':'fixture-model','displayName':'Fixture model','supportsEffort':True,'supportsFastMode':True,'supportedEffortLevels':['low','high']}]}}})
+   send({'type':'control_response','response':{'subtype':'success','request_id':d['request_id'],'response':{'current_permission_mode':permission_mode,'models':[{'value':'fixture-model','displayName':'Fixture model','supportsEffort':True,'supportsFastMode':True,'supportedEffortLevels':['low','high']}]}}})
    if d['request']['subtype']=='interrupt':finish('STOPPED','interrupted')
    continue
   if d.get('type')=='control_response':
@@ -40,6 +46,8 @@ for line in sys.stdin:
   if isinstance(message,list):message='\n'.join(x.get('text','') for x in message if x.get('type')=='text')
  else:
   method=d.get('method');params=d.get('params',{})
+  if native_permissions and method in ('thread/start','thread/fork','thread/resume','turn/start'):
+   assert not {'approvalPolicy','sandbox','sandboxPolicy','permissions','approvalsReviewer'}.intersection(params)
   if method in ('thread/goal/get','thread/goal/set','thread/goal/clear'):
    path=os.environ.get('AGENTDECK_FIXTURE_GOALS');goals=json.loads(pathlib.Path(path).read_text()) if path and pathlib.Path(path).exists() else {}
    gid=params['threadId']
@@ -61,8 +69,14 @@ for line in sys.stdin:
    send({'id':d['id'],'result':{'rateLimits':{'primary':{'usedPercent':25,'windowDurationMins':300,'resetsAt':1893456000}}}});continue
   if method=='model/list':
    send({'id':d['id'],'result':{'data':[{'id':'fixture-model','model':'fixture-model','displayName':'Fixture model','defaultReasoningEffort':'low','supportedReasoningEfforts':[{'reasoningEffort':'low'},{'reasoningEffort':'high'}],'inputModalities':['text','image'],'serviceTiers':[{'id':'priority','name':'Fast'}],'isDefault':True}],'nextCursor':None}});continue
+  if method=='thread/settings/update':
+   native_policy.update({k:v for k,v in params.items() if k in ['approvalPolicy','approvalsReviewer','sandboxPolicy']})
+   send({'method':'thread/settings/updated','params':{'threadId':session,'threadSettings':native_policy}})
+   send({'id':d['id'],'result':{}});continue
   if method in ('initialize','thread/start','thread/resume','thread/fork'):
-   send({'id':d['id'],'result':{'thread':{'id':session}}});continue
+   native_policy.update({k:v for k,v in params.items() if k in ['approvalPolicy','approvalsReviewer']})
+   if 'sandbox' in params:native_policy['sandboxPolicy']={'type':{'read-only':'readOnly','workspace-write':'workspaceWrite','danger-full-access':'dangerFullAccess'}[params['sandbox']]}
+   send({'id':d['id'],'result':{'thread':{'id':session},'approvalPolicy':native_policy['approvalPolicy'],'approvalsReviewer':native_policy['approvalsReviewer'],'sandbox':native_policy['sandboxPolicy']}});continue
   if method=='turn/interrupt':send({'id':d['id'],'result':{}});finish('STOPPED','interrupted');continue
   if 'result' in d:finish('APPROVED' if d['result'].get('decision')=='accept' else 'DECLINED');continue
   if method!='turn/start':continue

@@ -36,6 +36,8 @@ type Event struct {
 	Source  string `json:"source"`
 }
 type Session struct {
+	Completion    uint64 `json:"completion,omitempty"`
+	CompletedAt   string `json:"completed_at,omitempty"`
 	CatalogHidden bool   `json:"catalog_hidden,omitempty"`
 	Project       string `json:"project,omitempty"`
 	Managed       bool   `json:"managed,omitempty"`
@@ -311,6 +313,9 @@ func (s *Store) appendInTx(t *bolt.Tx, ev Event, preserveSession, desktop bool, 
 		if e = seen.Put([]byte(ev.ID), []byte{1}); e != nil {
 			return e
 		}
+		if e = s.recordCompletion(t, ev); e != nil {
+			return e
+		}
 		if preserveSession {
 			if ev.Agent == "claude" && ev.Source == "log" && ev.Status != "" && ev.Kind != "approval" {
 				var ss Session
@@ -424,6 +429,11 @@ func (s *Store) Sessions() ([]Session, error) {
 				return e
 			}
 			if !ss.CatalogHidden {
+				var completion completionMarker
+				if e := s.get(t, "agentconfig", "completion/"+ss.ID, &completion); e != nil && !errors.Is(e, os.ErrNotExist) {
+					return e
+				}
+				ss.Completion, ss.CompletedAt = completion.Revision, completion.Time
 				out = append(out, ss)
 			}
 			return nil

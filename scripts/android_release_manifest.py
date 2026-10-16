@@ -17,6 +17,7 @@ def main():
     parser.add_argument('--notes-file', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--aapt', type=Path)
+    parser.add_argument('--edition', choices=['voice','lite'], default='voice')
     args = parser.parse_args()
     tools = sorted((Path(os.environ.get('ANDROID_SDK_ROOT', Path.home()/'Library/Android/sdk'))/'build-tools').glob('*/aapt'))
     aapt = args.aapt or (tools[-1] if tools else None)
@@ -25,6 +26,9 @@ def main():
     metadata = subprocess.check_output([str(aapt), 'dump', 'badging', str(args.apk)], text=True)
     package = re.search(r"package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", metadata)
     sdk = re.search(r"sdkVersion:'(\d+)'", metadata)
+    manifest_xml = subprocess.check_output([str(aapt), 'dump', 'xmltree', str(args.apk), 'AndroidManifest.xml'], text=True)
+    flavor = re.search(r'android:name[^\n]*="dev\.agentdeck\.edition"[^\n]*\n[^\n]*android:value[^\n]*="(voice|lite)"', manifest_xml)
+    assert flavor and flavor[1] == args.edition, 'APK edition differs from requested release channel'
     assert package and sdk and package[1] == 'dev.agentdeck.agentdeck'
     assert re.search(r"native-code: 'arm64-v8a'\s*$", metadata, re.M)
     with args.apk.open('rb') as stream:
@@ -40,6 +44,7 @@ def main():
                 'package': package[1], 'abi': 'arm64-v8a', 'min_sdk': int(sdk[1]),
                 'bytes': args.apk.stat().st_size, 'sha256': digest,
                 'url': receipt['url'], 'notes': notes}
+    if args.edition == 'lite': manifest['edition']='lite'
     args.output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2)+'\n')
     print(f'Android {manifest["version"]} / code {manifest["version_code"]}: manifest saved to {args.output}')
 

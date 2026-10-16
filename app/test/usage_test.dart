@@ -1,3 +1,4 @@
+import 'package:agentdeck/core/client.dart' show ConnectionPhase;
 import 'dart:async';
 import 'package:agentdeck/core/usage.dart';
 import 'package:agentdeck/language.dart';
@@ -102,7 +103,8 @@ void main() {
   );
 
   testWidgets('disconnected workstation cannot request usage', (tester) async {
-    final client = UsageClient()..connected = false;
+    final client = UsageClient()
+      ..health.transition(ConnectionPhase.reconnecting);
     addTearDown(client.dispose);
     await tester.pumpWidget(
       AgentDeckApp(

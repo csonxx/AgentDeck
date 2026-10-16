@@ -1,7 +1,7 @@
 name: agentdeck
 description: Encrypted live coding-agent companion.
 publish_to: none
-version: 0.4.34+5051
+version: 0.4.41+7058
 environment:
   sdk: ^3.10.0
 dependencies:
@@ -30,7 +30,10 @@ dev_dependencies:
   url_launcher_platform_interface: ^2.3.2
   video_player_platform_interface: ^6.7.0
 flutter:
+  default-flavor: voice
   uses-material-design: true
   assets:
     - assets/brand/agentdeck-mark.png
-    - assets/asr/
+    - path: assets/asr/
+      flavors:
+        - voice

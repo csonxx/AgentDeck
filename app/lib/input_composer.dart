@@ -1,14 +1,17 @@
+import 'permission_control.dart';
 import 'language.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'loading_image.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'core/client.dart';
 import 'core/input.dart';
+import 'core/edition.dart';
 import 'core/local_speech.dart';
 import 'design.dart';
 import 'running_indicator.dart';
@@ -301,13 +304,14 @@ class _InputComposerState extends State<InputComposer>
   bool localRecording = false, holdActive = false, slideCancel = false;
   StreamSubscription<String>? localSubscription;
   bool get canRecord =>
+      hasVoiceInput &&
       !widget.sending &&
       !picking &&
       !starting &&
       !recording &&
       !finishing &&
       !transcribing &&
-      (services is LocalVoiceInputs || widget.client.connected);
+      (services is LocalVoiceInputs || widget.client.live);
   Timer? timer;
   StreamSubscription<Uint8List>? subscription;
   BytesBuilder pcm = BytesBuilder(copy: false);
@@ -319,8 +323,8 @@ class _InputComposerState extends State<InputComposer>
   String committedVoiceText = '';
   TextEditingValue? voiceBase;
   String? voiceRendered;
-  bool get enabled =>
-      widget.client.connected &&
+  bool get enabled => widget.client.live && canCompose;
+  bool get canCompose =>
       !widget.sending &&
       !picking &&
       !starting &&
@@ -334,7 +338,7 @@ class _InputComposerState extends State<InputComposer>
     widget.controller.addListener(_changed);
     widget.client.addListener(_nativeChanged);
     _restore();
-    if (services is LocalVoiceInputs) {
+    if (hasVoiceInput && services is LocalVoiceInputs) {
       unawaited(
         (services as LocalVoiceInputs).prepareLocalVoice().catchError(
           (Object _) {},
@@ -937,12 +941,15 @@ class _InputComposerState extends State<InputComposer>
                               ),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(5),
-                                child: Image.memory(
-                                  f.bytes,
+                                child: LoadingImage(
+                                  image: ResizeImage.resizeIfNeeded(
+                                    100,
+                                    null,
+                                    MemoryImage(f.bytes),
+                                  ),
                                   width: 38,
                                   height: 44,
                                   fit: BoxFit.cover,
-                                  cacheWidth: 100,
                                   errorBuilder: (_, _, _) =>
                                       const Icon(Icons.broken_image_outlined),
                                 ),
@@ -1047,14 +1054,7 @@ class _InputComposerState extends State<InputComposer>
             onTap: voiceMode ? () => _setVoiceMode(false) : null,
             minLines: 1,
             maxLines: 5,
-            enabled:
-                enabled ||
-                (services is LocalVoiceInputs &&
-                    !widget.sending &&
-                    !picking &&
-                    !starting &&
-                    !recording &&
-                    !finishing),
+            enabled: canCompose,
             style: const TextStyle(fontSize: 14),
             decoration: InputDecoration(
               hintText: context.tr('发消息给 {0}', [
@@ -1075,6 +1075,13 @@ class _InputComposerState extends State<InputComposer>
           ),
         if (voiceMode) _voiceHoldButton(),
 
+        Align(
+          alignment: Alignment.centerLeft,
+          child: PermissionControl(
+            client: widget.client,
+            session: widget.session,
+          ),
+        ),
         Row(
           children: [
             Expanded(
@@ -1101,14 +1108,15 @@ class _InputComposerState extends State<InputComposer>
               onPressed: enabled ? _pick : null,
               icon: const Icon(Icons.add, size: 21),
             ),
-            IconButton(
-              tooltip: voiceMode ? context.tr('键盘输入') : context.tr('语音输入'),
-              onPressed: canRecord ? () => _setVoiceMode(!voiceMode) : null,
-              icon: Icon(
-                voiceMode ? Icons.keyboard_alt_outlined : Icons.mic_none,
-                size: 21,
+            if (hasVoiceInput)
+              IconButton(
+                tooltip: voiceMode ? context.tr('键盘输入') : context.tr('语音输入'),
+                onPressed: canRecord ? () => _setVoiceMode(!voiceMode) : null,
+                icon: Icon(
+                  voiceMode ? Icons.keyboard_alt_outlined : Icons.mic_none,
+                  size: 21,
+                ),
               ),
-            ),
             if (widget.running && widget.onStop != null)
               IconButton.filled(
                 tooltip: context.tr('停止任务'),
@@ -1128,6 +1136,7 @@ class _InputComposerState extends State<InputComposer>
                 ),
               ),
             IconButton.filled(
+              key: const ValueKey('send-message'),
               tooltip: context.tr(
                 widget.running && canSendRunning && widget.agent != 'opencode'
                     ? '排队发送'

@@ -261,3 +261,21 @@ func (b *Bridge) Approve(ctx context.Context, t Target, id, decision string, ans
 func nativeApprovalCode(t Target, id, decision string, answers map[string]string) string {
 	return `(async()=>{` + sessionCheck(t) + `const p=(s.pendingToolPermissions||[]).find(p=>p.requestId===` + js(id) + `&&p.sessionId===s.sessionId);if(!p||typeof l.respondToToolPermission!=='function')throw Error('expired permission');let input;if(p.toolName==='AskUserQuestion'&&` + js(decision) + `==='accept'){input={...p.input,answers:` + js(answers) + `}}await l.respondToToolPermission(p.requestId,` + js(map[string]string{"accept": "once", "decline": "deny"}[decision]) + `,input);return true})()`
 }
+
+// PermissionMode reads only the native session policy; no account/config data.
+func (b *Bridge) PermissionMode(ctx context.Context, t Target) (string, error) {
+	var mode string
+	err := b.renderer(ctx, `(async()=>{`+sessionCheck(t)+`return s.permissionMode||''})()`, &mode)
+	return mode, err
+}
+func (b *Bridge) SetPermissionMode(ctx context.Context, t Target, mode string) (string, error) {
+	switch mode {
+	case "default", "acceptEdits", "auto", "bypassPermissions", "plan", "dontAsk":
+	default:
+		return "", errors.New("unsupported permission mode")
+	}
+	var actual string
+	code := `(async()=>{` + sessionCheck(t) + `if(typeof l.setPermissionMode!=='function')throw Error('unsupported');await l.setPermissionMode(s.sessionId,` + js(mode) + `);const current=await l.getSession(s.sessionId);return current.permissionMode||''})()`
+	err := b.renderer(ctx, code, &actual)
+	return actual, err
+}

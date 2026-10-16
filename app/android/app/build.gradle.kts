@@ -6,6 +6,7 @@ plugins {
 }
 
 android {
+    buildFeatures { buildConfig = true }
     namespace = "dev.agentdeck.agentdeck"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
@@ -30,6 +31,12 @@ android {
         versionName = flutter.versionName
     }
 
+    flavorDimensions += "edition"
+    productFlavors {
+        create("voice") { dimension = "edition"; manifestPlaceholders["agentdeckEdition"] = "voice" }
+        create("lite") { dimension = "edition"; manifestPlaceholders["agentdeckEdition"] = "lite" }
+    }
+
     buildTypes {
         release {
             proguardFiles("proguard-rules.pro")
@@ -37,6 +44,16 @@ android {
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
+    }
+}
+
+// Lite has no offline recognizer or model weights. Keep the same application ID
+// and signing identity so switching editions preserves pairing and preferences.
+androidComponents {
+    onVariants(selector().withFlavor("edition" to "lite")) { variant ->
+        variant.packaging.jniLibs.excludes.addAll(
+            "**/libonnxruntime.so", "**/libsherpa-onnx-*.so"
+        )
     }
 }
 

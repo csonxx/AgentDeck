@@ -16,11 +16,11 @@ class DownloadClient extends AgentClient {
   @override
   Future<void> prepareAttachmentTransfer() async {
     preparations++;
-    connected = true;
+    health.transition(ConnectionPhase.live);
   }
 
   DownloadClient() {
-    connected = true;
+    health.transition(ConnectionPhase.live);
   }
   @override
   Future<SessionAttachment> attachment(String session, String href) async =>
@@ -134,7 +134,7 @@ void main() {
         (call) async {
           platform.add(call.method);
           if (call.method == 'choose') {
-            c.connected = false;
+            c.health.transition(ConnectionPhase.reconnecting);
             return pickerCancelled ? null : 'saved';
           }
           if (call.method == 'write') {

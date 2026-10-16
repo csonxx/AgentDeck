@@ -34,6 +34,8 @@ type claudeCatalogFile struct {
 }
 type claudeCatalog struct {
 	statusStamps  map[string]string
+	runningTails  map[string]string
+	orphanSeen    map[string]string
 	processSeen   map[string]string
 	processOwners map[string]claudeProcessRecord
 	ready         bool

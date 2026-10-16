@@ -16,7 +16,6 @@ const authError = '请在工作站配置 WorkBuddy 开放平台应用、密钥�
 class FailingLoginClient extends OperableClient {
   @override
   Future<Map<String, dynamic>> agentLogin(String id) async {
-    error = authError;
     notifyListeners();
     throw const HttpException(authError);
   }
@@ -128,7 +127,7 @@ void main() {
     }
   });
   testWidgets(
-    'WorkBuddy authorization snackbar and home error follow language',
+    'authorization failure stays with its operation and follows language',
     (t) async {
       final c = FailingLoginClient();
       final languages = LanguageController(DeviceVault());
@@ -151,16 +150,16 @@ void main() {
       expect(find.text(authError), findsNothing);
       await t.tap(find.byType(BackButton));
       await t.pumpAndSettle();
+      await t.pump(const Duration(seconds: 5));
+      await t.pumpAndSettle();
       expect(
         find.text(const UiStrings(AppLanguage.english).text(authError)),
-        findsWidgets,
+        findsNothing,
       );
       await languages.select(AppLanguage.russian);
       await t.pumpAndSettle();
-      expect(
-        find.text(const UiStrings(AppLanguage.russian).text(authError)),
-        findsOneWidget,
-      );
+      expect(c.error, isEmpty);
+      expect(c.live, isTrue);
       expect(find.text(authError), findsNothing);
     },
   );

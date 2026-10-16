@@ -140,7 +140,18 @@ func (m *Manager) decorateGoal(g Goal, s store.Session) Goal {
 func (m *Manager) Goals() ([]Goal, error) {
 	m.goalMu.Lock()
 	defer m.goalMu.Unlock()
-	return m.goalsLocked(false)
+	goals, err := m.goalsLocked(false)
+	if err != nil {
+		return nil, err
+	}
+	current := []Goal{}
+	for _, goal := range goals {
+		switch goal.Status {
+		case "active", "paused", "blocked", "usageLimited", "budgetLimited":
+			current = append(current, goal)
+		}
+	}
+	return current, nil
 }
 func (m *Manager) goalsLocked(force bool) ([]Goal, error) {
 	if !force && time.Since(m.goalChecked) < 5*time.Second {

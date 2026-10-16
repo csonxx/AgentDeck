@@ -3,8 +3,9 @@ import 'model.dart';
 class TranscriptSection {
   final List<TranscriptBlock> blocks;
   final bool activity;
+  String? _stableKey;
   TranscriptSection(this.blocks, {this.activity = false});
-  String get key => blocks.first.key;
+  String get key => _stableKey ?? blocks.first.key;
   bool contains(String? key) => blocks.any((b) => b.key == key);
 }
 
@@ -15,7 +16,10 @@ bool isActivity(TranscriptBlock b) => const [
   'file_change',
 ].contains(b.kind);
 
-List<TranscriptSection> transcriptSections(List<TranscriptBlock> blocks) {
+List<TranscriptSection> transcriptSections(
+  List<TranscriptBlock> blocks, {
+  List<TranscriptSection> previous = const [],
+}) {
   final sections = <TranscriptSection>[];
   for (final b in blocks) {
     if (isActivity(b)) {
@@ -27,6 +31,29 @@ List<TranscriptSection> transcriptSections(List<TranscriptBlock> blocks) {
     } else {
       sections.add(TranscriptSection([b]));
     }
+  }
+  final oldKeys = <String, String>{
+    for (final section in previous.where((s) => s.activity))
+      for (final block in section.blocks) block.key: section.key,
+  };
+  final used = <String>{};
+  for (final section in sections.where((s) => s.activity)) {
+    for (final block in section.blocks) {
+      final oldKey = oldKeys[block.key];
+      if (oldKey != null && used.add(oldKey)) {
+        section._stableKey = oldKey;
+        break;
+      }
+    }
+    if (section._stableKey == null && used.contains(section.key)) {
+      final base = section.key;
+      var suffix = 1;
+      while (used.contains('$base/$suffix')) {
+        suffix++;
+      }
+      section._stableKey = '$base/$suffix';
+    }
+    used.add(section.key);
   }
   return sections;
 }

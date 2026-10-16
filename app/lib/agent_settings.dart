@@ -2,6 +2,7 @@ import 'language.dart';
 import 'app_update_page.dart';
 import 'device_name_setting.dart';
 import 'app_lock.dart';
+import 'display_setting.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'core/client.dart';
@@ -118,6 +119,7 @@ class _AgentSettingsPageState extends State<AgentSettingsPage> {
         children: [
           AppUpdateSetting(updater: widget.client.updates),
           DeviceNameSetting(client: widget.client),
+          const DisplaySizeSetting(),
           ListTile(
             key: const ValueKey('language-setting'),
             contentPadding: EdgeInsets.zero,

@@ -81,6 +81,36 @@ func TestClaudeQuotaErrorIsFailureInSidebarAndHydratedHistory(t *testing.T) {
 	}
 	expectClaudeStatus(t, f, "failed")
 }
+
+func TestClaudeHistoricalUnfinishedTurnHasNoLiveExecutorOnFreshStart(t *testing.T) {
+	f, path, _ := statusFixture(t)
+	f.ClaudeProcesses = t.TempDir() // A readable, empty native registry.
+	f.ClaudeProcessSnapshot = func() (map[int]string, error) { return map[int]string{}, nil }
+	appendStatusFixture(t, path, map[string]any{"type": "assistant", "timestamp": time.Now().Add(-30 * 24 * time.Hour).UTC().Format(time.RFC3339Nano), "message": map[string]any{"role": "assistant", "stop_reason": "tool_use", "content": []any{map[string]any{"type": "tool_use", "name": "Read"}}}})
+	f.Scan()
+	expectClaudeStatus(t, f, "interrupted")
+	if f.Normalizer.Store.LastSeq() != 0 {
+		t.Fatal("status observation imported history")
+	}
+	// Opening an old transcript must not revive its historical spinner.
+	if err := f.LoadClaudeHistory("native"); err != nil {
+		t.Fatal(err)
+	}
+	f.Scan()
+	expectClaudeStatus(t, f, "interrupted")
+}
+
+func TestClaudeUnknownLiveRegistryRecordDoesNotInventAnExit(t *testing.T) {
+	f, path, _ := statusFixture(t)
+	f.ClaudeProcesses = t.TempDir()
+	f.ClaudeProcessSnapshot = func() (map[int]string, error) {
+		return map[int]string{42: "Fri Oct 9 01:57:18 2026"}, nil
+	}
+	os.WriteFile(filepath.Join(f.ClaudeProcesses, "42.json"), []byte("{"), 0600)
+	appendStatusFixture(t, path, map[string]any{"type": "assistant", "timestamp": time.Now().UTC().Format(time.RFC3339Nano), "message": map[string]any{"role": "assistant", "stop_reason": "tool_use"}})
+	f.Scan()
+	expectClaudeStatus(t, f, "running")
+}
 func TestClaudeNativeProcessStatusBirthTimeWaitingAndExit(t *testing.T) {
 	f, path, _ := statusFixture(t)
 	processDir := t.TempDir()
@@ -151,5 +181,18 @@ func TestRealClaudeNativeStatusReadOnly(t *testing.T) {
 	if matched == 0 || n.Store.LastSeq() != 0 {
 		t.Fatal("native status was not observed without transcript ingestion")
 	}
-	t.Logf("verified owners=%d matched current status=%d raw events=%d elapsed=%s", len(f.claude.processOwners), matched, n.Store.LastSeq(), time.Since(start).Round(time.Millisecond))
+	interrupted := 0
+	for id := range f.claude.orphanSeen {
+		var ss store.Session
+		if n.Store.Get("sessions", id, &ss) != nil {
+			t.Fatal("orphan status missing")
+		}
+		if ss.Status == "running" || ss.Status == "waiting" || ss.Status == "pending" {
+			t.Fatal("historical unowned execution still appears active")
+		}
+		if ss.Status == "interrupted" {
+			interrupted++
+		}
+	}
+	t.Logf("verified owners=%d matched current status=%d historical interrupted=%d raw events=%d elapsed=%s", len(f.claude.processOwners), matched, interrupted, n.Store.LastSeq(), time.Since(start).Round(time.Millisecond))
 }

@@ -81,6 +81,10 @@ func TestOpenCodeNativeRoutingAndEvents(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/session":
+			var p map[string]any
+			if json.NewDecoder(r.Body).Decode(&p) != nil || len(p) != 1 || p["title"] != "新会话" {
+				t.Error("session creation overrode provider policy")
+			}
 			json.NewEncoder(w).Encode(map[string]any{"id": "native", "title": "Original", "directory": project})
 		case "/session/status":
 			w.Write([]byte(`{}`))
@@ -89,6 +93,9 @@ func TestOpenCodeNativeRoutingAndEvents(t *testing.T) {
 			json.NewDecoder(r.Body).Decode(&p)
 			if !strings.HasPrefix(str(p["messageID"]), "msg_") {
 				t.Error("missing message ID")
+			}
+			if len(p) != 2 || p["parts"] == nil {
+				t.Error("prompt overrode provider permissions or tools")
 			}
 			prompts.Add(1)
 			w.WriteHeader(204)
@@ -243,6 +250,10 @@ func TestWorkBuddyOAuthSyncRefreshAndAccountIsolation(t *testing.T) {
 			w.Write([]byte(`{"code":0,"data":{"online":true}}`))
 		case "/localassistant/message":
 			if r.Method == "POST" {
+				var p map[string]any
+				if json.NewDecoder(r.Body).Decode(&p) != nil || len(p) != 2 || p["content"] != "synthetic" || p["msg_type"] != "text" {
+					t.Error("WorkBuddy input overrode native settings")
+				}
 				sends.Add(1)
 				w.Write([]byte(`{"code":0,"data":{"message_id":"sent"}}`))
 			} else {
@@ -297,7 +308,7 @@ func TestWorkBuddyOAuthSyncRefreshAndAccountIsolation(t *testing.T) {
 	}
 }
 
-func TestACPTerminalRequiresOneTimeApprovalAndBoundsOutput(t *testing.T) {
+func TestACPTerminalUsesNativePermissionDecisionAndBoundsOutput(t *testing.T) {
 	m := connectorManager(t)
 	fixture, _ := filepath.Abs("../../../scripts/fixture_acp.py")
 	c := newACP(m, "qoder", ACPConfig{Command: "python3", Args: []string{fixture}})
@@ -308,25 +319,22 @@ func TestACPTerminalRequiresOneTimeApprovalAndBoundsOutput(t *testing.T) {
 	}
 	run, _ := c.get(m.Context, ss)
 	limit := 10
-	result := make(chan acp.CreateTerminalResponse, 1)
-	errs := make(chan error, 1)
-	go func() {
-		v, e := run.CreateTerminal(m.Context, acp.CreateTerminalRequest{SessionId: "native-fixture", Command: "python3", Args: []string{"-c", "print('a'*100)"}, OutputByteLimit: &limit})
-		result <- v
-		errs <- e
-	}()
-	approval := awaitConnector(t, m, ss.ID, "approval", "", "pending")
-	select {
-	case <-result:
-		t.Fatal("terminal started before approval")
-	default:
-	}
-	if e = m.Approve(ss.ID, approval.Item, "accept", ""); e != nil {
+	v, e := run.CreateTerminal(m.Context, acp.CreateTerminalRequest{SessionId: "native-fixture", Command: "python3", Args: []string{"-c", "print('a'*100)"}, OutputByteLimit: &limit})
+	if e != nil {
 		t.Fatal(e)
 	}
-	v := <-result
-	if e = <-errs; e != nil {
-		t.Fatal(e)
+	events, _ := m.Store.Events(ss.ID, 0, 100)
+	for _, event := range events {
+		if event.Kind == "approval" {
+			t.Fatal("client fabricated a second terminal permission request")
+		}
+	}
+	outside := t.TempDir()
+	if _, e = run.CreateTerminal(m.Context, acp.CreateTerminalRequest{SessionId: "foreign", Command: "python3"}); e == nil {
+		t.Fatal("foreign session terminal accepted")
+	}
+	if _, e = run.CreateTerminal(m.Context, acp.CreateTerminalRequest{SessionId: "native-fixture", Command: "python3", Cwd: &outside}); e == nil {
+		t.Fatal("terminal directory escaped project")
 	}
 	ctx, cancel := context.WithTimeout(m.Context, 5*time.Second)
 	defer cancel()

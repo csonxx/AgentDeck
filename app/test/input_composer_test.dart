@@ -27,7 +27,7 @@ class InputClient extends AgentClient {
   Completer<String>? previewGate;
   Completer<Map<String, dynamic>>? capabilitiesGate;
   InputClient() : super(vault: InputVault()) {
-    connected = true;
+    health.transition(ConnectionPhase.live);
   }
   @override
   Future<dynamic> request(
@@ -251,10 +251,25 @@ void main() {
       }
       expect(find.byType(LinearProgressIndicator), findsNothing);
       await t.tap(find.text('照片'));
+      await t.pump();
+      await t.runAsync(
+        () => precacheImage(
+          t.widget<Image>(find.byType(Image)).image,
+          t.element(find.byType(Image)),
+        ),
+      );
       await t.pumpAndSettle();
       expect(find.text('pixel.png'), findsOneWidget);
       expect(controller.text, 'draft');
-      expect(c.calls.where((v) => v['method'] != 'session_settings'), isEmpty);
+      expect(
+        c.calls.where(
+          (v) => ![
+            'session_settings',
+            'session_permissions',
+          ].contains(v['method']),
+        ),
+        isEmpty,
+      );
       expect(native.starts, 0);
     },
   );
@@ -274,7 +289,15 @@ void main() {
         Uint8List.fromList([1]),
       );
       await c.validateAttachments('opencode', 'chat', [text]);
-      expect(c.calls.where((v) => v['method'] != 'session_settings'), isEmpty);
+      expect(
+        c.calls.where(
+          (v) => ![
+            'session_settings',
+            'session_permissions',
+          ].contains(v['method']),
+        ),
+        isEmpty,
+      );
       await expectLater(
         c.validateAttachments('workbuddy', 'chat', [image]),
         throwsFormatException,
@@ -545,6 +568,13 @@ void main() {
       await t.tap(find.byTooltip('添加图片或文件'));
       await t.pumpAndSettle();
       await t.tap(find.text('照片'));
+      await t.pump();
+      await t.runAsync(
+        () => precacheImage(
+          t.widget<Image>(find.byType(Image)).image,
+          t.element(find.byType(Image)),
+        ),
+      );
       await t.pumpAndSettle();
       expect(find.text('pixel.png'), findsOneWidget);
       await t.tap(find.byTooltip('添加图片或文件'));
@@ -569,7 +599,7 @@ void main() {
   testWidgets(
     'client streaming writes while held, release finalizes without server upload',
     (t) async {
-      final c = InputClient()..connected = false,
+      final c = InputClient()..health.transition(ConnectionPhase.reconnecting),
           native = FakeLocalInputs(),
           controller = TextEditingController(text: '请');
       addTearDown(c.dispose);
@@ -604,7 +634,15 @@ void main() {
       expect(find.byKey(const ValueKey('voice-hold')), findsNothing);
       await t.enterText(find.byType(TextField), '请 检查登录页面并测试');
       expect(controller.text, '请 检查登录页面并测试');
-      expect(c.calls.where((v) => v['method'] != 'session_settings'), isEmpty);
+      expect(
+        c.calls.where(
+          (v) => ![
+            'session_settings',
+            'session_permissions',
+          ].contains(v['method']),
+        ),
+        isEmpty,
+      );
       await t.pumpWidget(const SizedBox());
       await t.pump();
     },
@@ -631,7 +669,13 @@ void main() {
     await t.pump();
     expect(controller.text, '原草稿');
     expect(native.cancelled, true);
-    expect(c.calls.where((v) => v['method'] != 'session_settings'), isEmpty);
+    expect(
+      c.calls.where(
+        (v) =>
+            !['session_settings', 'session_permissions'].contains(v['method']),
+      ),
+      isEmpty,
+    );
     await t.pumpWidget(const SizedBox());
     await t.pump();
   });

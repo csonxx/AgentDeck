@@ -6,6 +6,8 @@ if '--child-pid' in sys.argv:
  worker=subprocess.Popen([sys.executable,'-c','import time;time.sleep(300)'])
  pathlib.Path(sys.argv[sys.argv.index('--child-pid')+1]).write_text(str(worker.pid))
 session='native-fixture'
+modes={'currentModeId':'ask','availableModes':[{'id':'ask','name':'Ask'},{'id':'auto','name':'Auto'}]}
+permission_test='--permissions' in sys.argv
 pending=None
 waiting={}
 inputs='--inputs' in sys.argv
@@ -19,10 +21,18 @@ def chunk(kind,text):
 for line in sys.stdin:
  v=json.loads(line); p=v.get('params',{}); method=v.get('method')
  if method=='initialize':reply(v,{'protocolVersion':1,'authMethods':[],'agentCapabilities':{'loadSession':True,'sessionCapabilities':{'list':{}},'promptCapabilities':{'image':image_input}}})
- elif method=='session/new':reply(v,dict(sessionId=session,**({'configOptions':configs} if inputs else {})))
+ elif method=='session/new':
+  assert set(p)<= {'cwd','mcpServers'}
+  reply(v,dict(sessionId=session,**({'configOptions':configs} if inputs else {}),**({'modes':modes} if permission_test else {})))
  elif method=='session/load':
+  assert set(p)<= {'sessionId','cwd','mcpServers'}
   if p['sessionId']!=session:send({'id':v['id'],'error':{'code':-32602,'message':'wrong session'}})
   else:chunk('agent_message_chunk','restored history');reply(v,{'configOptions':configs} if inputs else {})
+ elif method=='session/set_mode':
+  assert permission_test and p['sessionId']==session and p['modeId'] in ['ask','auto']
+  modes['currentModeId']=p['modeId']
+  send({'method':'session/update','params':{'sessionId':session,'update':{'sessionUpdate':'current_mode_update','currentModeId':p['modeId']}}})
+  reply(v,{})
  elif method=='session/list':reply(v,{'sessions':[]})
  elif method=='session/set_config_option':
   assert inputs and p['sessionId']==session and p['configId']!='mode'

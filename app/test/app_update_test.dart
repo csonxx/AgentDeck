@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'package:agentdeck/core/app_update.dart';
 import 'package:agentdeck/core/vault.dart';
 import 'package:agentdeck/core/client.dart';
+import 'package:agentdeck/app_update_page.dart';
+import 'package:flutter/material.dart';
+import 'package:agentdeck/language.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class UpdateVault extends DeviceVault {
@@ -32,6 +35,18 @@ AndroidRelease fixtureRelease() => AndroidRelease(
 );
 
 void main() {
+  test('editions retain identity and reject unknown flavors', () {
+    final voice = fixtureRelease().toJson();
+    expect(AndroidRelease.fromJson(voice).edition, 'voice');
+    expect(
+      AndroidRelease.fromJson({...voice, 'edition': 'lite'}).edition,
+      'lite',
+    );
+    expect(
+      () => AndroidRelease.fromJson({...voice, 'edition': 'other'}),
+      throwsFormatException,
+    );
+  });
   TestWidgetsFlutterBinding.ensureInitialized();
   var installed = 7050,
       received = 12345,
@@ -76,6 +91,177 @@ void main() {
           }
           return null;
         });
+  });
+  test(
+    'lite ignores voice releases and cancels old edition downloads',
+    () async {
+      final vault = UpdateVault()
+        ..update = {
+          'automatic': true,
+          'download_id': 42,
+          'release': fixtureRelease().toJson(),
+          'latest': fixtureRelease().toJson(),
+        };
+      final updater = AppUpdater(
+        vault,
+        gateway: () async => 'https://gateway.example/agentdeck',
+        edition: 'lite',
+        supported: true,
+        fetchRelease: (_) async => fixtureRelease(),
+      );
+      addTearDown(updater.dispose);
+      await updater.initialize();
+      expect(updater.latest, isNull);
+      expect(updater.available, isFalse);
+      expect(updater.downloadId, isNull);
+      expect(cancels, 1);
+      expect(vault.update!['latest'], isNull);
+      expect(starts, 0);
+    },
+  );
+  test(
+    'explicit same-version edition switch persists and resumes download',
+    () async {
+      installed = 7051;
+      final vault = UpdateVault();
+      late AppUpdater u;
+      AppUpdater make(String edition) {
+        u = AppUpdater(
+          vault,
+          edition: edition,
+          supported: true,
+          gateway: () async => 'https://gateway.example',
+          fetchRelease: (_) async => AndroidRelease.fromJson({
+            ...fixtureRelease().toJson(),
+            'edition': u.selectedEdition,
+          }),
+        );
+        return u;
+      }
+
+      make('lite');
+      await u.initialize();
+      expect(u.selectedEdition, 'lite');
+      expect(u.available, false);
+      await u.setEdition('voice');
+      expect(u.available, true);
+      expect(vault.update!['selected_edition'], 'voice');
+      await u.download();
+      expect(starts, 1);
+      expect(u.canSelectEdition, false);
+      await u.setEdition('lite');
+      expect(u.selectedEdition, 'voice');
+      u.dispose();
+      make('lite');
+      await u.initialize();
+      expect(u.downloadId, 42);
+      expect(cancels, 0);
+      state = 'complete';
+      await u.refreshDownload();
+      await u.install();
+      expect(u.error, isEmpty);
+      u.dispose();
+      // The same installed target clears its old download, preserving other settings.
+      make('voice');
+      await u.initialize();
+      expect(u.downloadId, isNull);
+      expect(u.available, false);
+      expect(cancels, 1);
+      u.dispose();
+    },
+  );
+  test('edition switch rejects downgrade and wrong gateway edition', () async {
+    installed = 7052;
+    final u = AppUpdater(
+      UpdateVault(),
+      edition: 'lite',
+      supported: true,
+      gateway: () async => 'https://gateway.example',
+      fetchRelease: (_) async => fixtureRelease(),
+    );
+    addTearDown(u.dispose);
+    await u.initialize();
+    expect(u.latest, isNull);
+    await u.setEdition('voice');
+    expect(u.latest!.edition, 'voice');
+    expect(u.available, false);
+    await u.download();
+    expect(starts, 0);
+  });
+  testWidgets(
+    'update picker shows selected edition size and same-version download',
+    (tester) async {
+      installed = 7051;
+      late AppUpdater u;
+      u = AppUpdater(
+        UpdateVault(),
+        edition: 'lite',
+        supported: true,
+        gateway: () async => 'https://gateway.example',
+        fetchRelease: (_) async => AndroidRelease.fromJson({
+          ...fixtureRelease().toJson(),
+          'edition': u.selectedEdition,
+          'bytes': u.selectedEdition == 'lite' ? 33000000 : 273000000,
+        }),
+      );
+      addTearDown(u.dispose);
+      await u.initialize();
+      await tester.pumpWidget(
+        LanguageScope(
+          controller: LanguageController(
+            UpdateVault(),
+            initial: AppLanguage.simplifiedChinese,
+          ),
+          child: MaterialApp(
+            locale: AppLanguage.simplifiedChinese.locale,
+            localizationsDelegates: UiStrings.delegates,
+            supportedLocales: UiStrings.supportedLocales,
+            home: AppUpdatePage(updater: u),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('33.0 MB'), findsOneWidget);
+      expect(find.text('下载更新'), findsNothing);
+      await tester.tap(find.text('带语音版'));
+      await tester.pumpAndSettle();
+      expect(u.selectedEdition, 'voice');
+      expect(find.text('273.0 MB'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('下载更新'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(find.text('下载更新'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('下载更新'));
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(starts, 1);
+      expect(u.canSelectEdition, false);
+      u.background();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
+  test('lite discovers only its own edition update', () async {
+    final updater = AppUpdater(
+      UpdateVault(),
+      gateway: () async => 'https://gateway.example',
+      edition: 'lite',
+      supported: true,
+      fetchRelease: (_) async => AndroidRelease.fromJson({
+        ...fixtureRelease().toJson(),
+        'edition': 'lite',
+      }),
+    );
+    addTearDown(updater.dispose);
+    await updater.initialize();
+    expect(updater.available, isTrue);
+    expect(updater.latest!.edition, 'lite');
+    await updater.download();
+    expect(starts, 1);
   });
   test(
     'release rejects insecure URLs and wrong identity; native ABI code is used',

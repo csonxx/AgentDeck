@@ -82,6 +82,18 @@ class ToolGapClient extends PagingClient {
       : super.event(i);
 }
 
+class FoldedRunClient extends PagingClient {
+  FoldedRunClient({required super.atStart}) : super(total: 620, pageSize: 30);
+  @override
+  Map<String, dynamic> event(int i) => i > 2 && i < 619
+      ? {...super.event(i), 'kind': 'tool_call', 'text': 'Tool execution $i'}
+      : {
+          ...super.event(i),
+          'text':
+              'Full message $i\n${List.filled(6, 'Conversation text for reading').join('\n')}',
+        };
+}
+
 Future<void> mount(WidgetTester t, PagingClient c) async {
   await t.pumpWidget(
     MaterialApp(
@@ -209,4 +221,46 @@ void main() {
     expect(c.olderCalls, requests);
     expect(t.takeException(), isNull);
   });
+  for (final older in [true, false]) {
+    testWidgets(
+      'long folded run reaches visible dialogue without a blank viewport ${older ? "older" : "newer"}',
+      (tester) async {
+        final c = FoldedRunClient(atStart: !older);
+        addTearDown(c.dispose);
+        await mount(tester, c);
+        await tester.drag(
+          find.byType(ReadingScrollView),
+          Offset(0, older ? 400 : -400),
+        );
+        await tester.pumpAndSettle();
+        final marker = older ? 'Full message 1' : 'Full message 620';
+        final text = find.textContaining(marker);
+        expect(text, findsOneWidget);
+        final viewport = tester.getRect(find.byType(ReadingScrollView));
+        expect(tester.getRect(text).overlaps(viewport), isTrue);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+  testWidgets(
+    'expanded execution does not automatically skip the entire tool run',
+    (tester) async {
+      final c = FoldedRunClient(atStart: false);
+      addTearDown(c.dispose);
+      c.transcripts['s']!.history({
+        'events': [for (var i = 590; i <= 620; i++) c.event(i)],
+        'cursor': 620,
+        'before': 590,
+        'has_more': true,
+      }, replace: true);
+      await mount(tester, c);
+      await tester.tap(find.byKey(const ValueKey('all-activities-toggle')));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(ReadingScrollView), const Offset(0, 800));
+      await tester.pumpAndSettle();
+      expect(c.olderCalls, lessThan(5));
+      expect(c.transcripts['s']!.hasMore, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

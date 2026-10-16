@@ -97,7 +97,7 @@ class _AppUpdatePageState extends State<AppUpdatePage> {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: u,
     builder: (context, _) {
-      final release = u.downloading ?? (u.available ? u.latest : null);
+      final release = u.downloading ?? u.latest;
       return Scaffold(
         appBar: AppBar(title: Text(context.tr('应用更新'))),
         body: ListView(
@@ -114,7 +114,31 @@ class _AppUpdatePageState extends State<AppUpdatePage> {
               ]),
               style: const TextStyle(color: DeckColors.muted),
             ),
+            const SizedBox(height: 4),
+            Text(
+              context.tr(u.edition == 'lite' ? '轻量版 · 不含语音输入' : '完整版 · 离线语音输入'),
+              style: const TextStyle(color: DeckColors.muted),
+            ),
             const SizedBox(height: 24),
+            SegmentedButton<String>(
+              key: const ValueKey('update-edition-picker'),
+              segments: [
+                ButtonSegment(value: 'lite', label: Text(context.tr('轻量版'))),
+                ButtonSegment(value: 'voice', label: Text(context.tr('带语音版'))),
+              ],
+              selected: {u.selectedEdition},
+              onSelectionChanged: u.canSelectEdition
+                  ? (values) => unawaited(u.setEdition(values.single))
+                  : null,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              context.tr(
+                u.selectedEdition == 'lite' ? '轻量版 · 不含语音输入' : '完整版 · 离线语音输入',
+              ),
+              style: const TextStyle(color: DeckColors.muted),
+            ),
+            const SizedBox(height: 16),
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
               title: Text(context.tr('自动检查更新')),
@@ -143,12 +167,23 @@ class _AppUpdatePageState extends State<AppUpdatePage> {
                 u.downloadId == null)
               Padding(
                 padding: const EdgeInsets.only(top: 14),
-                child: Text(context.tr(u.latest == null ? '暂无可用更新' : '已是最新版本')),
+                child: Text(
+                  context.tr(
+                    u.latest == null
+                        ? '暂无可用更新'
+                        : u.latest!.code < u.installedCode
+                        ? '该版本较旧，暂不可切换'
+                        : '已是最新版本',
+                  ),
+                ),
               ),
             if (release != null) ...[
               const Divider(height: 40),
               Text(
-                context.tr('新版本 {0}', [release.version]),
+                context.tr('{0} · {1}', [
+                  context.tr(release.edition == 'lite' ? '轻量版' : '带语音版'),
+                  release.version,
+                ]),
                 style: const TextStyle(
                   fontSize: 21,
                   fontWeight: FontWeight.w600,
@@ -200,7 +235,7 @@ class _AppUpdatePageState extends State<AppUpdatePage> {
                       : const Icon(Icons.install_mobile_outlined),
                   label: Text(context.tr(u.installing ? '正在校验更新包' : '安装更新')),
                 )
-              else if (!u.active)
+              else if (!u.active && u.available)
                 FilledButton.icon(
                   onPressed: u.starting ? null : u.download,
                   icon: const Icon(Icons.download_outlined),
@@ -211,11 +246,12 @@ class _AppUpdatePageState extends State<AppUpdatePage> {
                   onPressed: u.installing ? null : u.cancelDownload,
                   child: Text(context.tr('取消更新下载')),
                 ),
-              TextButton.icon(
-                onPressed: () => browserDownload(release),
-                icon: const Icon(Icons.open_in_browser_outlined),
-                label: Text(context.tr('浏览器下载')),
-              ),
+              if (u.available || u.downloadId != null)
+                TextButton.icon(
+                  onPressed: () => browserDownload(release),
+                  icon: const Icon(Icons.open_in_browser_outlined),
+                  label: Text(context.tr('浏览器下载')),
+                ),
               Text(
                 context.tr('安装前校验文件完整性和应用签名，保留原有配对和设置。'),
                 style: const TextStyle(color: DeckColors.muted, fontSize: 12),

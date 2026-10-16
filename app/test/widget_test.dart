@@ -33,8 +33,7 @@ class OperableClient extends AgentClient {
   String sent = '', forkedFrom = '';
   OperableClient({DeviceVault? vault})
     : super(vault: vault ?? MemoryLayoutVault()) {
-    connected = true;
-    state = '实时连接';
+    health.transition(ConnectionPhase.live);
     projects = [
       AgentProject(id: 'p1', name: 'project-a', path: '/project-a'),
       AgentProject(id: 'p2', name: 'project-b', path: '/project-b'),
@@ -74,6 +73,7 @@ class OperableClient extends AgentClient {
     String agent,
     String project, {
     String parent = '',
+    String permissionMode = '',
   }) async {
     forkedFrom = parent;
     final child = AgentSession(
@@ -872,15 +872,22 @@ void main() {
         ),
       ),
     );
+    await tester.pump();
     await tester.runAsync(
       () => precacheImage(
-        MemoryImage(bytes),
+        tester.widget<Image>(find.byType(Image)).image,
         tester.element(find.byType(EncryptedImage)),
       ),
     );
     await tester.pumpAndSettle();
     expect(find.byType(Image), findsOneWidget);
     expect(find.text('图片无法解码'), findsNothing);
+    await tester.runAsync(
+      () => precacheImage(
+        MemoryImage(bytes),
+        tester.element(find.byType(EncryptedImage)),
+      ),
+    );
     await tester.tap(find.byType(Image));
     await tester.pumpAndSettle();
     expect(find.byType(InteractiveViewer), findsOneWidget);

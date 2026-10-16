@@ -49,12 +49,14 @@ object UpdateBridge {
                 when (call.method) {
                     "info" -> {
                         val p = context.packageManager.getPackageInfo(context.packageName, 0)
-                        result.success(mapOf("version" to p.versionName, "version_code" to code(p), "package" to context.packageName, "sdk" to Build.VERSION.SDK_INT, "abis" to Build.SUPPORTED_ABIS.toList()))
+                        result.success(mapOf("version" to p.versionName, "version_code" to code(p), "package" to context.packageName, "sdk" to Build.VERSION.SDK_INT, "abis" to Build.SUPPORTED_ABIS.toList(), "edition" to BuildConfig.FLAVOR))
                     }
                     "start" -> {
                         val uri = Uri.parse(call.argument<String>("url") ?: error("Missing URL"))
                         val hash = call.argument<String>("sha256") ?: error("Missing hash")
                         val version = call.argument<Number>("version_code")?.toLong() ?: error("Missing version")
+                        val targetEdition = call.argument<String>("edition") ?: "voice"
+                        check(targetEdition in listOf("voice", "lite"))
                         check(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.query == null && uri.fragment == null && hash.matches(Regex("[a-f0-9]{64}")) && version > 0)
                         val name = "updates/agentdeck-$version-$hash.apk"
                         val file = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), name)
@@ -88,8 +90,12 @@ object UpdateBridge {
                                 check(digest.digest().joinToString("") { "%02x".format(it) } == hash)
                                 @Suppress("DEPRECATION") val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
                                 @Suppress("DEPRECATION") val installed = context.packageManager.getPackageInfo(context.packageName, flags)
-                                val archive = context.packageManager.getPackageArchiveInfo(file.path, flags) ?: error("Invalid APK")
-                                check(archive.packageName == context.packageName && code(archive) == expectedCode && expectedCode > code(installed))
+                                val archive = context.packageManager.getPackageArchiveInfo(file.path, flags or PackageManager.GET_META_DATA) ?: error("Invalid APK")
+                                val targetEdition = call.argument<String>("edition") ?: "voice"
+                                check(targetEdition in listOf("voice", "lite"))
+                                check(archive.applicationInfo?.metaData?.getString("dev.agentdeck.edition") == targetEdition)
+                                check(archive.packageName == context.packageName && code(archive) == expectedCode)
+                                check(expectedCode > code(installed) || expectedCode == code(installed) && targetEdition != BuildConfig.FLAVOR)
                                 check(signatures(installed).isNotEmpty() && signatures(archive) == signatures(installed))
                                 main.post {
                                     try {

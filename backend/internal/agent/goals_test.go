@@ -44,6 +44,32 @@ func TestClaudeNativeGoalRecords(t *testing.T) {
 		t.Fatal("old history revived cleared goal")
 	}
 }
+
+func TestCurrentGoalsExcludeFinishedRecordsWithoutDeletingHistory(t *testing.T) {
+	s, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, status := range []string{"active", "paused", "complete", "failed"} {
+		_ = s.Put("sessions", status, store.Session{ID: status, Agent: "claude", Source: "claude-desktop"})
+		_ = s.Put("goals", status, storedClaudeGoal{Goal: &Goal{Session: status, Agent: "claude", Objective: "Synthetic goal", Status: status}})
+	}
+	m := &Manager{Store: s}
+	goals, err := m.Goals()
+	if err != nil || len(goals) != 2 {
+		t.Fatal("current goal filter", err, len(goals))
+	}
+	for _, g := range goals {
+		if g.Status != "active" && g.Status != "paused" {
+			t.Fatal("finished goal exposed")
+		}
+	}
+	var history storedClaudeGoal
+	if err := s.Get("goals", "complete", &history); err != nil || history.Goal == nil || history.Goal.Status != "complete" {
+		t.Fatal("finished goal history was deleted")
+	}
+}
 func TestGoalNativeReadAndStaleDelete(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "codex")

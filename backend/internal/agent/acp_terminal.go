@@ -66,11 +66,10 @@ func (r *acpRuntime) CreateTerminal(ctx context.Context, p acp.CreateTerminalReq
 	if e != nil || !st.IsDir() {
 		return acp.CreateTerminalResponse{}, errors.New("terminal directory unavailable")
 	}
-	title := p.Command + " " + strings.Join(p.Args, " ")
-	out, e := r.RequestPermission(ctx, acp.RequestPermissionRequest{SessionId: p.SessionId, Options: []acp.PermissionOption{{OptionId: "allow", Kind: acp.PermissionOptionKindAllowOnce, Name: "允许此次"}, {OptionId: "deny", Kind: acp.PermissionOptionKindRejectOnce, Name: "拒绝"}}, ToolCall: acp.ToolCallUpdate{ToolCallId: acp.ToolCallId(UUID()), Title: &title}})
-	if e != nil || out.Outcome.Selected == nil || out.Outcome.Selected.OptionId != "allow" {
-		return acp.CreateTerminalResponse{}, errors.New("terminal execution declined")
-	}
+	// The native ACP agent owns permission decisions and sends
+	// session/request_permission when its policy requires user confirmation.
+	// Do not manufacture a second approval for terminal/create. Identity,
+	// project-directory and resource bounds still apply to every request.
 	r.mu.Lock()
 	if len(r.terminals) >= 8 {
 		r.mu.Unlock()

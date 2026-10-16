@@ -72,6 +72,61 @@ func TestAndroidReleaseValidationPublicationAndPrefix(t *testing.T) {
 	}
 }
 
+func TestAndroidEditionsPublishAndUpgradeIndependently(t *testing.T) {
+	db, e := store.New(t.TempDir())
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer db.Close()
+	g := New(db, "https://gateway.example/agentdeck", "", "system", time.Minute)
+	voice := AndroidRelease{Version: "0.4.41", VersionCode: 9058, Package: "dev.agentdeck.agentdeck", ABI: "arm64-v8a", MinSDK: 24, Bytes: 273000000, SHA256: strings.Repeat("a", 64), URL: "https://cdn.example/voice.apk"}
+	if e = g.PublishAndroidRelease(voice); e != nil {
+		t.Fatal(e)
+	}
+	get := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		g.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/agentdeck/v2/app/releases/android"+path, nil))
+		return w
+	}
+	if get("?edition=lite").Code != 204 || get("?edition=bad").Code != 400 {
+		t.Fatal("edition fallback is unsafe")
+	}
+	lite := voice
+	lite.Edition = "lite"
+	lite.Bytes = 33000000
+	lite.SHA256 = strings.Repeat("b", 64)
+	lite.URL = "https://cdn.example/lite.apk"
+	if e = g.PublishAndroidRelease(lite); e != nil {
+		t.Fatal(e)
+	}
+	for _, test := range []struct {
+		edition string
+		want    AndroidRelease
+	}{{"voice", voice}, {"lite", lite}} {
+		w := get("?edition=" + test.edition)
+		var got AndroidRelease
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got != test.want {
+			t.Fatal("edition manifest crossed")
+		}
+		w = get("/apk?edition=" + test.edition)
+		if w.Code != 307 || w.Header().Get("Location") != test.want.URL {
+			t.Fatal("edition download crossed")
+		}
+	}
+	voice.VersionCode++
+	voice.Version = "0.4.42"
+	voice.SHA256 = strings.Repeat("c", 64)
+	if g.PublishAndroidRelease(voice) != nil {
+		t.Fatal("voice upgrade failed")
+	}
+	var got AndroidRelease
+	w := get("?edition=lite")
+	json.Unmarshal(w.Body.Bytes(), &got)
+	if got.VersionCode != 9058 {
+		t.Fatal("voice upgrade changed lite")
+	}
+}
+
 func TestGatewayClientIPOnlyTrustsConfiguredProxyChain(t *testing.T) {
 	g := &Server{}
 	r := httptest.NewRequest("GET", "https://gateway.example/", nil)

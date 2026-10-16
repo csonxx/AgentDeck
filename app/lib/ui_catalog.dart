@@ -1,5 +1,225 @@
 // App-owned interface strings only. Conversation content is never translated.
 const uiCatalog = <String, List<String>>{
+  '轻量版': ['Lite', '輕量版', 'Облегчённая'],
+  '带语音版': ['With voice', '含語音版', 'С голосом'],
+  '{0} · {1}': ['{0} · {1}', '{0} · {1}', '{0} · {1}'],
+  '该版本较旧，暂不可切换': [
+    'This edition is older; switching is unavailable',
+    '此版本較舊，暫不可切換',
+    'Эта версия устарела; переключение недоступно',
+  ],
+
+  '轻量版 · 不含语音输入': [
+    'Lite · No voice input',
+    '輕量版 · 不含語音輸入',
+    'Лёгкая версия · Без голосового ввода',
+  ],
+  '完整版 · 离线语音输入': [
+    'Full · Offline voice input',
+    '完整版 · 離線語音輸入',
+    'Полная версия · Голосовой ввод офлайн',
+  ],
+  '正在加载图片…': ['Loading image…', '正在載入圖片…', 'Загрузка изображения…'],
+  '正在同步会话': ['Syncing chats', '正在同步會話', 'Синхронизация чатов'],
+  '会话同步超时，正在重新连接': [
+    'Chat sync timed out. Reconnecting.',
+    '會話同步逾時，正在重新連線',
+    'Время синхронизации чатов истекло. Переподключение.',
+  ],
+  '设备名称保存失败，请重试': [
+    'Could not save the device name. Try again.',
+    '裝置名稱儲存失敗，請重試',
+    'Не удалось сохранить имя устройства. Повторите попытку.',
+  ],
+  '设备名称读取失败，请重试': [
+    'Could not read the device name. Try again.',
+    '裝置名稱讀取失敗，請重試',
+    'Не удалось прочитать имя устройства. Повторите попытку.',
+  ],
+  '本机会话缓存读取失败，将从工作站同步': [
+    'Could not read cached chats. They will sync from the workstation.',
+    '本機會話快取讀取失敗，將從工作站同步',
+    'Не удалось прочитать кеш чатов. Данные будут загружены с рабочей станции.',
+  ],
+  '本机存储需要关注': [
+    'Local storage needs attention',
+    '本機儲存需要處理',
+    'Требуется проверка локального хранилища',
+  ],
+  '重新配对': ['Pair again', '重新配對', 'Повторить сопряжение'],
+  '连接与同步': ['Connection and sync', '連線與同步', 'Подключение и синхронизация'],
+  '关闭': ['Close', '關閉', 'Закрыть'],
+  '会话列表已同步，正在接收实时更新': [
+    'Chats are synced and receiving live updates.',
+    '會話列表已同步，正在接收即時更新',
+    'Чаты синхронизированы и обновляются в реальном времени.',
+  ],
+  '当前显示上次同步的内容，执行状态待确认': [
+    'Showing previously synced content. Execution status is awaiting confirmation.',
+    '目前顯示上次同步的內容，執行狀態待確認',
+    'Показаны ранее синхронизированные данные. Статус выполнения ожидает подтверждения.',
+  ],
+  '连接并同步后显示工作站的会话': [
+    'Workstation chats appear after connection and sync.',
+    '連線並同步後顯示工作站的會話',
+    'Чаты рабочей станции появятся после подключения и синхронизации.',
+  ],
+  '正在刷新…': ['Refreshing…', '正在重新整理…', 'Обновление…'],
+  '暂不提醒': ['Dismiss reminder', '暫不提醒', 'Скрыть напоминание'],
+  '状态待同步': ['Awaiting sync', '狀態待同步', 'Ожидание синхронизации'],
+  "执行完成，未读": ["Completed, unread", "執行完成，未讀", "Выполнено, не прочитано"],
+  "权限暂不可读": ["Permissions unavailable", "權限暫不可讀", "Разрешения недоступны"],
+  "原会话当前未连接，读取权限不会启动或接管会话": [
+    "The original chat is not connected. Reading permissions will not start or take over the chat.",
+    "原會話目前未連線，讀取權限不會啟動或接管會話",
+    "Исходный чат не подключён. Чтение разрешений не запускает и не перехватывает чат.",
+  ],
+  "拒绝所有工具": ["Deny all tools", "拒絕所有工具", "Запретить все инструменты"],
+  "允许所有工具": ["Allow all tools", "允許所有工具", "Разрешить все инструменты"],
+  "所有工具询问": [
+    "Ask for every tool",
+    "所有工具詢問",
+    "Спрашивать для всех инструментов",
+  ],
+  "dontAsk · 自动拒绝需要确认的工具": [
+    "dontAsk · Deny tools that require confirmation",
+    "dontAsk · 自動拒絕需要確認的工具",
+    "dontAsk · Отклонять инструменты, требующие подтверждения",
+  ],
+  "plan · 规划模式": [
+    "plan · Planning mode",
+    "plan · 規劃模式",
+    "plan · Режим планирования",
+  ],
+  "bypassPermissions · 跳过工具权限确认": [
+    "bypassPermissions · Skip tool permission prompts",
+    "bypassPermissions · 跳過工具權限確認",
+    "bypassPermissions · Пропускать запросы разрешений инструментов",
+  ],
+  "auto · 原生自动权限审查": [
+    "auto · Native automatic permission review",
+    "auto · 原生自動權限審查",
+    "auto · Нативная автоматическая проверка разрешений",
+  ],
+  "acceptEdits · 自动接受文件编辑": [
+    "acceptEdits · Accept file edits automatically",
+    "acceptEdits · 自動接受檔案編輯",
+    "acceptEdits · Автоматически принимать изменения файлов",
+  ],
+  "default · 逐项请求授权": [
+    "default · Request tool approval",
+    "default · 逐項請求授權",
+    "default · Запрашивать подтверждение инструментов",
+  ],
+  "刷新": ["Refresh", "重新整理", "Обновить"],
+  "ACP 原生会话模式（由 Agent 定义）": [
+    "Native ACP session mode (defined by the agent)",
+    "ACP 原生會話模式（由 Agent 定義）",
+    "Нативный режим чата ACP (определён агентом)",
+  ],
+  "由 Agent 管理": ["Managed by Agent", "由 Agent 管理", "Управляется агентом"],
+  "按 OpenCode 的 Agent / 项目权限规则执行": [
+    "Uses OpenCode agent / project permission rules",
+    "依 OpenCode 的 Agent / 專案權限規則執行",
+    "Используются правила агента / проекта OpenCode",
+  ],
+  "原生工具权限规则": [
+    "Native tool permission rules",
+    "原生工具權限規則",
+    "Нативные правила разрешений инструментов",
+  ],
+  "电脑 Codex 版本不支持权限修改": [
+    "This Desktop Codex version does not support permission changes",
+    "電腦 Codex 版本不支援權限修改",
+    "Эта версия Codex на компьютере не поддерживает изменение разрешений",
+  ],
+  "电脑 Codex 未应用权限修改": [
+    "Desktop Codex did not apply the permission change",
+    "電腦 Codex 未套用權限修改",
+    "Codex на компьютере не применил изменение разрешений",
+  ],
+  "电脑 Codex 尚未确认权限更新，请刷新核对": [
+    "Desktop Codex has not confirmed the permission update. Refresh to check",
+    "電腦 Codex 尚未確認權限更新，請重新整理核對",
+    "Codex на компьютере ещё не подтвердил изменение. Обновите данные",
+  ],
+  "权限已变更，请刷新后重试": [
+    "Permissions changed. Refresh and try again",
+    "權限已變更，請重新整理後重試",
+    "Разрешения изменились. Обновите данные и повторите",
+  ],
+  "当前原生接口不支持修改权限": [
+    "The native API does not support permission changes",
+    "目前原生介面不支援修改權限",
+    "Нативный API не поддерживает изменение разрешений",
+  ],
+  "当前原生接口不提供权限修改": [
+    "The native API does not expose permission changes",
+    "目前原生介面未提供權限修改",
+    "Нативный API не предоставляет изменение разрешений",
+  ],
+  "原会话未连接": [
+    "Original chat is disconnected",
+    "原會話未連線",
+    "Исходный чат не подключён",
+  ],
+  "不支持此权限模式": [
+    "Unsupported permission mode",
+    "不支援此權限模式",
+    "Режим разрешений не поддерживается",
+  ],
+  "OpenCode 尚未确认权限更新，请刷新核对": [
+    "OpenCode has not confirmed the permission update. Refresh to check",
+    "OpenCode 尚未確認權限更新，請重新整理核對",
+    "OpenCode ещё не подтвердил изменение. Обновите данные",
+  ],
+  "Codex 尚未确认权限更新，请刷新核对": [
+    "Codex has not confirmed the permission update. Refresh to check",
+    "Codex 尚未確認權限更新，請重新整理核對",
+    "Codex ещё не подтвердил изменение. Обновите данные",
+  ],
+  "Claude 未应用此权限模式，请检查电脑端策略": [
+    "Claude did not apply this permission mode. Check desktop policy",
+    "Claude 未套用此權限模式，請檢查電腦端策略",
+    "Claude не применил режим. Проверьте правила на компьютере",
+  ],
+  "Claude Desktop 版本不支持权限读取": [
+    "This Claude Desktop version does not expose permissions",
+    "Claude Desktop 版本不支援權限讀取",
+    "Эта версия Claude Desktop не предоставляет разрешения",
+  ],
+  "Claude Desktop 版本不支持权限修改": [
+    "This Claude Desktop version does not support changing permissions",
+    "Claude Desktop 版本不支援權限修改",
+    "Эта версия Claude Desktop не поддерживает изменение разрешений",
+  ],
+  "Agent 未提供原生会话模式": [
+    "Agent does not expose native session modes",
+    "Agent 未提供原生會話模式",
+    "Агент не предоставляет режимы чата",
+  ],
+  "权限": ["Permissions", "權限", "Разрешения"],
+  "会话权限": ["Session permissions", "會話權限", "Разрешения чата"],
+  "权限未提供": ["Permissions unavailable", "權限未提供", "Разрешения недоступны"],
+  "无法读取权限，请重试": [
+    "Could not read permissions. Try again",
+    "無法讀取權限，請重試",
+    "Не удалось прочитать разрешения. Повторите попытку",
+  ],
+  "工作站默认权限": ["Workstation defaults", "工作站預設權限", "Настройки рабочей станции"],
+
+  "界面大小": ["Interface size", "介面大小", "Размер интерфейса"],
+  "小一号": ["Smaller", "小一號", "Меньше"],
+  "文字、图标、间距和卡片同步调整": [
+    "Adjusts text, icons, spacing and cards together",
+    "文字、圖示、間距和卡片同步調整",
+    "Одновременно меняет текст, значки, отступы и карточки",
+  ],
+  "界面大小保存失败，请重试": [
+    "Could not save interface size. Try again",
+    "介面大小儲存失敗，請重試",
+    "Не удалось сохранить размер интерфейса. Повторите попытку",
+  ],
   "设备显示名称": ["Device display name", "裝置顯示名稱", "Отображаемое имя устройства"],
   "例如：我的 OnePlus 7": [
     "For example: My OnePlus 7",

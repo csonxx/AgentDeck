@@ -59,6 +59,47 @@ Widget conversation(SlowDeliveryClient c) => MaterialApp(
 );
 
 void main() {
+  test(
+    'folded activity keeps its identity while history grows and is evicted',
+    () {
+      TranscriptBlock tool(int n) =>
+          TranscriptBlock(key: 'tool-$n', kind: 'tool_call');
+      var groups = transcriptSections([tool(10), tool(11)]);
+      final identity = groups.single.key;
+      groups = transcriptSections([
+        tool(9),
+        tool(10),
+        tool(11),
+      ], previous: groups);
+      expect(groups.single.key, identity);
+      groups = transcriptSections([
+        tool(11),
+        tool(12),
+        tool(13),
+      ], previous: groups);
+      expect(groups.single.key, identity);
+      final split = transcriptSections([
+        tool(11),
+        TranscriptBlock(key: 'dialogue', kind: 'message'),
+        tool(12),
+        tool(13),
+      ], previous: groups);
+      expect(split.map((s) => s.key).toSet().length, split.length);
+      var shared = transcriptSections([tool(12), tool(13)]);
+      shared = transcriptSections([
+        tool(11),
+        tool(12),
+        tool(13),
+      ], previous: shared);
+      final divided = transcriptSections([
+        tool(11),
+        TranscriptBlock(key: 'late-dialogue', kind: 'message'),
+        tool(12),
+        tool(13),
+      ], previous: shared);
+      expect(divided.map((s) => s.key).toSet().length, divided.length);
+    },
+  );
   testWidgets(
     'definite pre-write rejection preserves only the editable draft',
     (tester) async {

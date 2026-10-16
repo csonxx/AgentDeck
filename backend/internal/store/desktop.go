@@ -13,6 +13,21 @@ import (
 
 type desktopAlias struct{ Item, Native, Log, Source, LogText string }
 
+// Retain concurrent status/history updates when following an existing owner.
+func (s *Store) AdoptCodexDesktop(id, project string) error {
+	return s.db.Update(func(t *bolt.Tx) error {
+		var current Session
+		if err := s.get(t, "sessions", id, &current); err != nil {
+			return err
+		}
+		if current.Agent != "codex" || current.Project != project {
+			return errors.New("desktop project mismatch")
+		}
+		current.Source = "desktop"
+		return s.put(t, "sessions", id, current)
+	})
+}
+
 func desktopKey(kind string, ev Event, value string) string {
 	h := sha256.Sum256([]byte(ev.Session + "\x00" + ev.Kind + "\x00" + ev.Role + "\x00" + value))
 	return "desktop/" + kind + "/" + hex.EncodeToString(h[:])
@@ -25,6 +40,13 @@ func (s *Store) reconcileDesktop(t *bolt.Tx, ev *Event) (bool, error) {
 		var ss Session
 		if err := s.get(t, "sessions", ev.Session, &ss); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return false, err
+		}
+		if ss.Status == ev.Status && ev.Status == "completed" && ev.Item != "" {
+			var marker completionMarker
+			if err := s.get(t, "agentconfig", "completion/"+ev.Session, &marker); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return false, err
+			}
+			return marker.Item == ev.Item, nil
 		}
 		return ss.Status == ev.Status && ev.Status != "", nil
 	}

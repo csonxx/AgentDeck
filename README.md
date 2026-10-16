@@ -1,319 +1,387 @@
 # AgentDeck · 会话甲板
 
-在手机上查看和继续电脑上的 coding agent 会话。支持 Codex、Claude Code、OpenCode、Qoder、TRAE、WorkBuddy，电脑运行 Go 后端，手机使用 Flutter 原生 App。
+在手机上查看、继续电脑上的 coding agent 会话。Go 后端运行在工作站，Flutter App 负责加密连接、消息输入和展示。无需把项目迁移到 AgentDeck，也不要求项目使用 Git。
 
-当前版本 **0.4.34** · [源码仓库](https://gitlab.ttyuyin.com/azeroth/agentdesk)
+View and continue workstation coding-agent chats on your phone. A Go backend runs on the workstation; the Flutter app handles encrypted connections, input and presentation. Existing projects stay where they are and do not need Git.
 
-[下载最新 Android APK / Download latest APK](https://web-test-omnivibe.ttyuyin.com/agentdeck/v2/app/releases/android/apk) · [0.4.34 存档 / Archive](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.34/c5d6b55ac994e3179e6681c15ffab726f416f6dd47d797eafcf0deff109faf47/agentdeck-0.4.34-arm64-v8a.apk) · 0.4.34 · arm64-v8a · 272.9 MB
-已通过 infras 上传并完成匿名公网下载 SHA-256 校验。 / Uploaded through infras; anonymous public download SHA-256 verified.
+**当前版本 / Current version: 0.4.41** · [GitHub](https://github.com/csonxx/AgentDeck) · [GitLab](https://gitlab.ttyuyin.com/azeroth/agentdesk)
 
+| Android arm64-v8a | 下载 / Download | 大小 / Size | 区别 / Difference |
+| --- | --- | --- | --- |
+| 轻量版 / Lite | [0.4.41 APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.41/a6b8b882fe3eb55dc1ad0c0ddb37903ec3eaa4e932e93d21d39101738a58b88a/agentdeck-0.4.41-arm64-v8a-lite.apk) | 33.0 MB | 不含语音模型、引擎和麦克风权限 / No speech models, engines or microphone permission |
+| 带语音版 / With voice | [0.4.41 APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.41/b2d1cb4ed33504c5b80846920ca49a086bdc50e47b06ce1bd08ea090c9dba561/agentdeck-0.4.41-arm64-v8a-voice.apk) | 273.1 MB | 增加离线语音输入 / Adds offline speech input |
 
-## 应用更新与设备管理 / App updates and device management
+两个包的文字、图片、附件及会话功能一致，使用相同应用 ID 和签名；不能同时安装，可覆盖切换并保留配对与设置。公网文件已完成全量下载及 SHA-256 校验。现有 APK 使用开发测试签名；自建安装包必须维护自己的固定签名，不能假定能覆盖这里下载的包。
 
-Android App 在启动和回到前台时自动检查已配置网关的新版本（检查间隔 6 小时）；设置 → 应用更新也可立即检查、关闭自动检查、下载或安装。首次使用需手动安装带更新功能的版本，此后可从 App 内升级。下载由 Android 系统负责，可离开页面、切后台，断网或进程退出后继续恢复；也可选择浏览器下载。下载前显示版本说明和大小；安装前校验 SHA-256、包名、版本号和当前应用签名。首次安装更新需在 Android 允许 AgentDeck 安装此来源的应用，然后返回点击安装；安装仍由系统确认，配对与设置保留。
+Both editions share text, image, attachment and chat features, application ID and signing certificate. They replace one another while retaining pairing/settings; they cannot coexist. Public downloads were fully SHA-256 verified. Distributed APKs currently use a development signing key. Maintain a stable signing identity for your own builds; a locally generated debug key will not necessarily replace these APKs.
 
-The Android app checks the configured gateway at launch and on foreground resume, at most once every six hours. Settings → App updates supports immediate checks, automatic-check preferences, downloads and installation. Manually install the first update-capable version once, then upgrade within the app. Android owns the download so it continues in the background and resumes after network/process interruptions; browser download is also available. Version notes and size appear before downloading. SHA-256, package identity, version code and the installed app's signing certificate are checked before Android confirms installation. Initially allow installs from AgentDeck in Android settings, return, and tap Install. Pairing and settings are retained.
+**发布状态（2026-10-16） / Release status:** 双包及更新页已完成构建、测试和 OnePlus 7 安装；双通道网关代码尚未发布到现有测试网关，当前请使用上方固定版本下载。/ Both editions and the picker are built/tested and installed on OnePlus 7. The dual-channel gateway code has not yet been deployed to the existing testing gateway; use the versioned links above for now. [验证范围 / Acceptance scope](docs/ACCEPTANCE.md)
 
-网关提供 `GET /agentdeck/v2/app/releases/android?abi=arm64-v8a` 版本信息，以及 `GET /agentdeck/v2/app/releases/android/apk` 下载跳转。APK 存放于 infras/CDN，网关只在现有加密数据库中保存发布信息，不新增 PVC，也不通过会话中继传送 APK。发布更新仅允许通过网关 owner Unix 管理口：
+## 从哪里开始 / Start here
 
-The gateway provides a version manifest and APK redirect. Infras/CDN stores APKs; the gateway's existing encrypted database stores only release metadata. No new PVC or conversation relay transfer is needed. Publishing is restricted to the owner Unix socket:
+- **只用手机 / Phone user:** 安装上方 APK，向工作站所有者获取配对码或网关地址，再按[连接流程](#连接手机--connect-the-phone)操作。/ Install an APK, obtain pairing material or a gateway address from the workstation owner, then follow the connection steps.
+- **已有网关 / Existing gateway:** 构建后端，使用[网关模式](#方式-a已有网关--existing-gateway)启动 S-LOCAL，浏览器配对；手机不需要 USB。/ Build the backend, start S-LOCAL in gateway mode and pair in the browser. USB is unnecessary.
+- **先本机体验 / Local trial:** 使用 [USB 直连](#方式-bandroid-usb-直连--android-usb-direct)，不需要飞书应用或公网域名。/ Use USB direct mode; no Feishu application or public domain is needed.
+- **从零搭建网关 / Host your own gateway:** 先完成[网关部署](#自建公网网关--host-a-public-gateway)，再启动 S-LOCAL。/ Deploy a gateway before linking the workstation.
+- **交给 AI / AI-assisted setup:** 复制下一节的任务，并填写实际目录、设备和连接方式。/ Copy the following brief with your actual paths, device and connection mode.
 
-```sh
-python3 scripts/android_release_manifest.py \
-  --apk artifacts/agentdeck-VERSION-arm64-v8a.apk \
-  --receipt artifacts/apk-public-VERSION.json \
-  --notes-file release-notes.txt --output android-release.json
-agentdeck gateway-publish-release --data /data/agentdeck \
-  --android-manifest android-release.json
+## 直接交给 AI 的任务 / Copy this task to your AI
+
+以下提示词不含凭据；把方括号替换成自己的信息。已有后端或配对时明确写“保留现有数据”。不要把 storage.key、飞书 Secret、Agent token 或配对 JSON 发给 AI 聊天。
+
+Replace bracketed values below. Explicitly request preservation of existing data when applicable. Do not paste storage keys, Feishu secrets, agent tokens or pairing JSON into chat.
+
+```text
+请在这台电脑安装并配置 AgentDeck，按仓库 README.md 和 AGENTS.md 执行。
+仓库：https://github.com/csonxx/AgentDeck
+工作站系统：[macOS / Linux]；源码目录：[绝对路径]
+允许手机操作的项目父目录：[绝对路径，可逗号分隔]
+启用的 Agent：[Codex / Claude CLI / OpenCode / 其他]
+连接模式：[已有网关 / 自建网关 / Android USB 直连]
+网关 HTTPS 地址：[自有地址，含路径前缀；USB 模式不填]
+手机：[adb devices 中的设备编号，或由我手动安装]
+安装类型：[轻量版 / 带语音版]；数据目录：[默认 ~/.agentdeck]
+已有安装：[无 / 有，必须保留数据、storage.key、配对和设置]
+
+先检查环境、已有进程、版本、端口和目录，再构建；只启用我列出的 Agent。
+读取本仓库 CLI --help，不猜参数。已有网关不重建；直连不申请飞书应用。
+以登录 Agent 的同一个系统用户运行 S-LOCAL，保留 Agent 的原生默认权限。
+网关 Secret 仅通过本机安全文件或部署平台注入，不写入源码或聊天。
+启动后验证：本机管理页、网关状态（如适用）、手机加密配对、真实会话同步。
+需要我登录、扫飞书码、核对配对码或批准系统安装时，明确提示我操作。
+发送验收只使用专门的测试会话，不向现有工作会话发消息。
+不要退出任何 Agent 的登录，不自动开启 Claude Desktop 调试器，不关闭 TLS 校验，
+不要重置数据、覆盖存储密钥、放宽权限或把 8787/9229/control.sock 暴露到公网。
+如需后台常驻，使用实际绝对路径配置本机服务管理器，说明启动/停止/日志位置。
+最后报告：启动命令、管理页、版本、手机类型、数据目录、已验证项和未通过项。
+没有我的明确要求，不提交推送代码、不发布公网服务。
 ```
 
-生成清单会核对 APK 原生版本号和上传后的完整下载校验记录；网关拒绝降低版本号或用不同内容替换同一版本。发布后无需重启网关，App 下一次检查即可发现新版本。清单是公开信息，不得放凭据或私密发布说明。
+English equivalent:
 
-Manifest generation checks native APK version codes and complete public-download verification. The gateway rejects lower version codes and different content under an existing code. Publishing takes effect without a gateway restart. The manifest is public; exclude credentials and private notes.
+```text
+Install AgentDeck using this repository's README.md and AGENTS.md.
+Repository: https://github.com/csonxx/AgentDeck
+OS: [macOS / Linux]; checkout: [absolute path]
+Allowed project roots: [absolute paths, comma-separated]
+Enabled agents: [Codex / Claude CLI / OpenCode / others]
+Connection: [existing gateway / self-hosted gateway / Android USB direct]
+Gateway URL: [my HTTPS URL including its prefix, or empty for USB]
+Phone: [adb serial, or manual APK installation]; edition: [Lite / With voice]
+State directory: [~/.agentdeck unless specified]
+Existing installation: [none / preserve existing state, keys, pairing and settings]
 
-本机管理页的已配对 App 支持修改显示名称和删除配对。App 设置 → 设备显示名称也能改名；离线修改在重连后同步，电脑改名实时推送到 App。删除配对立即断开连接、清除未使用的连接票据并让旧设备密钥失效，需要重新配对；已有会话历史保留。在线行显示 IP，离线行显示配对时间。直连只读取真实连接地址；中继 IP 由已认证的网关覆写传递。若网关位于 Envoy/Istio 后面，通过 `AGENTDECK_TRUSTED_PROXY_CIDRS` 明确配置可信代理网段，按从右向左的可信代理链读取 X-Forwarded-For，不信任公网客户端自行填写的来源地址。未配置时只显示网关实际看到的连接地址。
+Inspect prerequisites, existing processes, versions, ports and paths first.
+Use CLI --help; enable only requested agents. Do not redeploy an existing gateway.
+Run S-LOCAL as the same OS user who signed into the agents, with native default permissions.
+Keep secrets in local protected files or deployment secret management, never source or chat.
+Verify the local console, gateway status if applicable, encrypted phone pairing and real history.
+Ask me to perform required sign-ins, Feishu authorization, code comparison or OS install approval.
+Use a dedicated test chat for sending; never send into an existing work chat for acceptance.
+Do not sign agents out, enable the Claude Desktop debugger automatically, disable TLS checks,
+reset state, replace storage keys, widen permissions or expose 8787/9229/control.sock publicly.
+If background service is needed, use the actual absolute paths and report start/stop/log commands.
+Report versions, paths, connection mode, tested behavior and remaining failures separately.
+Do not commit, push or publish services unless I explicitly request it.
+```
 
-The local console supports renaming and revoking paired Apps. App Settings → Device display name supports the same rename, queues offline changes and receives owner changes live. Revocation disconnects streams immediately, removes unused tickets and invalidates the old device key; pairing again is required, while chat history is retained. Online rows show connection IPs; offline rows show pairing time. Direct connections use the actual peer address. Relay metadata is overwritten by the authenticated gateway. Behind Envoy/Istio, explicitly set `AGENTDECK_TRUSTED_PROXY_CIDRS`; the gateway walks trusted forwarding hops from right to left, ignoring untrusted client-supplied IPs. Without that configuration it reports only the actual gateway peer address.
+## 架构与连接方式 / Architecture and connection modes
 
-## 能做什么
+| 角色 / Role | 运行位置 / Where | 职责 / Responsibility |
+| --- | --- | --- |
+| S-LOCAL | 运行 Agent 的电脑 / Agent workstation | 导入原会话、执行授权操作、加密保存、与手机配对 / Import chats, execute authorized operations, encrypt storage and pair phones |
+| S-GATEWAY | 公网 HTTPS/Envoy 后 / Behind public HTTPS/Envoy | 飞书身份、多租户归属、在线目录和密文中继；不持有会话解密 root / Feishu identity, tenant ownership, discovery and ciphertext relay; no chat decryption root |
+| C-APP | Android 手机 / Android phone | 配对、解密、输入、会话与附件展示 / Pairing, decryption, input, chats and attachments |
 
-- 按 Agent、项目或最近会话浏览，搜索历史并跳到指定消息。
-- 新建、发送、续聊、停止和工具审批，具体能力取决于 Agent。
-- 授权卡片点击「展开完整执行内容」，可滚动查看和复制完整命令、工作目录、文件路径及嵌套参数；关闭详情后选择允许或拒绝。查看详情不会执行操作。 / Tap “Show full execution details” on an approval card to scroll through and copy the complete command, working directory, file paths and nested arguments. Close details to allow or deny; viewing details does not execute the action.
-- 每条发送/接收的文字消息下方可复制完整原文，保留 Markdown、链接和代码。 / Copy the complete original text below each sent/received message, including Markdown, links and code.
-- 查看 Markdown、思考摘要、工具输出、图片与文件；支持 Office 内容预览和音视频播放。
-- 手机端语音转文字，编辑后手动发送；支持图片和文件附件。
-- 手机与工作站之间加密通信，可直连，也可通过飞书网关发现工作站和中继。
+直连：`C-APP → HTTPS/WSS → S-LOCAL`。网关：`S-LOCAL → 出站 WSS → S-GATEWAY ← HTTPS/WSS ← C-APP`。HTTP 用于认证、控制、分页和附件；WebSocket 用于实时事件；OpenCode 上游另用 REST/SSE。不是把终端画面录屏传给手机。
 
-WorkBuddy 当前只提供每个账号的一个本地助理；各 Agent 的接入要求见 [接入指南](docs/AGENTS.md)。
+Direct: `C-APP → HTTPS/WSS → S-LOCAL`. Gateway: `S-LOCAL → outbound WSS → S-GATEWAY ← HTTPS/WSS ← C-APP`. HTTP handles authentication, control, paging and attachments; WebSocket carries live events. OpenCode additionally uses REST/SSE upstream. The phone receives structured events rather than a terminal screen recording.
 
-## 界面
+Local/App 首次核对配对码，之后自动重连并轮换流量密钥（默认 15 分钟）。事件、设备、附件及手机缓存加密保存。网关多租户不等于分布式高可用：当前使用单实例 bbolt 和进程内路由，不可直接扩成多副本。/ Local/App compare a code once, then reconnect and rotate traffic keys automatically (15-minute default). Events, devices, attachments and phone caches are encrypted at rest. Multi-tenancy is authorization isolation; the current single-instance bbolt/in-memory router is not horizontally scalable HA. [安全说明 / Security](docs/SECURITY.md)
 
-以下为 Android 0.4.13 真机截图，项目组已折叠以隐藏私人会话。
+## 环境准备与后端构建 / Prerequisites and backend build
 
-<p>
-  <img src="docs/images/app-0.4.13-workspace.png" width="260" alt="工作空间">
-  <img src="docs/images/app-0.4.13-settings.png" width="260" alt="设置">
-</p>
+当前主要验收平台为 **macOS 工作站 + Android arm64-v8a 手机**。Go 服务可用于 Linux；桌面 IPC、macOS 自动打开原会话等能力受平台和原生版本限制。Flutter 使用 `dart:io`，不是 Web App；iOS/macOS 源码目录不代表已有同等实机验收。
 
-## 快速上手：Android USB 直连
+The main accepted platform is **macOS workstation + Android arm64-v8a phone**. Go services also run on Linux; desktop IPC and macOS original-chat opening are platform/version dependent. This is a native `dart:io` app, not a web app. iOS/macOS source folders do not imply equivalent device acceptance.
 
-需要 Go 1.25+、Flutter 3.38+ / Dart 3.10+、Python 3、Android SDK/JDK，以及开启 USB 调试的 Android 7.0+ 手机。在运行后端的同一系统用户下安装并登录 Codex 或 Claude Code。
-
-**1. 克隆并构建**
+| 用途 / Purpose | 需要 / Required |
+| --- | --- |
+| 后端 / Backend | Git、Go 1.25+；Agent 已在同一系统用户下安装、登录且能独立使用 / Git, Go 1.25+, agents installed/signed in and working as the same OS user |
+| 安装现成 APK / Install existing APK | Android 7.0+、arm64-v8a；允许浏览器安装来源，或 Android SDK platform-tools / Allow the APK install source, or use platform-tools |
+| 自建 APK / Build APK | Flutter 3.38+ / Dart 3.10+、Python 3、JDK 17+、Android SDK/build-tools；先通过 `flutter doctor -v` / Complete Flutter's Android toolchain setup |
+| 网关 / Gateway | HTTPS 域名、反向代理、飞书网页登录应用；仅 USB 直连不需要 / HTTPS domain, reverse proxy and Feishu web-login application; unnecessary for USB direct |
 
 ```sh
-git clone git@gitlab.ttyuyin.com:azeroth/agentdesk.git
-cd agentdesk
+git clone https://github.com/csonxx/AgentDeck.git
+cd AgentDeck
 mkdir -p artifacts
 (cd backend && GOWORK=off go build -o ../artifacts/agentdeck.next ./cmd/agentdeck)
 mv artifacts/agentdeck.next artifacts/agentdeck
-(cd app && flutter pub get)
-python3 scripts/setup_client_voice.py
-(cd app && flutter build apk --release --split-per-abi)
-adb -s DEVICE_SERIAL install -r app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+./artifacts/agentdeck serve --help
 ```
 
-把 `DEVICE_SERIAL` 换成 `adb devices` 中的设备编号。语音模型首次下载约 300 MB，随 App 打包；当前 APK 使用开发测试签名。
+已有 checkout 在原目录更新和构建即可，不必再次克隆。`artifacts/agentdeck` 是生成文件，不入 Git。后端默认数据在 `~/.agentdeck`；用其他目录时，启动、配对及管理命令的 `--data` 必须一致。/ Update an existing checkout in place. The binary is generated, not committed. State defaults to `~/.agentdeck`; every serve/pair/admin command must use the same `--data` if overridden.
 
-**2. 在电脑启动后端**
+## 启动工作站 / Start the workstation
 
-将 `$HOME/workspace` 换成实际项目父目录，以下命令从仓库根目录执行，并保持运行：
+### 方式 A：已有网关 / Existing gateway
+
+以下从仓库根目录执行，先将 `PROJECTS_ROOT` 改成实际存在的项目父目录。示例启用 Codex 和 Claude 日志导入；未安装的 Agent 删除对应参数。`--codex-desktop-socket` 只在该路径确实存在且需操作原 Desktop 会话时添加，不能把示例路径当成所有平台通用路径。
+
+Run from the repository root after setting a real existing project root. The example imports Codex and Claude logs; remove absent agents' flags. Add the optional Codex desktop socket only when it actually exists and native Desktop operations are required.
 
 ```sh
-./artifacts/agentdeck serve \
+PROJECTS_ROOT="$HOME/workspace"
+test -d "$PROJECTS_ROOT"
+./artifacts/agentdeck serve --relay \
   --data "$HOME/.agentdeck" \
-  --listen 127.0.0.1:8443 \
-  --public-url https://localhost:8443 \
   --codex-sessions "$HOME/.codex/sessions" \
   --claude-sessions "$HOME/.claude/projects" \
-  --project-roots "$HOME/workspace" \
-  --media-roots "$HOME/workspace"
+  --project-roots "$PROJECTS_ROOT" \
+  --media-roots "$PROJECTS_ROOT"
 ```
 
-日志目录用于导入历史，`--project-roots` 用于允许手机新建和发送。若要发送到电脑上已打开的 Codex 原会话，给启动命令增加 `--codex-desktop-socket "$HOME/.codex/ipc/ipc.sock"`；未配置时通过手机分支续聊，原会话的停止和审批仍在电脑处理。
+需要 Codex Desktop 原会话时，给上面启动命令增加 / For original Codex Desktop chats, add:
 
-**3. 在另一个终端配对**
+```sh
+--codex-desktop-socket "$HOME/.codex/ipc/ipc.sock"
+```
+
+1. 保持后端运行，电脑浏览器打开 **http://127.0.0.1:8787/**。未关联时也能打开。/ Keep the process running and open the local console, even before enrollment.
+2. 填自己的完整网关 HTTPS 地址和工作站名称，点击飞书关联，用飞书授权后返回，确认状态在线。地址有 `/agentdeck` 等前缀时必须保留。/ Enter your full gateway URL and workstation name, authorize with Feishu, return and verify Online. Preserve any path prefix.
+3. 按下一节在手机登录和配对。网页可查看在线 App 数量、名称、IP、待配对请求及网关状态。/ Sign in and pair the phone below. The console shows app connections, names, IPs, pairing requests and gateway status.
+
+`--relay` 不开放手机直连的公网 TCP 端口；8787 只是电脑本机管理页，手机不要填写它。后端需持续运行，关闭终端/进程即停止服务；后台常驻见[服务管理](#日常启动停止与数据--service-and-state-management)。/ Relay mode opens no public workstation listener. Port 8787 is local administration, not the phone connection address. The process must remain running; closing it stops service.
+
+### 方式 B：Android USB 直连 / Android USB direct
+
+无需网关或飞书。开启手机 USB 调试，在电脑运行 `adb devices -l`，解锁手机并允许调试；把 `DEVICE_SERIAL` 换成目标手机编号，多台手机时不要省略 `-s`。
+
+No gateway or Feishu is required. Enable USB debugging, run `adb devices -l`, unlock the phone and approve debugging. Replace `DEVICE_SERIAL` with the intended device and retain `-s` when multiple phones are attached.
+
+```sh
+PROJECTS_ROOT="$HOME/workspace"
+test -d "$PROJECTS_ROOT"
+./artifacts/agentdeck serve \
+  --data "$HOME/.agentdeck" \
+  --listen 127.0.0.1:8443 --public-url https://localhost:8443 \
+  --codex-sessions "$HOME/.codex/sessions" \
+  --claude-sessions "$HOME/.claude/projects" \
+  --project-roots "$PROJECTS_ROOT" --media-roots "$PROJECTS_ROOT"
+```
+
+另开终端，在相同仓库根目录执行 / In a second terminal at the same checkout:
 
 ```sh
 adb -s DEVICE_SERIAL reverse tcp:8443 tcp:8443
 ./artifacts/agentdeck pair --data "$HOME/.agentdeck" --out /tmp/agentdeck-pair
 ```
 
-打开生成的 `/tmp/agentdeck-pair.png`，在 App 扫码，也可粘贴 JSON。配对码 5 分钟内有效、单次使用，配对后删除 `.png` 和 `.json`。手机连接后，选 Agent → 项目 → 打开或新建会话 → 发送。
+App 选择扫码/粘贴配对，扫描 `/tmp/agentdeck-pair.png`，或私下复制 `.json` 到 App。邀请五分钟内有效且单次使用；成功后删除这两份一次性文件。这里只使用回环自签证书的公钥绑定，不能改成全局忽略 TLS 错误。USB 重连后再执行 `adb reverse`，保留的配对仍有效。
 
-USB 断开或电脑休眠会中断连接；重接后再执行 `adb reverse`，已有配对可继续使用。日常通过 Wi-Fi 或移动网络使用，请配置下面的公网连接。
+Choose QR/pasted pairing in the app and use the generated PNG/JSON privately. Invitations expire after five minutes and are single-use; delete both files after success. Loopback self-signed TLS uses public-key pinning, never a global certificate bypass. Repeat `adb reverse` after USB reconnection; existing pairing remains valid.
 
-会话向顶部滑动自动加载更早记录，向底部滑动自动补回后续记录，持续分页直到没有更多；不需要点加载按钮。工具调用默认折叠；分页只有工具或过程记录时会继续自动获取，直到取得实际对话消息或到达历史末尾。窗口保持有界并保留阅读位置，新输出不会强制拉回底部。右上角对话目录可筛选「全部 / 我发送的 / 我收到的」，结合摘要搜索定位并跳转。 / Scroll towards the top to load older records and towards the bottom to load newer records, continuing until the end without load buttons. Tool calls default to collapsed. Pages containing only execution records are followed automatically until a dialogue message or the history boundary is reached. Bounded windows preserve the reading position. The conversation outline filters All / Sent by me / Received and combines filtering with preview search and precise navigation.
+直连和 relay 选一种启动同一数据目录，不要同时运行两个进程。直连工作站经公网 HTTPS 使用时，见 [Envoy/TLS 部署](docs/deploy/README.md)。/ Run one mode/process per data directory. For direct public HTTPS, use the Envoy/TLS deployment guide.
 
-## Claude 桌面会话同步 / Claude desktop conversations
+## 连接手机 / Connect the phone
 
-**实机状态（2026-10-12）：OnePlus 7 已完成公网网关到 Desktop 原会话的真实收发。** 普通文字、图片、运行中追加输入、询问回答、停止执行和 Mac 锁屏后收发均通过。输入在原生记录中是普通用户来源；原会话 UUID、执行 PID 和启动时间保持一致。没有 peer 提示、分支或替换 CLI。OnePlus 7 已安装完整构建的 **0.4.32**，现有配对保留；各项证据和版本范围见 [验收记录](docs/ACCEPTANCE.md)。
+### 安装 / Install
 
-**Live status (2026-10-12): real OnePlus 7 round trips through the public gateway to the original Desktop chat passed.** Coverage includes text, images, mid-turn input, question answers, interruption and sending/receiving while the Mac is locked. Native records retain human provenance and the original session UUID, executor PID and process birth. No peer warning, fork or replacement CLI is involved. OnePlus 7 runs a full release build of **0.4.32**, retaining its pairing; see [acceptance evidence and version coverage](docs/ACCEPTANCE.md).
-
-macOS 下启用默认 `~/.claude/projects` 日志目录时，后端自动读取 `~/Library/Application Support/Claude/claude-code-sessions` 的桌面会话目录，按桌面的标题、原项目和归档状态显示。目录不受默认 72 小时日志窗口限制，子 agent 日志不会成为独立会话。已存在的手机分支仍保留。
-
-On macOS, enabling the default `~/.claude/projects` log root automatically discovers the Claude desktop catalog under `~/Library/Application Support/Claude/claude-code-sessions`. Chats follow desktop titles, original projects and archive state. The catalog is not limited by the default 72-hour log window, and subagent logs do not become separate chats. Existing mobile branches remain available.
-
-本机直发是显式选择的实验性 macOS 接入，使用 Desktop 自带调试功能，并非 Anthropic 公开稳定 API。首次需要在 Claude **Help → Troubleshooting → Enable Developer Mode** 开启开发模式（会重启应用），再在 **Developer → Enable Main Process Debugger** 开启本机调试器。仅在确认本机其他程序可信时开启：该调试器有广泛的本机应用控制权限。
-
-Native direct input is an explicitly opted-in experimental macOS integration using Desktop's built-in debugger, not a public stable Anthropic API. Enable **Help → Troubleshooting → Enable Developer Mode** (restarts Desktop), then **Developer → Enable Main Process Debugger**. Enable it only on a trusted workstation: the debugger grants broad local application control.
-
-S-LOCAL 在原有启动参数上增加 `--claude-desktop-debugger`；仍需 `--claude-sessions` 和可读取的 Desktop 目录。该开关默认关闭，不适用于 S-GATEWAY。后端仅连接 `127.0.0.1:9229`，校验监听进程的用户、可执行文件和启动时间，再匹配本机目录中的原会话、项目和消息 UUID。**不要把 9229 加入 Envoy、VS、公网监听或端口转发。** 手机仍只连接自己的 S-LOCAL/S-GATEWAY，不需要登录 Claude 网页，也不直连 Anthropic；模型执行仍由电脑 Claude 使用原账号完成。
-
-Add `--claude-desktop-debugger` to the existing S-LOCAL arguments, with `--claude-sessions` and a readable Desktop catalog. It defaults off and does not belong on S-GATEWAY. The adapter connects only to `127.0.0.1:9229`, verifies the listener's owner, executable and process birth, then matches the original local session, project and message UUID. **Never publish or proxy port 9229 through Envoy/VS or a port forward.** The phone continues connecting only to its own Local/Gateway; it requires no Claude web login or direct Anthropic connection. Desktop retains its original account for model execution.
-
-发送后，后端只有在原生记录中确认同一 UUID 的普通用户输入才返回 `submitted`；它表示原会话收到输入，不表示模型执行成功。回执丢失不会自动重复发送或回退到 peer、工作站队列、分支/替换执行端。额度/API 错误同步为失败。图片作为原生图片输入；运行中追加交给 Desktop 自己的待处理输入。手机可展开审批完整内容、回答问题、单次允许或拒绝，并停止原执行。真机已验证图片、运行中追加、询问回答和停止；工具允许/拒绝的分支另有协议回归，未声称在真机触发 Bash 授权弹窗。此版本的模型参数应在电脑原会话修改；不同参数会明确拒绝，不会假装切换成功。
-
-The backend returns `submitted` only after observing the exact UUID as native human input; this acknowledges reception, not successful inference. Lost acknowledgements never trigger a resend or a fallback to peer delivery, a workstation queue, fork or replacement executor. Quota/API errors are synchronized as failures. Images use native image input, and mid-turn input goes to Desktop's own pending-input handling. The phone exposes full approval details, question answers, one-time allow/deny and interruption. Real phone checks cover images, mid-turn input, question answers and interruption; tool allow/deny branches have protocol regression coverage, without claiming a real Bash permission prompt was exercised. Change model settings in the original Desktop chat; mismatched parameters are explicitly rejected rather than falsely reported as changed.
-
-原会话直发目前必须使用上述本机调试器，按用户授权仅在 AgentDeck 使用期间保留。S-LOCAL 同时增加 `--claude-desktop-close-debugger`，正常退出或收到 SIGTERM/SIGINT 时关闭调试器；它不会结束 Desktop 或原任务。已实际验证退出 Local 后 9229 关闭、原执行进程不变。强杀或系统崩溃无法保证清理，请手动关闭 **Enable Main Process Debugger**。当前常驻 Local 正在使用该入口，9229 仅监听本机；开发设置的持久值仍为关闭，未退出登录或改变隐私选项。
-
-Original-chat input currently requires this local debugger. Under the owner's authorization it remains enabled only while AgentDeck uses it. Also pass `--claude-desktop-close-debugger` to S-LOCAL to close the debugger on normal exit or SIGTERM/SIGINT without stopping Desktop or its tasks. A real Local shutdown closed port 9229 while preserving the executor. Forced termination/system crashes cannot guarantee cleanup; close **Enable Main Process Debugger** manually. The resident Local currently uses the loopback-only endpoint; the persisted developer setting remains disabled, with login and privacy settings preserved.
-
-Desktop 重启后调试器默认关闭，需要通过官方菜单重新开启；Local 不会自动绕过 Electron 的调试限制。升级 Desktop 后必须重新验收内部接口，失配时明确报未发送。Mac 锁屏收发已通过，不需要操作桌面输入框；电脑休眠、Desktop 退出或断网仍会断开。此版本的 Desktop 模型/effort 修改仍需在电脑原会话进行。
-
-Desktop restarts turn the debugger off; reopen it through the official menu. Local does not bypass Electron's debugging restrictions. Revalidate the internal API after Desktop updates; incompatibility fails explicitly. Locked-screen sending and receiving passed without operating the desktop composer. Sleep, Desktop exit and network loss disconnect the route. Desktop model/effort changes still require the original desktop chat in this version.
-
-官方 `claude --print --cloud` 在此前实测中仍被归为其他 Claude 会话请求，不能替代上述普通用户入口；peer 发送器仅保留协议回归测试，不供 App 用户输入调用。S-LOCAL 自己持有的 CLI 仍使用原生 `stream-json`，属于另一种执行方式。研究参考：[Relaymote 原生 Desktop 入口](https://github.com/ashwarsadh/relaymote/blob/main/lib/desktop.js)；AgentDeck 没有安装或运行其安装脚本。
-
-Earlier tests classify official `claude --print --cloud` input as another Claude session, so it cannot replace the owner-input handler. The peer sender is retained only for protocol regressions and never called for app input. S-LOCAL-owned CLIs retain native `stream-json` as a separate execution mode. Research reference: [Relaymote Desktop input](https://github.com/ashwarsadh/relaymote/blob/main/lib/desktop.js); AgentDeck did not install or run its setup scripts.
-
-此前桌面标准输入桥接已退出生产路径。本机 Claude 桌面保留了 `CLAUDE_CODE_LOCAL_BINARY` 字符串，但当前构建不调用初始化逻辑，不能作为可用接口。旧安装可运行 `python3 scripts/install_claude_stdio.py --uninstall` 清除启动配置；不会结束官方桌面任务。实验性桥接仅保留隔离协议回归测试。
-
-The earlier desktop stdin adapter is no longer a production input path. The installed desktop retains the `CLAUDE_CODE_LOCAL_BINARY` string but does not initialize it in this build. Remove the old launch configuration with `python3 scripts/install_claude_stdio.py --uninstall`; this does not stop desktop tasks. The experimental adapter remains only for isolated protocol regression tests.
-
-配置 Codex 桥接后，手机主动继续/发送到原会话时，若电脑尚未加载该会话，macOS 后端自动通过 `codex://threads/<原 ID>` 唤起，再重新发现执行端，始终向原 ID 和授权项目投递。后台刷新、只读订阅不会切换电脑页面。仅明确返回没有持有者时才唤起；版本拒绝、断线或发送后回执丢失不会被当成「没打开」，也不会自动重发消息。需要电脑 Codex 正常运行及本机协议兼容；其他系统暂不自动唤起。
-
-With the Codex bridge configured, explicitly continuing or sending to an unloaded native chat on macOS opens `codex://threads/<original ID>` and rediscovers its owner before delivery. Background reads and subscriptions do not navigate the desktop. Only an explicit no-owner result triggers opening; protocol rejection, transport failures and lost input acknowledgements never trigger an automatic resend or fork. The native desktop must be running and compatible. Automatic opening currently supports macOS.
-
-Codex 项目列表只展示用户会话：从原生 `state_5.sqlite` 只读核对来源和归档状态，过滤 `codex exec` 自动任务及内部子 agent；原生日志头也会阻止新任务导入。旧版本已导入、且原生目录已不再登记的日志会话只从列表隐藏，历史和配对保留。原生目录不可用时保留现有列表，不按目录长相猜测或删聊天。
-
-The Codex project list shows user conversations. S-LOCAL reads source and archive metadata from native `state_5.sqlite`, excluding `codex exec` jobs and internal subagents; rollout headers also prevent new internal imports. Existing orphaned log imports are hidden from the list while encrypted history and pairing remain intact. An unavailable native catalog preserves the existing list; directory names are not used to guess or delete conversations.
-
-Codex 实时快照与落盘记录在合并前统一过滤内部引用标记，避免最终回复重复显示。升级时只修复符合已知特征的展示索引，保留加密原始事件、配对及不同轮次的相同回复。
-
-Codex live snapshots and rollout records filter internal citation metadata before reconciliation, preventing duplicate final replies. Upgrade repairs only matching presentation indexes; encrypted source events, pairing and identical replies in separate turns are retained.
-
-Claude 状态优先读取本机 `~/.claude/sessions/*.json` 的原生 `idle / busy / waiting`，校验 PID 和进程启动时间，排除退出进程、PID 复用及停放任务。状态与桌面目录更新时间分别排序，避免完成事件被较新的目录更新时间挡住。后端每 500 ms 检查原生文件，随后通过加密会话推送；原生 CLI 写文件之前的延迟仍由 Claude 决定。不提供原生状态文件的版本或环境回退到增量日志，延迟取决于日志落盘。等待用户确认时单独显示「等待确认」，已验证的活跃进程退出显示中断。
-
-Claude status prefers the native `idle / busy / waiting` records in local `~/.claude/sessions/*.json`, checking both PID and process birth time and excluding exited/reused PIDs and parked tasks. Status uses its own source clock rather than desktop catalog activity timestamps. The backend polls native records every 500 ms and pushes changes over the encrypted session; Claude still controls when those records are written. Environments without native status records fall back to incremental log evidence and its flush delay. Confirmation waits have their own state; a verified active owner exiting is reported as interruption.
-
-大对话首次仍只取近期 40 条完整记录，历史按页读取。App 保留最多 200 条、约 1 Mi 个 UTF-16 文本单元的浏览窗口，滚到更早记录时自动释放离开的内容，点「回到最新」重新取最新窗口；原始记录仍在后端。单条长消息先显示约 8,000 个文本单元，点击「继续显示」逐段展开已接收内容；工具输出每段约 4,000。全部展开执行过程时，各步骤仍逐项渲染，不一次构建整个工具组。实时推送也按文本预算分包，并保留游标，避免漏消息。日志和 Codex 初次实时快照采用加密批量事务，减少逐条写盘等待。这些是内存与排版边界，不代表所有设备都有固定帧率。
-
-Large chats initially load only the latest 40 complete records and page older history. The app retains a browsing window of at most 200 records and about 1 Mi UTF-16 text units. Moving through older pages releases records outside that window; **Back to latest** reloads the current window, while original history remains on the backend. Individual long messages initially render about 8,000 text units with **Show more**; tool output uses roughly 4,000 per step. Expanding all activity retains lazy rendering for each step. Live updates also use a bounded text budget with lossless cursors. Log imports and initial Codex native snapshots use encrypted batched transactions instead of per-record durable writes. These bounds reduce memory/layout work; they are not a fixed frame-rate guarantee for every device.
-
-打开较早的会话时才加载对应日志的近期内容（默认最多 8 MiB），随后继续跟随增量；不会一次读入所有历史日志。桌面保留记录但本机日志缺失时，会话仍显示并提示内容不可用，不能从手机续聊。更早内容超出首次导入窗口时，需要调整 `--history-bytes`；`0` 会读取整份日志，大日志会增加时间和存储开销。
-
-Older chats load their recent native log content on demand (up to 8 MiB by default), then follow new output. The backend does not ingest all historical logs at once. A desktop record with no matching local log remains visible with an unavailable-history notice and cannot be continued on mobile. Content outside the first-import window requires adjusting `--history-bytes`; `0` imports the entire log and increases processing and storage costs.
-
-自定义日志目录、其他系统或多桌面账号时，可通过 `--claude-desktop-sessions /path/to/catalog` 指定对应账号的桌面目录。未启用桌面目录时按 CLI 日志发现会话，可能与桌面列表不同。
-
-For custom log roots, other operating systems or multiple desktop accounts, set `--claude-desktop-sessions /path/to/catalog` to the appropriate account's catalog. Without a desktop catalog, chats are discovered from CLI logs and can differ from the desktop list.
-
-## Android 附件下载 / Android attachment downloads
-
-附件下载没有 8 MB 上限。打开附件 →「下载原文件」→ 确认 → 用 Android 系统文件选择器选择保存位置（建议本机 Downloads）。首页和附件右上角的下载图标打开统一下载列表，可暂停、续传、重新下载、取消和移除记录；返回会话、切换应用或锁屏不会取消任务。Android 使用前台下载服务和常驻通知保持加密连接；系统回收后会读取加密任务记录继续，系统强制停止后需重新打开 App。Android 的后台服务时长限制和厂商省电策略仍可能暂停任务；重新打开后可续传。本次实现针对 Android，其他平台没有承诺同等后台能力。
-
-Downloads have no 8 MB cap. Open an attachment → **Download original → Confirm** → choose a destination with Android's system picker (prefer local Downloads). The download icon on Home and attachment pages opens a shared task list with pause, resume, restart, cancel, and remove-record actions. Leaving the page, switching apps, or locking the phone keeps the task alive through an Android foreground service and notification. Encrypted task records restore progress after process reclamation; force-stopping requires reopening the app. Android service time limits and vendor battery policies can still pause work; resume after reopening. This implementation targets Android; equivalent background behavior is not promised on other platforms.
-
-工作站附件采用最多 4 路预取、每块 512 KiB 的端到端加密传输，减少网关往返等待；续传重新授权原会话链接，核对大小和文件版本指纹（元数据及首尾采样），源文件变更时暂停，不拼接不同版本。HTTPS 下载使用 Range / If-Range 和响应范围校验；若远端不支持续传则安全地从头下载，界面进度重置。失败与暂停保留已提交进度，只有明确「取消下载」才删除未完成文件。选择本机可持久授权、可定位写入的目录；不支持的文件提供器会报错。任务元数据保存在加密安全存储，原文件明文只写入用户明确选定的导出位置。8 MiB 仍是自动内存预览和发送给模型的单附件边界。
-
-Workstation downloads pipeline up to four encrypted 512 KiB reads to reduce relay round-trip waits. Resume reauthorizes the original chat link and checks size plus a version fingerprint (metadata and head/tail samples); changed sources pause instead of mixing versions. HTTPS uses Range / If-Range with Content-Range validation; servers that ignore ranges restart safely with progress reset. Failed and paused tasks retain committed progress; only explicit cancellation deletes incomplete files. Choose a local provider supporting persistent access and seekable writes; unsupported providers report an error. Task metadata stays in encrypted secure storage; plaintext originals are written only to the user-selected export destination. Automatic previews and model-input uploads retain their 8 MiB bounds.
-
-网页链接可选择「应用内打开」或「浏览器或其他应用打开」；HTTPS 媒体附件右上角也提供外部打开。下载完成后选择「其他应用打开」，由 Android 显示文件打开方式。工作站本地文件需要先通过加密连接下载，系统只向选中的应用授予导出文件读取权限；不会生成绕过配对的公网明文链接。
-
-Web links offer **Open in app** or **Open in browser or another app**. HTTPS media previews also offer external opening. Completed downloads use Android's **Open with** chooser. Workstation files must first download over the encrypted connection; Android grants the chosen viewer read access to the exported document. No public plaintext URL bypasses pairing. See Android's [Storage Access Framework](https://developer.android.com/training/data-storage/shared/documents-files) and [foreground service types](https://developer.android.com/develop/background-work/services/fgs/service-types).
-
-### 会话模型、Effort 与快速模式 / Session model, effort, and fast mode
-
-进入会话后，输入栏显示原生接口能提供的实际模型、Effort 和速度。Codex 优先读当前电脑会话设置；日志返回的参数标记「上次使用」。Claude 读取原会话日志里的模型及原生 effort，OpenCode 读取最近用户消息的模型与 Variant；未提供的值明确显示未知，不拿目录默认值冒充会话当前值。S-LOCAL 持有的 Claude 进程优先返回实际运行模型及已传入的 Effort / 速度；模型变化后不沿用日志中旧模型的未知参数。输入栏只显示原生会话值，不展示手机保存的预选参数。
-
-The composer shows the native model, effort, and speed when available. Codex prefers live desktop settings; log-derived values are labeled **Last used**. Claude reads the original transcript's native model/effort, and OpenCode reads recent user-message model/variant values. Missing values stay unknown rather than being replaced with catalog defaults. S-LOCAL-owned Claude processes expose their running model and explicit effort/speed. Unknown parameters are not carried over from a previous model. The composer displays native session values only, without a separate phone override label.
-
-点击参数 → 选择原生模型和 Effort → 选择「标准 / 快速」→「保存」。Codex 根据本机模型目录中的服务档位启用快速模式；Claude 仅对 CLI 标记 `supportsFastMode` 的模型显示快速选项，通过该会话的 `--settings` 设置 `fastMode`，不修改全局配置。快速模式不降低 Effort，也可能增加用量或费用；账号、组织限制和可用性仍由原生 Agent 执行。OpenCode 的速度变体从其模型目录的 Variant 选择；Qoder/TRAE 显示 ACP 公开的配置，WorkBuddy 未公开相应能力时不伪造开关。参考 [Claude Fast Mode](https://code.claude.com/docs/en/fast-mode)。
-
-Tap the parameters → choose a native model/effort → select **Standard / Fast** → **Save**. Codex uses service tiers advertised by the installed model catalog. Claude exposes Fast only for models advertising `supportsFastMode`, using per-session `--settings` with `fastMode`, without changing global settings. Fast leaves effort unchanged and may increase usage or cost; native agents retain account and organization eligibility checks. OpenCode speed variants remain native Variant selections. Qoder/TRAE use advertised ACP settings; WorkBuddy has no invented switch when its API exposes none. See [Claude Fast Mode](https://code.claude.com/docs/en/fast-mode).
-
-## 首页刷新与执行过程 / Refresh and activity
-
-首页的项目、最新会话和空列表都支持下拉刷新。刷新通过原加密通道重新请求当前列表，收到后端确认才停止转圈；离线时先尝试重连，失败保留已有列表并提示。项目排序、隐藏和折叠偏好不变。平时仍自动推送更新：日志扫描约 500ms、目录变更检查约 250ms、Claude 桌面目录约 2 秒、目标约 5 秒；日志尚未落盘时刷新不能提前读取。每 20 秒发送应用心跳，45 秒未收到端到端响应则重连（给原生发送等较慢操作留出时间）。
-
-Pull down in Projects, Recent chats or an empty home list to refresh over the existing encrypted connection. The spinner waits for the server reply; offline refresh reconnects first, and failures retain the list with a visible message. Sorting, visibility and collapse preferences remain intact. Automatic updates continue: approximately 500ms log scanning, 250ms catalog-change checks, a two-second Claude desktop catalog interval and five-second goal refresh. Refresh cannot read unflushed agent logs. An application heartbeat runs every 20 seconds and reconnects after a 45-second response timeout, allowing slower native send operations.
-
-会话中的连续思考、工具调用／输出及文件变更归入「执行过程」，默认整体折叠；顶部可全部展开／折叠，也可逐组展开，再查看单项详情。正文、图片和审批单独显示，目录定位会自动展开对应执行过程及记录。发送立即显示本地消息与发送阶段，确认后持续显示「已送达，等待 Agent 响应」，原生消息接替时不重复；不再以普通发送 toast 表示完成。请求失败但可能已执行时显示「未确认送达」，保留草稿，不自动重发。临时发送卡片仅存内存，重新打开会话以工作站记录为准。
-
-Consecutive reasoning summaries, tool calls/results and file changes form collapsed Activity groups. Expand/collapse all groups, open one group, then inspect individual details. Messages, media and approvals remain separate; outline navigation expands the target group and record. Sending immediately shows a local input and its stage, then keeps a delivered/waiting state until native activity arrives. Canonical inputs replace local cards without duplicates, without a normal-send toast. An uncertain failure retains the draft and warns before retry; no automatic resend occurs. Transient cards live only in memory; reopened chats use workstation history.
-
-## 启动密码 / App passcode
-
-在 App **设置 → 启动密码**，输入两次 4 位数字开启。冷启动和从后台返回时需解锁；切到后台时遮住会话页面。修改或关闭密码需验证当前密码。连续输错 5 次后固定冷却 10 分钟，期间正确密码也不能解锁；冷却后重置尝试次数，后续冷却仍为 10 分钟，不递增。失败次数及截止时间保存在系统安全存储，重启 App 不会重置。仅保存随机盐和 PBKDF2-SHA256 校验值，不保存或上传明文密码。忘记密码需清除 App 数据并重新配对，工作站会话不会被删除。
-
-Open **Settings → App passcode**, enter and confirm four digits. Unlock is required on cold launch and after returning from the background; chat content is hidden while backgrounded. Changing or disabling the passcode requires the current code. Five incorrect attempts trigger a fixed 10-minute cooldown, including correct attempts during that period. Attempts reset after the cooldown; later cooldowns remain 10 minutes. Attempts and the deadline survive restarts in platform secure storage. Only a random salt and PBKDF2-SHA256 verifier are stored; no plaintext passcode is saved or uploaded. If forgotten, clear app data and pair again; workstation chats remain intact.
-
-## 持续执行的目标 / Continuous goals
-
-与用量和数量同一行的 **目标** 打开当前 Agent 的目标列表，点击可进入原会话。会话列表显示目标状态，会话内显示条件、状态、已用 token / 预算、用时与最新评估原因。目标通过配对的加密通道每 5 秒刷新，查询不启动推理。删除目标有确认框，保留会话及已有内容；旧手机页面不能删除已被替换的新目标。
-
-**Goals**, beside Usage and the count, lists goals for the selected agent and opens the original chat. Chat rows show goal status; the conversation shows the condition, status, token spend / budget, elapsed time and latest evaluation reason. Goals refresh over the paired encrypted channel every five seconds without inference. Deletion requires confirmation and preserves the chat/history; a stale view cannot delete a replacement goal.
-
-- **Codex**：只读读取 Codex 原生 `goals_1.sqlite`（含 WAL），仅展示已发现的会话；原生 `thread/goal/get` 要求加载会话，因此列表查询不使用会触发加载的接口。电脑目标暂停走原会话的 `user-stop`（先暂停目标调度再中断），删除先暂停原目标，再短暂加载同一个原生 thread，校验目标未变化后调用 `thread/goal/clear`，不 fork、不启动新 turn；恢复电脑目标仍需在电脑操作，因为当前桌面 follower 协议没有恢复目标接口。由 AgentDeck 持有的会话可暂停、删除；尚未验证恢复后的持续目标调度，因此不提供恢复按钮。
-- **Claude Code**：读取原生 `goal_status` / `active_goal`，目标记录单独加密索引，历史扫描不导入聊天正文。AgentDeck 持有的进程可中断暂停、发送消息继续、通过 `/goal clear` 清除；电脑 Claude 持有的目标目前只显示状态，并提示在电脑操作。不会新开分支冒充控制原目标。
-
-- **Codex**: reads the native `goals_1.sqlite` ledger in read-only mode, including WAL, restricted to discovered chats. Native `thread/goal/get` requires a loaded thread, so discovery does not load chats. Desktop pause uses the original owner's `user-stop` path (pause scheduling, then interrupt); deletion pauses the original goal, briefly loads the same native thread, checks its identity and calls `thread/goal/clear` without forking or starting a turn. Desktop resume remains a computer action because the installed follower protocol has no goal-resume API. AgentDeck-owned chats support pause and delete. Resume is not offered until continued goal scheduling is verified.
-- **Claude Code**: reads native `goal_status` / `active_goal` into a separate encrypted goal index without importing chat bodies. AgentDeck-owned processes can interrupt/pause, continue by message and clear via `/goal clear`. Desktop-owned Claude goals currently show their state and direct you to the computer for controls. No fork is created to simulate controlling the original goal. See [Claude's native goal lifecycle](https://code.claude.com/docs/en/goal).
-
-模型设置中的 Claude Effort 来自本机 CLI 的 `supportedEffortLevels`，与 Codex 的 `supportedReasoningEfforts` 分开。当前本机 Claude 2.1.295 返回 `low / medium / high / xhigh / max`；两者有重叠，但不会把 Codex 的 `none / minimal / ultra` 填给 Claude。发送前后端再次校验所选模型的原生档位。
-
-Claude Effort comes from the local CLI's `supportedEffortLevels`, independently of Codex's `supportedReasoningEfforts`. This machine's Claude 2.1.295 advertises `low / medium / high / xhigh / max`. Overlap is expected; Codex-only values such as `none / minimal / ultra` are not offered to Claude. The backend validates the chosen model's native levels before sending.
-
-## 查看用量 / View usage
-
-连接工作站后，选择 **Codex / Claude →「项目 / 最新会话」下方、与会话数量同一行的「用量」**。显示工作站账号的额度窗口、已用与剩余百分比、数据时间，以及接口提供的重置时间；额度由所有项目共享。点击刷新重新查询（后端有 30 秒短时缓存）。
-
-Connect to the workstation, select **Codex / Claude → Usage on the same row as the chat count below the Projects / Recent switch**. The sheet shows account limit windows, used and remaining percentages, observation time and reset times when supplied. Limits are shared across projects. Tap refresh to query again; the backend caches results for 30 seconds.
-
-Codex 通过本机 CLI `account/rateLimits/read` 查询。Claude 使用 CLI 的实验性 `get_usage` 控制接口；建议更新 CLI。如果实时接口未返回额度，macOS 可以显示同机 Claude 桌面缓存，醒目标记「非实时」及原始时间；缓存账号可能与 CLI 登录不同，重置时间未知时显示「暂不可用」。多组织缓存无法可靠选定账号时拒绝猜测。API Key、第三方供应商或未登录的账号可能不提供套餐额度；不会显示为 0%。
-
-Codex queries the local CLI's `account/rateLimits/read` control method. Claude uses its experimental `get_usage` method; keep the CLI updated. If live limits are absent, macOS can show the local Claude desktop account cache with an explicit **not live** label and its original timestamp. The desktop account can differ from the CLI account; unknown reset times are unavailable. Mixed-organization caches are rejected rather than guessed. API-key, third-party-provider or signed-out accounts may not expose subscription limits; missing data is never shown as 0%.
-
-查询不发送推理消息，不读取会话正文；仅通过现有配对加密通道返回额度字段，不向网关或手机传递登录凭据。
-
-Usage queries submit no inference prompt and read no chat bodies. Only limit fields travel over the existing paired encrypted channel; login credentials are not sent to the gateway or phone.
-
-## 公网连接
-
-| 方式 | 适用情况 | 配置 |
-| --- | --- | --- |
-| HTTPS 直连 | 手机连接自己的工作站；Envoy 持有域名证书 | [部署指南](docs/deploy/README.md) |
-| 飞书网关 | 多租户发现工作站，工作站只需主动连出；网关只中继密文 | [网关指南](docs/GATEWAY.md) |
-
-飞书应用的最小配置：启用网页登录能力，在安全设置登记 `https://你的网关域名/v2/auth/callback`，将使用者加入应用可用范围，并发布应用。App ID / App Secret 只配置在 S-GATEWAY；电脑与手机使用同一个应用、同一个飞书账号登录。
-
-当前仅通过 `user_info` 读取租户标识、用户标识和姓名，**无需额外 API 权限，`FEISHU_OAUTH_SCOPE` 留空即可**。无需通讯录、手机号、邮箱、消息/机器人权限或 `offline_access`。官方接口的权限要求见 [获取授权码](https://open.feishu.cn/document/authentication-management/access-token/obtain-oauth-code)和[获取用户信息](https://open.feishu.cn/document/server-docs/authentication-management/login-state-management/get)；详细配置及跨企业使用限制见[网关指南](docs/GATEWAY.md)。
-
-测试网关地址为 `https://web-test-omnivibe.ttyuyin.com/agentdeck`；电脑 `local-login --gateway-url` 和 App 网关登录都填完整地址。飞书回调为该地址加 `/v2/auth/callback`。CICD 构建、NAS 子目录和 VS 配置见[测试部署指南](docs/deploy/TESTING.md)。
-
-测试网关已配置飞书应用，真实电脑端登录及工作站在线已验证。电脑以 `serve --relay` 启动，再打开下面的本机管理页面；首次在页面中关联网关，已有绑定会自动沿用。App 用同一飞书账号登录、选择工作站，在电脑页面输入手机的校验码并批准。App 重置后需要重新配对。完整步骤见[网关指南](docs/GATEWAY.md)，验收范围见[测试验收记录](docs/deploy/ACCEPTANCE-2026-10-10.md)。
-
-The testing gateway uses `https://web-test-omnivibe.ttyuyin.com/agentdeck`. Enter the full URL, including the prefix, in S-LOCAL and the app. Register this URL plus `/v2/auth/callback` in Feishu. See the [testing deployment guide](docs/deploy/TESTING.md).
-
-The testing gateway now has Feishu configured; real workstation sign-in and its online tunnel have been verified. Start `serve --relay`, then open workstation controls below to link through Feishu; saved associations reconnect automatically. Sign in to the app with the same Feishu account, select the workstation, and enter the phone comparison code on the computer to approve pairing. Resetting the app requires a new pairing. See the [gateway guide](docs/GATEWAY.md) and [acceptance record](docs/deploy/ACCEPTANCE-2026-10-10.md).
-
-### 电脑管理页面 / Workstation controls
-
-本地后端启动后，浏览器直接打开 **[http://127.0.0.1:8787/](http://127.0.0.1:8787/)**。可收藏此地址，刷新或重新打开都能使用；不需要额外命令、启动文件或手工复制访问凭据。
-
-After starting S-LOCAL, open **[http://127.0.0.1:8787/](http://127.0.0.1:8787/)** in your browser. Bookmark, reload and reopen this address directly. No extra console command, launcher file or copied credential is needed.
-
-页面顶部显示 **当前在线 App / 已配对 App / 网关隧道**，下面列出每台 App 的名称、在线或离线状态、本次连接时间或最后连接时间。每 2 秒刷新；在线数量按已认证的实时连接统计，同一设备的多个连接只算一台 App。已配对数量包括离线设备，不包括待确认请求；工作站连上网关不代表手机已经连上。后台休眠会断开连接，无响应的网络连接最迟在服务端读超时（90 秒）后清除。最后连接时间加密保存，重启后仍可查看；读取失败显示「状态未知」，不会伪装为 0 台在线。
-
-The overview shows **Online Apps / Paired Apps / Gateway tunnel**, followed by each App's name, online/offline state and current or last connection time. It refreshes every two seconds and counts authenticated live streams; multiple streams from one device count as one App. Paired totals include offline devices and exclude pending requests. An online gateway tunnel does not imply a connected phone. Background suspension disconnects the App; an unresponsive connection is removed by the server read timeout within 90 seconds. Last connection times are encrypted and survive restarts. Failed reads show an unknown state instead of a false zero.
-
-页面支持关联网关、飞书授权、实时查看在线/重连状态，以及填写手机 12 位校验码批准配对。首次关联不再需要停后端执行 `local-login`。后端尚未关联时，`serve --relay` 正常启动并等待网页关联；已有关联会自动重连。
-
-The page supports gateway enrollment, Feishu authorization, live connection status and approval using the phone's 12-character comparison code. An unlinked `serve --relay` waits for browser enrollment without stopping the backend; existing associations reconnect automatically.
-
-默认固定监听 `127.0.0.1:8787`，只允许本机访问，并保留 Host、Origin、Fetch Metadata 校验和有限管理 API。浏览器自动获取仅存内存的访问凭据，不写 URL 或浏览器存储。此模式信任本机用户和进程，不用于共享、不可信的电脑账号。公网网关不会开放这个页面。端口被占用时会明确报错；部署人员可用 `--console-listen 127.0.0.1:其他端口` 修改端口，或用 `--no-console` 关闭页面。多实例必须使用不同管理端口。
-
-The default fixed listener is loopback-only at `127.0.0.1:8787`, with Host, Origin and Fetch Metadata checks and a restricted API. The browser bootstraps an in-memory capability without putting it in URLs or browser storage. This mode trusts local users and processes; use a trusted workstation account. The public gateway does not expose this page. An occupied port produces an explicit error. Administrators may choose another port with `--console-listen 127.0.0.1:PORT`, or disable controls with `--no-console`. Multiple instances need different control ports.
-
-已关联时，页面提供「解除网关关联」：确认后撤销网关端这台工作站及其手机路由、关闭隧道，清除本机关联凭据和未完成配对；本机会话历史及 Agent 配置保留。随后在页面输入网关地址和工作站名称，点击「连接网关 · 飞书授权」即可重新关联，手机需重新配对。操作需要更新后的网关；网络故障或旧版网关不会被误报为解除成功。
-
-When linked, choose **Unlink gateway** and confirm to revoke this workstation and its phone routes remotely, close the tunnel, and clear local enrollment and unfinished pairings. Conversation history and agent settings remain. Enter a gateway URL and workstation name to link again through Feishu; phones need fresh pairing. This operation requires an updated gateway; network errors and old gateways are never reported as successful unlinking.
-
-本地状态统一保存在 `~/.agentdeck`（默认目录），包括加密数据库、密钥和 `agents.json`；Agent 工具保留在 `~/.agentdeck/tools`。网页显示当前数据目录，避免操作错误实例。
-
-Workstation state uses the default `~/.agentdeck` directory, including the encrypted database, wrapping key and `agents.json`. Agent tools remain under `~/.agentdeck/tools`. The page displays the effective state directory.
-
-`agentdeck console --data <相同目录>` 保留用于独立运行管理页面；使用它时应关闭后端内置页面，或指定不同端口。完整步骤及日志排障见[本机管理指南](docs/WORKSTATION.md)。
-
-The standalone `console` command remains available; disable the backend's built-in controls or use a different port when running it separately. See [workstation controls and diagnostics](docs/WORKSTATION.md).
-
-iOS/macOS 也使用原生客户端，需 Xcode 与对应签名配置；不支持 Flutter Web。仅部署后端时只需 Go。
-
-## 使用前了解
-
-- 电脑已有会话的同步依赖源日志落盘；不代表所有桌面会话都能逐 token 同步。
-- 已配对手机可以查看该工作站全部已导入会话，目前没有按项目细分的查看权限。
-- App 一次保存一个工作站；网关目前只支持单节点。
-- 升级时保留 `--data` 目录；替换后端程序后需要重启服务。
-
-## 开发与文档
-
-`backend/` 是 Go 后端，`app/` 是 Flutter 客户端，`docs/` 是配置和协议文档。完整检查运行：
+手机下载上方对应 APK，按 Android 提示允许该安装来源并安装。USB 安装也可使用 / Download an edition on the phone and approve its Android install source, or install with ADB:
 
 ```sh
-./scripts/verify.sh
+adb -s DEVICE_SERIAL install -r /absolute/path/to/agentdeck-0.4.41-arm64-v8a-lite.apk
 ```
 
-检查包含 Go race/vet、Flutter 分析、协议兼容与合成端到端测试；真实公网和飞书配置仍需在自己的环境验证。
+签名不一致会拒绝覆盖；不要通过自动卸载来“修复”，卸载会丢失手机配对和设置。/ A signing mismatch prevents replacement. Do not automatically uninstall to work around it; uninstalling loses phone pairing and preferences.
 
-- [Agent 接入与配置](docs/AGENTS.md)
-- [模型、语音、图片与文件输入](docs/INPUTS.md)
-- [Office 预览范围](docs/OFFICE_PREVIEW.md)
-- [加密与授权](docs/SECURITY.md)
-- [验收记录](docs/ACCEPTANCE.md)
+### 网关配对 / Gateway pairing
 
-当前未指定开源许可证。
+1. 手机选「通过网关 · 飞书登录」，填写与电脑完全一致的 HTTPS 地址和前缀。/ Select gateway/Feishu sign-in and enter exactly the workstation's gateway URL, including its prefix.
+2. 用**同一飞书账号**授权，选择在线工作站；同一手机可点授权链接，无需扫描自己屏幕的二维码。/ Authorize as the **same Feishu account**, then select the online workstation. On one phone, follow the authorization link rather than scanning its own QR.
+3. 电脑打开 http://127.0.0.1:8787/，将**手机显示的 12 位十六进制校验码**填入待配对请求，点击校验并批准。/ Enter the **phone's 12-character hexadecimal code** in the local console and approve that request.
+4. 手机确认两边一致；等待中的手机会在电脑批准后继续。确认首页显示「实时连接」，并能打开真实会话。/ Confirm the code matches on the phone; a waiting phone proceeds after approval. Verify Live connection and real chat history.
+
+飞书登录只确认归属，不代替端到端配对；网关绑定完成不等于手机已配对。请求过期后重选工作站即可，不需要重置后端。/ Feishu establishes ownership, not the end-to-end pairing key. Gateway enrollment alone does not pair a phone. If a request expires, select the workstation again without resetting backend state. [详细流程 / Detailed workflow](docs/WORKSTATION.md)
+
+## 各 Agent 怎么接 / Connect each agent
+
+| Agent | 操作 / Setup | 当前边界 / Current boundary |
+| --- | --- | --- |
+| Codex | 先在电脑独立登录使用；配置 `--codex-sessions`，原 Desktop 会话另配置其 IPC / Sign in on the workstation; import logs and optionally configure Desktop IPC | 原会话发送依赖运行中的 Desktop 及兼容 IPC；macOS 在明确无持有者时可打开原 ID，不自动创建分支 / Original input requires a running compatible Desktop; macOS can open the original ID when explicitly unowned, without silently forking |
+| Claude Code CLI | 先运行 `claude` 完成原生登录，配置 `--claude-sessions` / Sign in natively and enable the log root | Local 自己持有的 CLI 使用 stream-json；不等于接管 Desktop 进程 / Local-owned stream-json execution is separate from Desktop ownership |
+| Claude Desktop | macOS 原生目录自动发现；直发为单独显式启用的实验功能 / macOS catalog auto-discovery; input is a separate opt-in experiment | 需要所有者经官方菜单开启本机调试入口及两个启动开关，默认关闭，不能保证任意版本兼容 / Requires owner-enabled local debugger and flags; defaults off, version dependent |
+| OpenCode | 启动回环 server，配置 `agents.json` / Start a loopback server and configure agents.json | REST/SSE 原 ID 会话；已做真实链路验收 / Original IDs over REST/SSE; real integration exercised |
+| Qoder / TRAE | 安装、原生登录，再配置 ACP CLI / Install, sign in and configure ACP | 只展示 CLI 实际支持的会话及能力，不承诺读取 IDE 私有历史；当前未做同等实机验收 / Only advertised CLI capabilities/history; no equivalent live acceptance |
+| WorkBuddy | 注册开放平台应用、配置回调和环境密钥，再从 App 授权 / Register an application, callback and environment secret, then authorize in the app | 入口已实现；无应用凭据时不可用，尚无真实授权验收 / Implemented entry point; unavailable without credentials, real OAuth acceptance pending |
+
+额外 Agent 配置放在工作站 `~/.agentdeck/agents.json`（0600），启动时加 `--agents-config "$HOME/.agentdeck/agents.json"`。只复制实际启用的块，不把未配置的 Agent 全部开启。OpenCode 最小示例 / Put only enabled integrations in a private workstation configuration and add the flag. Minimal OpenCode example:
+
+```sh
+opencode serve --hostname 127.0.0.1 --port 4096
+```
+
+```json
+{"opencode":{"url":"http://127.0.0.1:4096"}}
+```
+
+没有认证的回环示例只供本机可信用户；有密码时使用 `password_env` 指向安全注入的环境变量，OpenCode 和 S-LOCAL 必须继承同一密码。/ The unauthenticated example assumes trusted local users. For authentication, use password_env and inject the same password into both processes. [完整配置、WorkBuddy 权限和授权 / Full integration instructions](docs/AGENTS.md)
+
+Claude Desktop 直发曾在特定版本和设备完成原会话验收，但不代表当前所有环境均可用；目前这条排障工作暂停。不要为了安装 AgentDeck 自动退出登录、改隐私设置或开启调试器。需要这项能力时由所有者按[本机管理指南](docs/WORKSTATION.md#claude-app-原会话发送--original-claude-chats-in-the-app)明确启用并重新验收；9229 只允许回环，不能经过公网代理。
+
+Claude Desktop input passed historical tests on a specific version/device, not every current environment; that troubleshooting work is currently paused. Installation must not sign the user out, change privacy settings or automatically enable debugging. Owners requiring it should explicitly follow the workstation guide and revalidate. Never publish the loopback debugger on port 9229.
+
+## 在 App 里使用 / Use the app
+
+| 位置 / Location | 使用方式 / How to use |
+| --- | --- |
+| 首页 / Home | 先选 Agent，再选「项目 / 最新会话」；项目可折叠、排序、选择显示；下拉刷新 / Choose an agent, then Projects/Recent; fold, order, hide projects and pull to refresh |
+| 会话输入 / Composer | 输入文字发送；支持图片/文件。显示真实模型、effort 和支持的快速模式，读取不到不冒充默认 / Send text or attachments; show reported model/effort and supported fast mode without inventing unknown values |
+| 权限盾牌 / Permission shield | 查看原生权限及完整说明，在线修改同一会话；未指定时沿用工作站默认 / Inspect native permissions/details and change the same chat online; unspecified policies follow workstation defaults |
+| 执行过程 / Execution | 工具调用默认折叠，支持整体展开/收起；执行中转圈 / Tool runs default to folded and expand/collapse together; active tasks show a spinner |
+| 审批 / Approval | 先展开完整命令、目录和参数，再允许或拒绝 / Expand full command, directory and arguments before allowing/denying |
+| 历史与目录 / History and outline | 上滑自动获取更早、下滑补齐后续；折叠工具页自动翻过；目录筛选「我发送的 / 我收到的」并搜索跳转 / Automatic bidirectional paging past folded tools; filter sent/received outline entries and search/jump |
+| 复制 / Copy | 每条文字消息下方复制完整原文，保留 Markdown / Copy the complete original text beneath each message |
+| 附件 / Attachments | 图片加载有转圈、失败可重试；原文件下载前确认，下载任务支持后台/恢复；可选浏览器或其他应用 / Image loading/retry; confirm original-file downloads, resume/background tasks, open externally |
+| 设置 / Settings | Agent 显示、设备名称、标准/小一号界面、语言及 4 位启动密码 / Agent visibility, device name, standard/smaller UI, languages and four-digit app passcode |
+
+启动密码连续输错五次冷却十分钟，不递增；它是本机打开保护，不能替代系统锁屏和端到端配对。语音版语音在手机离线识别，先填入输入框，确认后手动发送；轻量版无麦克风入口。模型、effort、快速模式和权限可改能力由 Agent/会话决定，拒绝或不支持时显示真实结果。/ Five wrong passcodes cause a fixed ten-minute cooldown. It complements device security and pairing. Speech is recognized offline on the phone into an editable draft and sent manually; Lite has no microphone entry. Model/effort/fast-mode/policy changes depend on the agent and chat; rejection/unsupported status remains visible. [输入详情 / Inputs](docs/INPUTS.md)
+
+### 查看用量 / View usage
+
+项目统计行的「用量」可查看 Codex / Claude 原生可获取的账号限额、窗口和刷新时间；不是按聊天次数推算额度。登录、版本或服务不支持时明确报错，数据有采样/缓存时延。/ Tap Usage beside the project count for available native Codex/Claude account limits/windows/reset times. Chat counts are not token quotas; unavailable access is reported explicitly and cached samples can lag.
+
+### 执行完成未读提示 / Unread completion indicator
+
+项目和最近会话中的蓝点表示未查看的完成结果，打开会话后清除；运行中仍用转圈。Codex 优先同步当前电脑账号和本机的原生未读状态：电脑已读可清除手机蓝点，手机查看也保存加密本地已读。**手机已读回写电脑 Codex 尚未打通**，不能声称双向一致。无可读原生状态时使用本地完成回执。/ Dots indicate unseen completions and clear on opening; running chats use a spinner. Codex prefers native account/host unread state. Desktop reads clear phone dots; phone reads are encrypted local receipts. **Phone-to-Desktop read writeback is not yet supported.** Local completion receipts are the fallback.
+
+目标入口只显示进行中的 Goal；暂停、删除和其他操作以原生 Agent 实际支持的能力为准，历史完成文本不是当前执行状态。/ Goals show ongoing work; pause/delete and other actions depend on native capabilities. Historical completion text is not live execution state.
+
+## 更新 App 与发布两种包 / App updates and publishing
+
+设置 → 应用更新可选择「轻量版 / 带语音版」，查看版本、大小和说明，手动下载和安装。自动检查通常每六小时一次；默认跟随安装类型，主动选择后使用所选类型。支持同版本切换，不允许降级；下载中/待安装时先取消任务才能改选。Android 后台负责下载，恢复后可继续；也可用浏览器。安装前核对字节数、SHA-256、包名、版本、目标类型和签名，最后由系统确认。
+
+Settings → App updates offers edition selection, version/size/notes, downloads and installation. Automatic checks normally run at most once per six hours, initially following the installed edition and then an explicit selection. Same-version switches are allowed; downgrades are blocked. Cancel active/ready downloads before changing editions. Android owns background/resumable downloads, with browser fallback. Installation validates bytes, SHA-256, package, version, edition and signer before OS confirmation.
+
+更新地址使用已配对/登录的网关；直连未设置网关时使用构建默认值。自建版本可在手动 Flutter 构建时设置 `--dart-define=AGENTDECK_GATEWAY_URL=https://your-gateway.example/agentdeck`。不要把仓库自带的测试网关当作其他用户的部署服务。/ Updates use the paired/signed-in gateway, falling back to the compiled default for direct-only installations. Override that default in a manual Flutter build using the shown dart-define. The repository's testing gateway is not a hosting service for other installations.
+
+网关公开接口 / Public gateway endpoints (prepend your actual gateway base URL):
+
+```text
+GET /v2/app/releases/android?abi=arm64-v8a&edition=lite
+GET /v2/app/releases/android?abi=arm64-v8a&edition=voice
+GET /v2/app/releases/android/apk?edition=lite
+GET /v2/app/releases/android/apk?edition=voice
+```
+
+未指定类型兼容旧版返回 voice。APK 位于你自己的 HTTPS 文件存储/CDN，网关仅在现有加密数据库保存清单，不新增 PVC。发布过程：先构建双包 → 上传至不可变 URL → 全量下载核验 SHA-256 → 生成清单 → 在运行中的网关机器通过 owner socket 发布。每个通道独立拒绝降级及同版本不同内容替换。/ Omitting edition retains voice for old clients. Store APKs in your HTTPS object store/CDN; the gateway stores only encrypted manifests, requiring no extra PVC. Build, upload immutable objects, fully download/hash-verify, generate manifests, then publish through the running gateway's owner socket. Downgrade/replacement guards are independent per channel.
+
+```sh
+# Run per edition, replacing VERSION and the verified receipt/notes paths.
+python3 scripts/android_release_manifest.py --edition lite \
+  --apk artifacts/agentdeck-VERSION-arm64-v8a-lite.apk \
+  --receipt artifacts/apk-public-VERSION-lite.json \
+  --notes-file release-notes.txt --output android-release-lite.json
+# Run on the gateway host, using its actual binary and state directory:
+agentdeck gateway-publish-release --data "$HOME/.agentdeck-gateway" \
+  --android-manifest android-release-lite.json
+```
+
+receipt 为上传后实际公网全量核验记录，包含 `url`、`bytes`、`sha256`、`anonymous_https_full_download_verified: true`；生成器再与 APK 比对。voice 同样操作并使用 `--edition voice`。网关必须先部署支持双通道的代码；清单发布本身无需重启。/ The receipt records the actual full public download with these four fields; the generator checks it against the APK. Repeat for voice. Deploy dual-channel code before publishing; manifest publication alone needs no restart.
+
+## 自建公网网关 / Host a public gateway
+
+只部署一次 S-GATEWAY；它不能读取 Agent 日志、项目或媒体。准备 HTTPS 域名、Envoy/反向代理，以及你自己的飞书网页登录应用。证书留在代理；Go 监听受控私网 HTTP/WS，不向公网开放明文端口。/ Deploy S-GATEWAY separately without agent log/project/media sources. Provide HTTPS, a reverse proxy and your Feishu web-login application. Certificates remain on the proxy; private Go HTTP/WS is never public.
+
+1. 在飞书开放平台配置网页登录、用户可用范围和**完整重定向地址**：`https://your-gateway.example/agentdeck/v2/auth/callback`。路径必须与 `--public-url` 一致。/ Configure web login, authorized users and the exact callback matching public-url.
+2. 在网关安全环境文件中注入 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`，不是在手机或 Local 填。当前登录只读取身份，不需要机器人/通讯录功能；scope 及应用类型要求见[飞书指南](docs/GATEWAY.md)。/ Inject the application credentials into the gateway's protected environment, never the phone/Local. Identity-only login does not use bots/address-book features; see the detailed guide for scopes/application availability.
+3. 启动网关（环境变量须先由服务管理器或当前安全环境加载；示例值需替换） / Start with credentials already supplied securely:
+
+```sh
+./artifacts/agentdeck serve --role gateway \
+  --data "$HOME/.agentdeck-gateway" \
+  --behind-proxy --listen 127.0.0.1:8080 \
+  --public-url https://your-gateway.example/agentdeck \
+  --rotation 15m --log-level info --connection-log-interval 30s
+```
+
+4. 代理保留 `/agentdeck` 前缀转发；Go 网关负责剥离。支持 WebSocket upgrade，流无总超时，保留认证 Header，不对一次性登录/配对请求重试或缓存。容器跨主机时使用受控私网；跨不可信网络另用 mTLS/安全隧道。/ Preserve the prefix to the gateway, enable WebSocket upgrade, no total stream timeout, retain authentication headers, and avoid retries/caching for one-time operations. Protect cross-host upstream transport appropriately.
+5. 先验证 `https://your-gateway.example/agentdeck/healthz`、真实飞书授权、本机隧道在线，再连接手机。`Ready` 或健康检查成功不能代替登录、配对和收发验收。/ Verify health, real Feishu authorization and an online Local tunnel before phone pairing. Ready/health alone is not end-to-end acceptance.
+
+飞书应用必须自行申请，扫码不会凭空获得 App ID/Secret。仅同租户、同账号归属的工作站可发现；跨企业还需飞书应用类型/授权范围支持。网关是单实例，数据目录需持久化；数据库和 `storage.key` 成对备份，不能只保存数据库。/ You must register a Feishu application; scanning cannot create application credentials. Discovery is limited to the same tenant/account, with cross-enterprise access additionally constrained by Feishu. Persist the single-instance gateway's state and back up database/key together.
+
+完整模板 / Templates: [Gateway](docs/GATEWAY.md) · [Envoy](docs/deploy/README.md) · [gateway.env.example](docs/deploy/gateway.env.example) · [systemd](docs/deploy/agentdeck-gateway.service)
+
+## 日常启动停止与数据 / Service and state management
+
+- **启动/停止 / Start/stop:** 示例前台进程使用 Ctrl+C 正常停止。常驻 Linux 可按实际路径安装 [Local systemd user service](docs/deploy/agentdeck-relay-local.service)；macOS 使用自己的 LaunchAgent，写实际绝对路径、Agent CLI PATH、日志位置，并以登录 Agent 的用户运行。不要把本仓库开发者的电脑路径复制到其他机器。/ Foreground examples stop with Ctrl+C. Use the supplied Linux user-service template or a workstation-specific macOS LaunchAgent with real absolute paths, CLI PATH and logs.
+- **本机管理 / Console:** http://127.0.0.1:8787/；改端口用 `--console-listen 127.0.0.1:PORT`。只监听回环，不能交给公网代理。/ Loopback only; never expose this administration interface through a public proxy.
+- **数据 / State:** Local 默认 `~/.agentdeck`，Gateway 单独 `~/.agentdeck-gateway`；同一目录只运行一个后端。升级不换目录；迁移前正常停止并成对备份 `vault.db` 和 `storage.key`。/ Separate Local/Gateway state; one process per directory. Preserve directories on upgrade and back up database/key together after a clean stop.
+- **App 管理 / Devices:** 电脑管理页可改名、查看在线 IP、撤销配对；手机设置也可改名。撤销使旧手机密钥失效，需要重新配对，历史保留。/ Rename, inspect online IP and revoke from the console; the phone can rename itself. Revocation invalidates the device key, requiring a new pairing without deleting history.
+- **网关解绑 / Unlink:** 在电脑页解除关联；网关验证撤销并回执后清除本机关联。重新关联获得新身份，手机需重新选工作站及配对。网关不可用时保留原关联供重试。/ Unlink waits for authenticated gateway revocation; re-enrollment requires phone selection/pairing again. Failed unlink keeps the original association.
+- **保活 / Availability:** Mac 锁屏不等于休眠。电脑休眠、退出 Agent 或停止 Local 会影响执行/同步；不要用修改 Agent 登录和权限解决网络问题。/ Screen lock and sleep differ. Sleep, agent exit or stopping Local interrupts service; do not alter credentials/permissions to fix transport issues.
+
+## 排障与验收 / Troubleshooting and acceptance
+
+| 现象 / Symptom | 检查 / Check |
+| --- | --- |
+| 手机连不上 / Phone offline | 电脑管理页后端/网关状态 → 完整域名和前缀 → 代理 WS → 手机网络；USB 模式重做 adb reverse / Console state, exact URL/prefix, proxy WS and phone network; repeat adb reverse for USB |
+| 网关登录失败 / Gateway login fails | HTTPS 健康检查、真实 App ID/Secret、完整飞书回调和可用范围；TODO 不可登录 / Health, real app credentials, exact callback and app availability; TODO is not a valid configuration |
+| 等待工作站确认 / Waiting for approval | 电脑 8787 页面输入该手机校验码并批准；过期重选工作站 / Approve the phone's code in the console; reselect after expiry |
+| 会话少/标题不同 / Missing chats | 同一系统用户、日志目录、lookback 默认 72h、首次每日志最近 8 MiB；`--lookback 0 --history-bytes 0` 可全量导入但启动更慢 / Check user/roots and import limits; zero values opt into slower full import |
+| 无法发送原会话 / Cannot send to original chat | 检查 Agent 登录/额度/原生状态和 IPC 配置；不确定送达时先核对原会话，不自动重发或创建分支 / Check native login/quota/state and IPC; reconcile uncertain delivery before any resend |
+| 附件不允许访问 / Attachment outside allowed roots | `--media-roots` 必须包含真实文件目录；符号链接按实际路径校验；不要放开整个文件系统 / Allow the actual directory, including resolved symlink target, rather than the entire filesystem |
+| 工具次数增加但对话没动 / Tool-only paging | 折叠过程自动继续翻页；断线时先恢复连接。开启图片加载会显示进度，失败可重试 / Folded tools are paged through; reconnect if offline, use image loading/retry indicators |
+| 更新页没有轻量版 / No Lite update | 网关须部署双通道代码并发布对应清单；旧网关只回 voice 时不会替换用户选择 / Deploy channel support and publish both manifests; a mismatched old voice response is ignored |
+| 更新签名失败 / Signing mismatch | 保留原固定签名，检查来源；不自动卸载/清空来绕过 / Verify provenance and signer; do not uninstall/reset automatically |
+| 启动后暂时无页面 / Slow initial startup | 大型已有 vault 的展示索引检查可延迟监听；查看启动进程/日志，避免反复强杀或重建数据 / Existing large vaults may delay serving during index checks; inspect progress rather than repeatedly killing/resetting |
+
+网关默认文本 INFO 日志，连接变化立即打印；每 30 秒输出 `connection_stats`（在线工作站、App 流及请求数）。`--log-level debug` 可辅助排障，仍不应记录凭据或会话正文。代理后真实 IP 仅信任 `AGENTDECK_TRUSTED_PROXY_CIDRS` 指定的来源。/ Gateway INFO text logs include immediate connection changes and a 30-second connection_stats summary. Debug logging remains credential/content safe; forwarded IPs require explicitly configured trusted proxy CIDRs. [日志与本机排障 / Diagnostics](docs/WORKSTATION.md)
+
+完整验收至少检查：手机看到真实历史 → 专用测试会话发送且在目标 Agent 原会话执行 → 输出/图片同步 → 后台恢复和断线补齐 → 需要时完整审批 → 已配对设备撤销。没有真实授权的 Agent 或没有现场执行的分支，标为未验收。/ Acceptance requires real history, execution in a dedicated intended chat, live output/images, background/reconnect recovery, applicable approval and device revocation. Mark unexercised agents/branches explicitly as unaccepted.
+
+## 自行构建与开发 / Build and develop
+
+```sh
+flutter doctor -v
+(cd app && flutter pub get)
+export FLUTTER="$(command -v flutter)"
+# Lite does not require downloading speech models.
+python3 scripts/build_android_editions.py --edition lite
+# With voice / both editions: download and verify public model weights first.
+python3 scripts/setup_client_voice.py
+python3 scripts/build_android_editions.py --edition all
+```
+
+Linux/自定义安装请设置实际 `JAVA_HOME`、`ANDROID_SDK_ROOT`；脚本默认路径针对 macOS，`FLUTTER` 应指向可执行文件。两包输出在 `artifacts/agentdeck-VERSION-arm64-v8a-{lite,voice}.apk`，同时生成原生版本、哈希、签名及冻结源码校验记录。原始 Flutter 文件名带 flavor：`app-arm64-v8a-lite-release.apk` / `app-arm64-v8a-voice-release.apk`。/ Set actual Java/SDK locations on Linux/custom setups; script defaults are macOS-oriented. Outputs include edition APKs and verified native-version/hash/signer/source metadata. Raw Flutter output filenames include the flavor.
+
+独立 Flutter 构建示例（替换你的网关；在 `app/` 目录执行） / Manual Flutter build with your update fallback gateway:
+
+```sh
+flutter build apk --release --flavor lite --split-per-abi \
+  --target-platform android-arm64 \
+  --dart-define=AGENTDECK_GATEWAY_URL=https://your-gateway.example/agentdeck
+```
+
+提交前验证 / Verify before committing:
+
+```sh
+bash scripts/verify.sh
+(cd app && flutter test --no-pub --flavor lite test/input_composer_lite_test.dart)
+git diff --check
+```
+
+verify 使用隔离的合成会话及身份执行 Go race/vet、Flutter analysis、真实 HTTP/TLS/加密中继协议和 UI 回归，不会用真实聊天发任务。它会下载语音模型并构建本地后端；不替代真实飞书、手机或生产部署验收。APK、模型权重、运行目录、数据库、密钥及配对码不提交。/ verify uses isolated synthetic chats/identity for Go race/vet, Flutter analysis, HTTP/TLS/encrypted relay and UI regression. It downloads speech models and builds the backend, but does not replace real Feishu/device/deployment acceptance. Never commit APKs, weights, runtime state, databases, keys or pairing material.
+
+| 文档 / Document | 内容 / Contents |
+| --- | --- |
+| [Agent 接入 / Integrations](docs/AGENTS.md) | OpenCode、ACP、WorkBuddy OAuth、权限、已读边界 |
+| [网关 / Gateway](docs/GATEWAY.md) | 飞书应用、角色、配对和租户 |
+| [本机管理 / Workstation](docs/WORKSTATION.md) | 网页、解绑、App 管理、日志、实验性 Desktop 接入 |
+| [部署 / Deployment](docs/deploy/README.md) | Envoy、直接 TLS、systemd 模板 |
+| [输入 / Inputs](docs/INPUTS.md) | 模型、effort、附件和语音 |
+| [安全 / Security](docs/SECURITY.md) | 信任边界、轮换、持久化与授权 |
+| [验收 / Acceptance](docs/ACCEPTANCE.md) | 按日期/版本区分代码、实机和公网证据 |
+
+语音模型及第三方许可 / Speech and third-party licensing: [Client speech](docs/CLIENT_VOICE_LICENSE.md) · [licenses](docs/licenses/)

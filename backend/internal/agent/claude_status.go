@@ -125,6 +125,9 @@ func (f *Follower) refreshClaudeStatuses() {
 	if c.statusStamps == nil {
 		c.statusStamps = map[string]string{}
 	}
+	if c.runningTails == nil {
+		c.runningTails = map[string]string{}
+	}
 	for id, entry := range c.entries {
 		if entry.CatalogHidden {
 			continue
@@ -148,6 +151,11 @@ func (f *Follower) refreshClaudeStatuses() {
 		if status != "" {
 			if err = f.Normalizer.Store.ObserveClaudeStatus(id, status, at); err != nil {
 				continue
+			}
+			if status == "running" {
+				c.runningTails[id] = stamp
+			} else {
+				delete(c.runningTails, id)
 			}
 		}
 		c.statusStamps[path] = stamp

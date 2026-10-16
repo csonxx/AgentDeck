@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 class OriginalClaudeClient extends AgentClient {
   final commands = <Map<String, dynamic>>[];
   OriginalClaudeClient() {
-    connected = true;
+    health.transition(ConnectionPhase.live);
     projects = [AgentProject(id: 'p', name: 'fixture', path: '/fixture')];
     sessions = [
       AgentSession(

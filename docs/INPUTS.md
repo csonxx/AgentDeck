@@ -56,6 +56,8 @@ Plus immediately opens a local attachment sheet and dismisses the keyboard. Phot
 
 ## 语音 / Voice
 
+**0.4.41 起仅带语音版包含此功能；轻量版没有麦克风入口、语音模型、语音引擎或 RECORD_AUDIO 权限。** 可在设置 → 应用更新选择安装类型；同版本切换保留配对。 / **From 0.4.41 this section applies only to With voice. Lite excludes the microphone entry, speech models/engines and RECORD_AUDIO permission.** Choose the edition in App updates; switching at the same version retains pairing.
+
 0.4.6 默认使用手机内置 Zipformer（int8 encoder/joiner + float32 decoder）流式识别，加 SenseVoiceSmall 整句校正。0.4.7 点击麦克风先切换为整块「按住说话」按钮，再长按大按钮录音，文字在原光标处持续更新；松开结束，向上滑动后松开取消。键盘图标切回文字，或点击识别文字直接编辑，草稿保留。取消恢复原草稿，迟到结果忽略；切后台或离开页面也取消。最多 60 秒，仅在长按时请求麦克风权限，预加载不打开麦克风。文字可编辑，识别不自动发送。
 
 From 0.4.6, embedded Zipformer streaming (int8 encoder/joiner + float32 decoder) is followed by SenseVoiceSmall utterance correction. In 0.4.7, tap the microphone to reveal the full-width Hold to speak button, then hold that button for live text at the original cursor. Release to finish or slide upward before release to cancel. The keyboard icon or a tap on recognized text restores editing while preserving the draft. Cancellation restores the draft and ignores late results, including background/navigation cancellation. Recording is capped at sixty seconds. Only a hold requests microphone permission; preloading never opens it. Transcripts remain editable and are never automatically sent.

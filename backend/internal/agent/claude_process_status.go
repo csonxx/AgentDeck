@@ -79,9 +79,18 @@ func (f *Follower) refreshClaudeProcessStatuses() {
 	if root == "" {
 		return
 	}
-	files, err := filepath.Glob(filepath.Join(root, "*.json"))
-	if err != nil || (len(files) == 0 && len(f.claude.processOwners) == 0) {
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		return // An unavailable registry is not proof of an absent executor.
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
 		return
+	}
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".json") {
+			files = append(files, filepath.Join(root, entry.Name()))
+		}
 	}
 	snapshot := f.ClaudeProcessSnapshot
 	if snapshot == nil {
@@ -97,17 +106,22 @@ func (f *Follower) refreshClaudeProcessStatuses() {
 		c.processOwners = map[string]claudeProcessRecord{}
 	}
 	owners := map[string]claudeProcessRecord{}
+	uncertain := false
 	for _, path := range files {
+		pid, _ := strconv.Atoi(strings.TrimSuffix(filepath.Base(path), ".json"))
 		info, err := os.Lstat(path)
 		if err != nil || !info.Mode().IsRegular() || info.Size() > 64<<10 {
+			uncertain = uncertain || processes[pid] != ""
 			continue
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
+			uncertain = uncertain || processes[pid] != ""
 			continue
 		}
 		var record claudeProcessRecord
 		if json.Unmarshal(data, &record) != nil {
+			uncertain = uncertain || processes[pid] != ""
 			// A partial atomic replacement must not be mistaken for a process exit.
 			for id, prior := range c.processOwners {
 				if filepath.Base(path) == fmt.Sprint(prior.PID)+".json" && processes[prior.PID] == strings.Join(strings.Fields(prior.Start), " ") {
@@ -117,6 +131,9 @@ func (f *Follower) refreshClaudeProcessStatuses() {
 			continue
 		}
 		if record.PID <= 0 || filepath.Base(path) != fmt.Sprint(record.PID)+".json" || record.Parked != "" || record.At <= 0 || nativeClaudeStatus(record.Status) == "" {
+			if record.Parked == "" && processes[pid] != "" {
+				uncertain = true
+			}
 			continue
 		}
 		entry, exists := c.entries[record.Session]
@@ -163,4 +180,30 @@ func (f *Follower) refreshClaudeProcessStatuses() {
 		}
 	}
 	c.processOwners = owners
+	if c.orphanSeen == nil {
+		c.orphanSeen = map[string]string{}
+	}
+	for id, stamp := range c.runningTails {
+		if _, live := owners[id]; live {
+			delete(c.orphanSeen, id)
+			continue
+		}
+		entry, known := c.entries[id]
+		if uncertain || !known || entry.CatalogHidden || c.orphanSeen[id] == stamp {
+			continue
+		}
+		var current store.Session
+		if err := f.Normalizer.Store.Get("sessions", id, &current); err != nil {
+			continue
+		}
+		if current.Status == "running" || current.Status == "waiting" || current.Status == "pending" {
+			// A historical tool call is not a live executor. This also covers
+			// owners that exited before this Local started, without guessing
+			// completion from the age of the log or changing chat history.
+			if err := f.Normalizer.Store.ObserveClaudeStatus(id, "interrupted", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+				continue
+			}
+		}
+		c.orphanSeen[id] = stamp
+	}
 }

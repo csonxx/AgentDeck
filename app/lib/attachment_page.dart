@@ -1,4 +1,5 @@
 import 'language.dart';
+import 'loading_image.dart';
 import 'download_page.dart';
 import 'core/download.dart' show DownloadDestination;
 import 'core/download_manager.dart';
@@ -502,11 +503,10 @@ class ZoomableImage extends StatelessWidget {
       minScale: .5,
       maxScale: 6,
       child: Center(
-        child: Image.memory(
-          bytes,
+        child: LoadingImage(
+          image: MemoryImage(bytes),
           fit: BoxFit.contain,
-          errorBuilder: (_, _, _) =>
-              Text(context.tr('图片无法解码'), style: TextStyle(color: Colors.white)),
+          errorColor: Colors.white,
         ),
       ),
     ),

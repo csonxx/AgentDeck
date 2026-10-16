@@ -1,8 +1,8 @@
 # 公网部署
 
-在运行 Codex/Claude 的机器上安装后端，以能读取 agent 日志的同一个受信任用户运行。配对、撤销、导入仍通过同用户的 0600 `control.sock`。没有执行实际公网部署。
+在运行 Codex/Claude 的机器上安装后端，以能读取 agent 日志的同一个受信任用户运行。配对、撤销、导入仍通过同用户的 0600 `control.sock`。本文是可移植部署模板；本仓库特定测试环境的实际发布记录见 [验收记录](../ACCEPTANCE.md)。 / This is a portable deployment template; see acceptance records for specific deployed environments.
 
-三角色中继部署见 [飞书网关指南](../GATEWAY.md)：公网 Envoy 指向 S-GATEWAY，S-LOCAL 仅主动连出。下面命令演示直连工作站模式。
+从零安装和 AI 操作提示词见 [根 README](../../README.md)。三角色中继部署见 [飞书网关指南](../GATEWAY.md)：公网 Envoy 指向 S-GATEWAY，S-LOCAL 仅主动连出。下面命令演示直连工作站模式。
 
 ## Envoy 终止 TLS（你的部署方式）
 
@@ -21,6 +21,7 @@ agentdeck serve \
   --public-url https://agent.example.com \
   --codex-sessions "$HOME/.codex/sessions" \
   --claude-sessions "$HOME/.claude/projects" \
+  --project-roots "$HOME/workspace" \
   --media-roots "$HOME/workspace" \
   --rotation 15m
 ```
@@ -29,7 +30,7 @@ Envoy 与 Go 不同机器或容器时，可改监听到私网地址或容器 `0.
 
 [`envoy.yaml`](envoy.yaml) 是独立 Envoy 参考配置：证书留在 Envoy、HTTP/1.1 上游、WebSocket upgrade、流路由 `timeout: 0s`、120 秒空闲超时（App 心跳 20 秒）。已有 Envoy 时将对应 virtual host/route/cluster 合入现有配置，保留自己的证书/SDS 管理。无需额外开放 Go HTTPS。不要用 buffer filter 缓冲 WebSocket，不要移除 Authorization；关闭配对与会话请求的重试，避免重复消费一次性 token/ticket；访问日志不要记录 Authorization、X-Relay-Auth、Cookie、请求体或 OAuth callback 查询参数。参考 [Envoy upgrade 文档](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/http/upgrades) 与 [超时文档](https://www.envoyproxy.io/docs/envoy/latest/faq/configuration/timeouts)。
 
-后端不依赖 `X-Forwarded-Proto`、`X-Forwarded-Host` 来生成配对地址，也不把这些 header 当成授权依据，公开地址仅来自 `--public-url`。路径必须原样转发 `/v1/pair`、`/v1/session`、`/v1/stream`、`/healthz`。网关模式还需转发 `/v2/auth/*`、`/v2/account/*`、`/v2/local/tunnel`、`/v2/local/grants`、`/v2/relay/*`；当前不支持 URL 子路径前缀。
+后端不依赖 `X-Forwarded-Proto`、`X-Forwarded-Host` 来生成配对地址，也不把这些 header 当成授权依据，公开地址仅来自 `--public-url`。路径必须原样转发 `/v1/pair`、`/v1/session`、`/v1/stream`、`/healthz`。网关模式还需转发 `/v2/auth/*`、`/v2/account/*`、`/v2/local/tunnel`、`/v2/local/grants`、`/v2/relay/*`。直连 S-LOCAL 的公网地址只支持 origin；S-GATEWAY 支持 `--public-url` 的路径前缀，代理必须保留前缀转发，由网关剥离。 / Direct S-LOCAL URLs use an origin only. S-GATEWAY supports a configured path prefix; preserve it to the gateway.
 
 若 Envoy 用自签证书，或需要额外绑定公网证书公钥，传 `--public-tls-pin <64位SPKI SHA256 hex>`。仅需从受信任证书文件算 pin，无需把私钥复制给 Go：
 

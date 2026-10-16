@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'vault.dart';
+import 'edition.dart';
 
 const defaultUpdateGateway = String.fromEnvironment(
   'AGENTDECK_GATEWAY_URL',
@@ -11,7 +12,7 @@ const defaultUpdateGateway = String.fromEnvironment(
 );
 
 class AndroidRelease {
-  final String version, sha256, url, notes, abi;
+  final String version, sha256, url, notes, abi, edition;
   final int code, bytes, minSdk;
   const AndroidRelease({
     required this.version,
@@ -22,6 +23,7 @@ class AndroidRelease {
     this.notes = '',
     this.abi = 'arm64-v8a',
     this.minSdk = 24,
+    this.edition = 'voice',
   });
   factory AndroidRelease.fromJson(Map<String, dynamic> v) {
     final uri = Uri.parse(v['url'] as String);
@@ -31,8 +33,10 @@ class AndroidRelease {
     final version = v['version'] as String;
     final hash = v['sha256'] as String;
     final notes = v['notes'] as String? ?? '';
+    final edition = v['edition'] as String? ?? 'voice';
     if (v['package'] != 'dev.agentdeck.agentdeck' ||
         v['abi'] != 'arm64-v8a' ||
+        !['voice', 'lite'].contains(edition) ||
         uri.scheme != 'https' ||
         uri.host.isEmpty ||
         uri.userInfo.isNotEmpty ||
@@ -55,6 +59,7 @@ class AndroidRelease {
       url: uri.toString(),
       notes: notes,
       minSdk: minSdk,
+      edition: edition,
     );
   }
   Map<String, dynamic> toJson() => {
@@ -67,6 +72,7 @@ class AndroidRelease {
     'sha256': sha256,
     'url': url,
     'notes': notes,
+    'edition': edition,
   };
 }
 
@@ -77,14 +83,18 @@ class AppUpdater extends ChangeNotifier {
   final HttpClient Function() createHttp;
   final Future<AndroidRelease?> Function(String)? fetchRelease;
   final bool supported;
+  final String edition;
+  String selectedEdition;
   AppUpdater(
     this.vault, {
     required this.gateway,
     HttpClient Function()? createHttp,
     this.fetchRelease,
     bool? supported,
+    this.edition = appEdition,
   }) : createHttp = createHttp ?? HttpClient.new,
-       supported = supported ?? Platform.isAndroid;
+       supported = supported ?? Platform.isAndroid,
+       selectedEdition = edition;
   bool automatic = true, checking = false, installing = false, starting = false;
   String installedVersion = '', error = '', downloadState = '', gatewayUrl = '';
   int installedCode = 0, sdk = 0, received = 0, total = 0;
@@ -95,7 +105,12 @@ class AppUpdater extends ChangeNotifier {
   Timer? _poll;
   bool _disposed = false, _background = false, _querying = false;
   Future<void>? _initializing;
-  bool get available => latest != null && latest!.code > installedCode;
+  bool _canInstall(AndroidRelease release) =>
+      release.code > installedCode ||
+      release.code == installedCode && release.edition != edition;
+  bool get available => latest != null && _canInstall(latest!);
+  bool get canSelectEdition =>
+      supported && !checking && !starting && !installing && downloadId == null;
   bool get ready => downloadId != null && downloadState == 'complete';
   bool get active =>
       ['pending', 'downloading', 'paused'].contains(downloadState);
@@ -114,14 +129,21 @@ class AppUpdater extends ChangeNotifier {
       installedCode = (info['version_code'] as num).toInt();
       sdk = (info['sdk'] as num).toInt();
       abis = List<String>.from(info['abis'] as List);
+      if (info['edition'] != null && info['edition'] != edition) {
+        throw const FormatException('更新信息无效');
+      }
       final saved = await vault.loadAppUpdate();
       if (saved != null) {
         automatic = saved['automatic'] != false;
         gatewayUrl = saved['gateway'] as String? ?? '';
+        if (['voice', 'lite'].contains(saved['selected_edition'])) {
+          selectedEdition = saved['selected_edition'] as String;
+        }
         if (saved['latest'] is Map) {
           latest = AndroidRelease.fromJson(
             Map<String, dynamic>.from(saved['latest']),
           );
+          if (latest!.edition != selectedEdition) latest = null;
         }
         if (saved['checked_at'] is int) {
           checkedAt = DateTime.fromMillisecondsSinceEpoch(
@@ -133,7 +155,8 @@ class AppUpdater extends ChangeNotifier {
           downloading = AndroidRelease.fromJson(
             Map<String, dynamic>.from(saved['release']),
           );
-          if (downloading!.code <= installedCode) {
+          if (!_canInstall(downloading!) ||
+              downloading!.edition != selectedEdition) {
             await channel.invokeMethod('cancel', {'id': downloadId});
             downloadId = null;
             downloading = null;
@@ -152,12 +175,34 @@ class AppUpdater extends ChangeNotifier {
 
   Future<void> _save() => vault.saveAppUpdate({
     'automatic': automatic,
+    'selected_edition': selectedEdition,
     'gateway': gatewayUrl,
     'checked_at': checkedAt?.millisecondsSinceEpoch,
     'latest': latest?.toJson(),
     'download_id': downloadId,
     'release': downloading?.toJson(),
   });
+  Future<void> setEdition(String value) async {
+    if (!canSelectEdition ||
+        !['voice', 'lite'].contains(value) ||
+        value == selectedEdition) {
+      return;
+    }
+    selectedEdition = value;
+    latest = null;
+    checkedAt = null;
+    _attemptedAt = null;
+    error = '';
+    _changed();
+    try {
+      await _save();
+      await check(force: true);
+    } catch (_) {
+      error = '无法保存更新设置';
+      _changed();
+    }
+  }
+
   Future<void> setAutomatic(bool value) async {
     automatic = value;
     try {
@@ -182,7 +227,7 @@ class AppUpdater extends ChangeNotifier {
     try {
       final req = await http.getUrl(
         Uri.parse(
-          '${origin.replaceFirst(RegExp(r'/$'), '')}/v2/app/releases/android?abi=arm64-v8a',
+          '${origin.replaceFirst(RegExp(r'/$'), '')}/v2/app/releases/android?abi=arm64-v8a&edition=$selectedEdition',
         ),
       );
       req.followRedirects = false;
@@ -198,9 +243,12 @@ class AppUpdater extends ChangeNotifier {
         raw.addAll(part);
         if (raw.length > 16 << 10) throw const FormatException('更新信息无效');
       }
-      return AndroidRelease.fromJson(
+      final release = AndroidRelease.fromJson(
         Map<String, dynamic>.from(jsonDecode(utf8.decode(raw))),
       );
+      // Older gateways return the voice build for unknown query parameters.
+      // Never silently substitute an edition the user did not select.
+      return release.edition == selectedEdition ? release : null;
     } finally {
       http.close(force: true);
     }
@@ -223,7 +271,8 @@ class AppUpdater extends ChangeNotifier {
     _attemptedAt = now;
     _changed();
     try {
-      final release = await (fetchRelease?.call(origin) ?? _fetch(origin));
+      final fetched = await (fetchRelease?.call(origin) ?? _fetch(origin));
+      final release = fetched?.edition == selectedEdition ? fetched : null;
       if (release != null &&
           (!abis.contains(release.abi) || sdk < release.minSdk)) {
         throw const FormatException('新版本暂不支持此设备');

@@ -191,3 +191,46 @@ func TestRuntimeApprovalAndStop(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeNativePermissionInheritanceAcrossCreateForkAndResume(t *testing.T) {
+	fixture, err := os.ReadFile("../../../scripts/fixture_runtime.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	for _, name := range []string{"codex", "claude"} {
+		if err := os.WriteFile(filepath.Join(bin, name), fixture, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("AGENTDECK_FIXTURE_NATIVE_PERMISSIONS", "1")
+	for _, name := range []string{"codex", "claude"} {
+		t.Run(name, func(t *testing.T) {
+			m := connectorManager(t)
+			ss, err := m.Create(name, m.Projects()[0].ID, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := m.Send(ss.ID, "synthetic inheritance probe", UUID()); err != nil {
+				t.Fatal(err)
+			}
+			awaitConnector(t, m, ss.ID, "status", "", "completed")
+			if name == "codex" {
+				ss, err = m.Create(name, m.Projects()[0].ID, ss.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			m.mu.Lock()
+			r := m.runs[ss.ID]
+			delete(m.runs, ss.ID)
+			m.mu.Unlock()
+			r.close()
+			<-r.done
+			if _, err := m.get(ss.ID); err != nil {
+				t.Fatal("resume replaced native permission policy", err)
+			}
+		})
+	}
+}

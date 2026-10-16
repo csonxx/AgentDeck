@@ -292,6 +292,8 @@ func (s *Server) inputRequest(owner string, req Request) (any, error) {
 		return s.Manager.Goals()
 	case "usage":
 		return s.Manager.AccountUsage(req.Agent)
+	case "session_permissions":
+		return s.Manager.SessionPermissions(req.Session)
 	case "session_settings":
 		return s.Manager.SessionSettings(req.Session)
 	case "models":

@@ -3,6 +3,8 @@ import 'dart:typed_data';
 class AgentSession {
   final String id, agent, title, source, status, updated, project, parent;
   final bool managed;
+  final int completion;
+  final String completedAt;
   AgentSession({
     required this.id,
     required this.agent,
@@ -13,6 +15,8 @@ class AgentSession {
     this.project = '',
     this.parent = '',
     this.managed = false,
+    this.completion = 0,
+    this.completedAt = '',
   });
   String get displayTitle =>
       parent.isNotEmpty && source != 'desktop' ? '$title · 手机分支' : title;
@@ -26,6 +30,8 @@ class AgentSession {
     project: m['project'] as String? ?? '',
     managed: m['managed'] == true,
     parent: m['parent'] as String? ?? '',
+    completion: (m['completion'] as num?)?.toInt() ?? 0,
+    completedAt: m['completed_at'] as String? ?? '',
   );
 }
 
@@ -190,14 +196,67 @@ class Transcript {
       loadingOlder = false,
       loadingNewer = false,
       detached = false;
+  bool readingHistory = false;
   int latestLiveCursor = 0;
   int revision = 0;
+  int windowVersion = 0;
+  void liveSnapshot(Map<String, dynamic> page) {
+    if ((!detached && !readingHistory) || blocks.isEmpty) {
+      refreshLatest(page);
+      return;
+    }
+    // A reconnect must not replace an older reading window with the latest
+    // forty records. Reconcile retained items, and page forward on demand.
+    final latest = (page['cursor'] as num).toInt();
+    if (latest > latestLiveCursor) latestLiveCursor = latest;
+    for (final raw in page['events'] as List) {
+      final event = Map<String, dynamic>.from(raw as Map);
+      if (containsEvent(event)) {
+        add(event);
+      } else if (((event['first'] ?? event['seq']) as num).toInt() >
+          blocks.last.first) {
+        detached = true;
+      }
+    }
+    revision++;
+  }
+
+  void refreshLatest(Map<String, dynamic> page) {
+    final pageCursor = (page['cursor'] as num).toInt();
+    // A live delta can arrive while Local is preparing the refresh reply.
+    // Keep any newer materialized values instead of rolling them backwards.
+    final newer = blocks
+        .where((b) => b.seq > pageCursor)
+        .map(
+          (b) => {
+            'id': 'retained/${b.key}/${b.seq}',
+            'item': b.key.substring(0, b.key.length - b.kind.length - 1),
+            'seq': b.seq,
+            'first': b.first,
+            'kind': b.kind,
+            'role': b.role,
+            'text': b.text,
+            'media': b.media,
+            'status': b.status,
+            'mode': 'snapshot',
+          },
+        )
+        .toList();
+    history(page, replace: true);
+    for (final event in newer) {
+      add(event);
+    }
+    if (latestLiveCursor > cursor) detached = true;
+  }
+
   void history(
     Map<String, dynamic> page, {
     bool replace = false,
     bool newer = false,
   }) {
     if (replace) {
+      windowVersion++;
+      readingHistory = false;
       blocks.clear();
       _textUnits = 0;
       _items.clear();

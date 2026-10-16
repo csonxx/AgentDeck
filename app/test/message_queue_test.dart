@@ -12,7 +12,7 @@ class QueueClient extends AgentClient {
   int calls = 0;
   Completer<void>? pending;
   QueueClient() {
-    connected = true;
+    health.transition(ConnectionPhase.live);
     queues['s'] = [
       const QueuedMessage(
         id: 'q',

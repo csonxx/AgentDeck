@@ -3,6 +3,86 @@ import 'package:agentdeck/core/model.dart';
 
 void main() {
   test(
+    'reading a cached window preserves it without inventing a missing tail',
+    () {
+      Map<String, dynamic> record(int n) => {
+        'id': 'cached-$n',
+        'item': 'record-$n',
+        'seq': n,
+        'first': n,
+        'kind': 'message',
+        'text': 'Record $n',
+        'mode': 'snapshot',
+      };
+      final t = Transcript();
+      t.history({
+        'events': [for (var n = 1; n <= 80; n++) record(n)],
+        'cursor': 80,
+        'before': 1,
+        'has_more': false,
+      }, replace: true);
+      t.readingHistory = true;
+      t.liveSnapshot({
+        'events': [for (var n = 41; n <= 80; n++) record(n)],
+        'cursor': 80,
+        'before': 41,
+        'has_more': true,
+      });
+      expect(t.blocks.length, 80);
+      expect(t.detached, isFalse);
+      t.liveSnapshot({
+        'events': [record(81)],
+        'cursor': 81,
+        'before': 81,
+        'has_more': true,
+      });
+      expect(t.blocks.length, 80);
+      expect(t.detached, isTrue);
+      expect(t.latestLiveCursor, 81);
+    },
+  );
+
+  test(
+    'reconnect reconciles retained items without replacing the reading window',
+    () {
+      Map<String, dynamic> event(String id, int first, int seq, String text) =>
+          {
+            'id': id,
+            'item': 'record-$first',
+            'seq': seq,
+            'first': first,
+            'kind': 'message',
+            'role': 'assistant',
+            'mode': 'snapshot',
+            'text': text,
+          };
+      final t = Transcript();
+      t.history({
+        'events': [event('old', 10, 10, 'Retained history')],
+        'cursor': 100,
+        'before': 10,
+        'has_more': true,
+        'has_newer': true,
+      }, replace: true);
+      t.liveSnapshot({
+        'events': [
+          event('update', 10, 109, 'Updated retained history'),
+          event('tail', 110, 110, 'Latest response'),
+        ],
+        'cursor': 110,
+        'before': 100,
+        'has_more': true,
+      });
+      expect(t.blocks.single.first, 10);
+      expect(t.blocks.single.text, 'Updated retained history');
+      expect(t.before, 10);
+      expect(t.hasMore, isTrue);
+      expect(t.detached, isTrue);
+      expect(t.latestLiveCursor, 110);
+    },
+  );
+
+  test(
     'older snapshots cannot overwrite newer live output or duplicate items',
     () {
       final t = Transcript();

@@ -128,6 +128,21 @@ void main() {
           lessThan(10000),
         );
         await until(() => c.sessions.any((s) => s.id == 'e2e-session'));
+        expect(c.live, isTrue);
+        c.health.report(LocalIssueKind.projectLayout, 'fixture layout failure');
+        await expectLater(
+          c.request({'method': 'fixture_unknown_request'}),
+          throwsA(isA<AgentRequestException>()),
+        );
+        expect(c.error, isEmpty);
+        expect(c.live, isTrue);
+        // A late/unmatched RPC error belongs to an expired operation. It must
+        // not become a permanent home warning or clear unrelated local issues.
+        await c.send({'method': 'fixture_unknown_request', 'id': 'expired-id'});
+        await c.request({'method': 'ping'});
+        expect(c.error, isEmpty);
+        expect(c.health.issues.single.kind, LocalIssueKind.projectLayout);
+        c.health.resolve(LocalIssueKind.projectLayout);
         await until(
           () =>
               c.sessions.any((s) => s.id == 'bridge-codex') &&
@@ -161,6 +176,21 @@ void main() {
         for (final agent in ['codex', 'claude']) {
           final session = await c.createSession(agent, c.projects.first.id);
           expect(session.managed, isTrue);
+          final permissions = await c.sessionPermissions(session.id);
+          expect(permissions.source, 'live');
+          expect(permissions.editable, isTrue);
+          final mode = agent == 'codex' ? 'auto_review' : 'acceptEdits';
+          final changed = await c.changePermissions(
+            session.id,
+            permissions.version,
+            mode,
+          );
+          expect(changed.mode, mode);
+          expect((await c.sessionPermissions(session.id)).mode, mode);
+          await expectLater(
+            c.changePermissions(session.id, permissions.version, mode),
+            throwsA(anything),
+          );
           await c.sendPrompt(session.id, 'runtime wire test');
           await until(
             () =>
@@ -174,6 +204,12 @@ void main() {
               (s) => s.id == session.id && s.status == 'completed',
             ),
           );
+          final completed = c.sessions.firstWhere((s) => s.id == session.id);
+          expect(completed.completion, greaterThan(0));
+          expect(c.isUnread(completed), isTrue);
+          c.setReadingSession(session.id);
+          expect(c.isUnread(completed), isFalse);
+          c.setReadingSession('');
           final catalog = await c.inputCatalog(agent, session.id);
           expect(catalog.models.single.id, 'fixture-model');
           expect(catalog.voice, isTrue);
@@ -391,6 +427,16 @@ void main() {
         expect(paged.blocks.length, 80);
         expect(paged.blocks.first.text, 'Paged message 160');
         expect(paged.blocks.map((b) => b.key).toSet().length, 80);
+        paged.readingHistory = true;
+        final cachedReadingKeys = paged.blocks.map((b) => b.key).toList();
+        c.suspend();
+        await c.resume();
+        await until(() => c.connected);
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+        expect(paged.blocks.map((b) => b.key).toList(), cachedReadingKeys);
+        expect(paged.detached, isFalse);
+        paged.readingHistory = false;
+
         final directory = await c.outlinePage('paged-session');
         expect((directory['entries'] as List).length, 200);
         expect(directory['has_more'], true);
@@ -412,6 +458,37 @@ void main() {
         expect(paged.detached, true);
         await Future<void>.delayed(const Duration(milliseconds: 700));
         expect(paged.blocks.length, 40);
+        final readingKeys = paged.blocks.map((b) => b.key).toList();
+        final readingBefore = paged.before;
+        c.suspend();
+        expect(c.health.phase, ConnectionPhase.suspended);
+        expect(c.live, isFalse);
+        expect(c.error, isEmpty);
+        await c.resume();
+        await until(() => c.live);
+        expect(c.error, isEmpty);
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+        expect(identical(c.transcripts['paged-session'], paged), isTrue);
+        expect(paged.blocks.map((b) => b.key).toList(), readingKeys);
+        expect(paged.before, readingBefore);
+        expect(paged.detached, isTrue);
+        final liveBefore = paged.latestLiveCursor;
+        await File('$pairDir/source/paged.jsonl').writeAsString(
+          '${jsonEncode({
+            'type': 'response_item',
+            'payload': {
+              'type': 'message',
+              'role': 'assistant',
+              'id': 'page-240',
+              'content': [
+                {'type': 'output_text', 'text': 'Paged message 240'},
+              ],
+            },
+          })}\n',
+          mode: FileMode.append,
+        );
+        await until(() => paged.latestLiveCursor > liveBefore);
+        expect(paged.blocks.map((b) => b.key).toList(), readingKeys);
         var lastIndex = 39;
         while (paged.detached) {
           await c.loadNewer('paged-session');
@@ -424,18 +501,18 @@ void main() {
           );
           lastIndex = nextIndex;
         }
-        expect(lastIndex, 239);
+        expect(lastIndex, 240);
         expect(paged.blocks.length, 200);
         expect(paged.hasMore, true);
         await c.loadOlder('paged-session');
         expect(paged.detached, true);
         await c.loadNewer('paged-session');
-        expect(paged.blocks.last.text, 'Paged message 239');
+        expect(paged.blocks.last.text, 'Paged message 240');
         expect(paged.detached, false);
         await c.reload('paged-session');
         await until(
           () => c.transcripts['paged-session']!.blocks.any(
-            (b) => b.text == 'Paged message 239',
+            (b) => b.text == 'Paged message 240',
           ),
         );
         expect(c.transcripts['paged-session']!.detached, false);
