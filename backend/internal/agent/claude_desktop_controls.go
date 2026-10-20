@@ -5,7 +5,6 @@ import (
 	"agentdeck/internal/store"
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -52,11 +51,33 @@ func (m *Manager) controlClaudeDesktop(ss store.Session, key, decision, answer s
 	if key == "" {
 		err = c.Interrupt(ctx, target)
 	} else {
-		var answers map[string]string
-		if answer != "" && json.Unmarshal([]byte(answer), &answers) != nil {
-			return true, errors.New("审批回答格式无效")
+		answers := questionAnswers{}
+		if decision == "accept" && answer != "" {
+			answers, err = parseQuestionAnswers(answer)
+			if err != nil {
+				return true, err
+			}
 		}
-		err = c.Approve(ctx, target, key, decision, answers)
+		state, stateErr := c.State(ctx, target)
+		if stateErr != nil {
+			return true, stateErr
+		}
+		found := false
+		for _, pending := range state.Permissions {
+			if pending.ID != key || pending.Session != target.Host {
+				continue
+			}
+			found = true
+			if pending.Tool == "AskUserQuestion" && decision == "accept" {
+				if err = validateQuestionAnswers(questionList(map[string]any{"input": pending.Input}), answers, "claude"); err != nil {
+					return true, err
+				}
+			}
+		}
+		if !found {
+			return true, errors.New("提问或审批已过期")
+		}
+		err = c.Approve(ctx, target, key, decision, claudeQuestionResponse(answers))
 	}
 	if err != nil {
 		return true, errors.New("Claude 原会话操作未确认，请刷新核对；审批可能已过期")
@@ -137,7 +158,7 @@ func (m *Manager) followClaudeDesktop(ctx context.Context, ss store.Session) err
 			if p.ID == "" || p.Session != target.Host {
 				continue
 			}
-			text := Redact(jsonText(map[string]any{"tool_name": p.Tool, "input": p.Input, "description": p.Description, "reason": p.Reason}))
+			text := Redact(jsonText(map[string]any{"tool_name": p.Tool, "input": p.Input, "description": p.Description, "reason": p.Reason, "question_kind": "claude"}))
 			active[p.ID] = text
 			if seen[p.ID] != text {
 				changed = true

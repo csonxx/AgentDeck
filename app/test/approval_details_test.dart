@@ -184,9 +184,19 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField), '/workspace/output');
-    await tester.tap(find.text('展开完整执行内容'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.close));
+    expect(find.text('需要你的回答'), findsOneWidget);
+    expect(find.text('允许此次'), findsNothing);
+    expect(find.text('拒绝'), findsNothing);
+    await tester.pumpWidget(
+      approval(
+        client,
+        jsonEncode({
+          'questions': [
+            {'id': 'choice', 'question': 'Which directory?', 'options': []},
+          ],
+        }),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text('/workspace/output'), findsOneWidget);
     await tester.tap(find.text('提交回答'));

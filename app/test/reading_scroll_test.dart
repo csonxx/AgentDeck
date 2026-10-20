@@ -237,4 +237,136 @@ void main() {
     expect(tester.getTopLeft(find.text(survivor)).dy, closeTo(before, 1));
     expect(tester.takeException(), isNull);
   });
+  testWidgets('a growing visible record preserves the reading location', (
+    tester,
+  ) async {
+    final controller = ReadingScrollController();
+    addTearDown(controller.dispose);
+    final view = GlobalKey<ReadingScrollViewState>();
+    var grown = false;
+    late StateSetter update;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (_, setState) {
+              update = setState;
+              return ReadingScrollView(
+                key: view,
+                controller: controller,
+                scrollKey: const ValueKey('growth'),
+                itemKeys: [for (var i = 0; i < 15; i++) 'row-$i'],
+                itemBuilder: (_, i) => SizedBox(
+                  height: i == 7 ? (grown ? 1200 : 800) : 110,
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: Text('row-$i'),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    controller.jumpTo(110 * 7 + 130);
+    await tester.pumpAndSettle();
+    final before = tester.getTopLeft(find.text('row-7')).dy;
+    view.currentState!.anchorReadingPosition();
+    update(() => grown = true);
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(find.text('row-7')).dy, closeTo(before, 1));
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets(
+    'mixed large rows remain painted through resize, folding and paging',
+    (tester) async {
+      final controller = ReadingScrollController();
+      addTearDown(controller.dispose);
+      final view = GlobalKey<ReadingScrollViewState>();
+      var newest = 220;
+      var loaded = false;
+      late StateSetter update;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (_, setState) {
+                update = setState;
+                return ReadingScrollView(
+                  key: view,
+                  controller: controller,
+                  scrollKey: const ValueKey('mixed-history'),
+                  itemKeys: [
+                    for (var i = newest; i > newest - 80; i--) 'item-$i',
+                  ],
+                  itemBuilder: (_, index) {
+                    final i = newest - index;
+                    final height = switch (i % 5) {
+                      0 => loaded ? 2400.0 : 120.0,
+                      1 => 48.0,
+                      2 => 1500.0,
+                      _ => 90.0,
+                    };
+                    return SizedBox(
+                      key: ValueKey('paint-$i'),
+                      height: height,
+                      child: const ColoredBox(color: Colors.blue),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      void noHoles() {
+        final viewport = tester.getRect(find.byType(ReadingScrollView));
+        final rects = <Rect>[];
+        for (var i = newest; i > newest - 80; i--) {
+          final finder = find.byKey(ValueKey('paint-$i'));
+          if (finder.evaluate().isEmpty) continue;
+          final rect = tester.getRect(finder);
+          if (rect.overlaps(viewport)) rects.add(rect.intersect(viewport));
+        }
+        rects.sort((a, b) => a.top.compareTo(b.top));
+        expect(rects, isNotEmpty);
+        expect(rects.first.top, closeTo(viewport.top, 1));
+        expect(rects.last.bottom, closeTo(viewport.bottom, 1));
+        for (var i = 1; i < rects.length; i++) {
+          expect(rects[i].top, closeTo(rects[i - 1].bottom, 1));
+        }
+      }
+
+      for (var round = 0; round < 18; round++) {
+        await tester.drag(
+          find.byType(ReadingScrollView),
+          Offset(0, round < 9 ? 450 : -450),
+        );
+        await tester.pumpAndSettle();
+        noHoles();
+        view.currentState!.anchorReadingPosition();
+        await tester.pumpAndSettle();
+        update(() => loaded = !loaded);
+        await tester.pumpAndSettle();
+        noHoles();
+        if (round == 8) {
+          update(() => newest -= 5);
+          await tester.pumpAndSettle();
+          noHoles();
+        }
+        expect(tester.takeException(), isNull);
+      }
+      controller.jumpTo(controller.position.minScrollExtent);
+      await tester.pumpAndSettle();
+      noHoles();
+      final latest = tester.getRect(find.byKey(ValueKey('paint-$newest')));
+      expect(
+        latest.bottom,
+        closeTo(tester.getRect(find.byType(ReadingScrollView)).bottom, 1),
+      );
+    },
+  );
 }

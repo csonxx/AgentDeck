@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"agentdeck/internal/store"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -229,6 +230,15 @@ func (b *DesktopBridge) SendInput(ctx context.Context, id, text, request, projec
 		return err
 	}
 	defer c.conn.Close()
+	stop := context.AfterFunc(nonNil(ctx), func() { c.conn.Close() })
+	defer stop()
+	state, err := c.snapshot(id, project)
+	if err != nil {
+		return &InputNotSentError{Err: err}
+	}
+	if err = checkSessionInput(store.Session{Issue: desktopSessionIssue(state)}); err != nil {
+		return err
+	}
 	// Desktop renders the optimistic input before app-server applies schema
 	// defaults. Its text renderer expects this array to exist even when empty.
 	normalized := make([]any, len(inputs))
@@ -309,6 +319,9 @@ func (b *DesktopBridge) SteerInput(ctx context.Context, id, text, request, proje
 	}
 	state, e := c.snapshot(id, project)
 	if e != nil {
+		return e
+	}
+	if e = checkSessionInput(store.Session{Issue: desktopSessionIssue(state)}); e != nil {
 		return e
 	}
 	if desktopTurnStatus(state) != "running" {

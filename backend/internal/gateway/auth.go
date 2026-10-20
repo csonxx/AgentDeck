@@ -301,9 +301,12 @@ func (g *Server) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, g.URL+"/v2/auth/done", http.StatusSeeOther)
 }
 func (g *Server) accountAuth(w http.ResponseWriter, r *http.Request) (Account, []byte, bool) {
+	return g.accountAuthLimit(w, r, 16<<10)
+}
+func (g *Server) accountAuthLimit(w http.ResponseWriter, r *http.Request, limit int64) (Account, []byte, bool) {
 	var a Account
 	id := strings.TrimPrefix(r.Header.Get("Authorization"), "Account ")
-	raw, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<10))
+	raw, e := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if e != nil || !relay.ValidID(id) || g.Store.Get("gwaccounts", id, &a) != nil || a.Expires < g.Clock.Unix() {
 		fail(w, 401)
 		return a, nil, false

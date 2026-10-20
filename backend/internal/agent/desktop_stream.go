@@ -285,14 +285,20 @@ func desktopTurnStatus(state map[string]any) string {
 	case "failed":
 		return "failed"
 	}
+	if str(obj(turns[len(turns)-1])["status"]) != "" {
+		return "unknown"
+	}
 	return ""
 }
 
 type desktopProjection struct {
-	m        *Manager
-	session  store.Session
-	seen     map[string]string
-	itemSeen map[string]string
+	m              *Manager
+	session        store.Session
+	seen           map[string]string
+	itemSeen       map[string]string
+	questions      map[string]string
+	asyncQuestions map[string]string
+	asyncScanStamp string
 }
 
 func (p *desktopProjection) publish(state map[string]any) error {
@@ -325,6 +331,12 @@ func (p *desktopProjection) publish(state map[string]any) error {
 		turn := obj(rawTurn)
 		for _, rawItem := range arr(turn["items"]) {
 			item := obj(rawItem)
+			if item["type"] == "steeringUserMessage" && item["status"] == "accepted" {
+				input := arr(item["input"])
+				if len(input) == 1 && obj(input[0])["type"] == "text" && parseAsyncReplies(str(obj(input[0])["text"])) != nil {
+					item = map[string]any{"id": item["id"], "type": "userMessage", "content": input}
+				}
+			}
 			if item["type"] == "userMessage" && str(item["clientId"]) != "" {
 				copy := map[string]any{}
 				for k, v := range item {
@@ -378,10 +390,16 @@ func (p *desktopProjection) publish(state map[string]any) error {
 	if err := flush(); err != nil {
 		return err
 	}
+	if err := p.publishQuestions(state); err != nil {
+		return err
+	}
+	if err := p.publishAsyncQuestions(state); err != nil {
+		return err
+	}
 	status := desktopTurnStatus(state)
 	if status != "" {
 		turn := obj(turns[len(turns)-1])
-		event := store.Event{Session: p.session.ID, Agent: "codex", Project: p.session.Project, Source: "desktop-live", Kind: "status", Item: "desktop-turn/" + str(turn["turnId"]), Status: status}
+		event := store.Event{Session: p.session.ID, Agent: "codex", Project: p.session.Project, Source: "desktop-live", Kind: "status", Item: "desktop-turn/" + str(turn["turnId"]), Status: status, Issue: desktopSessionIssue(state)}
 		if err := p.append(event); err != nil {
 			return err
 		}
@@ -396,7 +414,7 @@ func (p *desktopProjection) appendBatch(events []store.Event) error {
 	fingerprints := map[string]string{}
 	for _, event := range events {
 		key := event.Item + "/" + event.Kind
-		body, _ := json.Marshal([]string{event.Text, event.Media, event.Status})
+		body, _ := json.Marshal([]any{event.Text, event.Media, event.Status, event.Issue})
 		fingerprint := digest(string(body))
 		if p.seen[key] == fingerprint {
 			continue
@@ -474,7 +492,12 @@ func (m *Manager) WatchDesktop(ctx context.Context, id string) func() {
 				if claude {
 					_ = m.followClaudeDesktop(life, session)
 				} else {
-					_ = follow.Follow(life, id, p.publish)
+					err := follow.Follow(life, id, p.publish)
+					if err != nil && life.Err() == nil {
+						// Relay connectivity is not proof that the native owner
+						// can still be observed. Keep history, stop stale spinners.
+						_ = m.Store.MarkDesktopUnobserved(id)
+					}
 				}
 				select {
 				case <-life.Done():

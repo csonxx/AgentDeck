@@ -39,6 +39,9 @@ for line in sys.stdin:
    if d['request']['subtype']=='interrupt':finish('STOPPED','interrupted')
    continue
   if d.get('type')=='control_response':
+   if d['response']['request_id']=='question':
+    assert d['response']['response']['updatedInput']['answers']=={'choice':'A','features':'A, B'}
+    finish('QUESTION_OK');continue
    finish('APPROVED' if d['response']['response']['behavior']=='allow' else 'DECLINED');continue
   if d.get('type')!='user':continue
   if strict:(pathlib.Path(strict)/session).write_text('fixture native history marker')
@@ -65,6 +68,9 @@ for line in sys.stdin:
      if method=='thread/goal/clear':db.execute('DELETE FROM thread_goals WHERE thread_id=?',(gid,))
      else:db.execute('UPDATE thread_goals SET status=? WHERE thread_id=?',(params['status'],gid))
    send({'id':d['id'],'result':{'cleared':True} if method=='thread/goal/clear' else {'goal':goals.get(gid)}});continue
+  if method=='fixture/native-turn-start':
+   turn=str(uuid.uuid4());send({'method':'turn/started','params':{'threadId':session,'turn':{'id':turn}}});continue
+  if method=='fixture/native-turn-complete':finish();continue
   if method=='account/rateLimits/read':
    send({'id':d['id'],'result':{'rateLimits':{'primary':{'usedPercent':25,'windowDurationMins':300,'resetsAt':1893456000}}}});continue
   if method=='model/list':
@@ -74,15 +80,23 @@ for line in sys.stdin:
    send({'method':'thread/settings/updated','params':{'threadId':session,'threadSettings':native_policy}})
    send({'id':d['id'],'result':{}});continue
   if method in ('initialize','thread/start','thread/resume','thread/fork'):
+   if method=='thread/resume':session=params['threadId']
    native_policy.update({k:v for k,v in params.items() if k in ['approvalPolicy','approvalsReviewer']})
    if 'sandbox' in params:native_policy['sandboxPolicy']={'type':{'read-only':'readOnly','workspace-write':'workspaceWrite','danger-full-access':'dangerFullAccess'}[params['sandbox']]}
    send({'id':d['id'],'result':{'thread':{'id':session},'approvalPolicy':native_policy['approvalPolicy'],'approvalsReviewer':native_policy['approvalsReviewer'],'sandbox':native_policy['sandboxPolicy']}});continue
   if method=='turn/interrupt':send({'id':d['id'],'result':{}});finish('STOPPED','interrupted');continue
+  if 'result' in d and d['id']==43:
+   assert d['result']=={'answers':{'choice':{'answers':['A']},'features':{'answers':['A','B']}}}
+   finish('QUESTION_OK');continue
   if 'result' in d:finish('APPROVED' if d['result'].get('decision')=='accept' else 'DECLINED');continue
   if method!='turn/start':continue
   turn=str(uuid.uuid4());message=params['input'][0]['text'];send({'id':d['id'],'result':{'turn':{'id':turn}}})
   send({'method':'item/completed','params':{'threadId':session,'item':{'type':'userMessage','id':str(uuid.uuid4()),'content':params['input']}}})
- if 'approval' in message.lower():
+ if 'question wire test' in message.lower():
+  questions=[{'id':'choice','question':'choice','header':'Choice','options':[{'label':'A','description':'First'},{'label':'B','description':'Second'}]}, {'id':'features','question':'features','header':'Features','multiple':True,'multiSelect':True,'options':[{'label':'A','description':'First'},{'label':'B','description':'Second'}]}]
+  if claude:send({'type':'control_request','request_id':'question','request':{'subtype':'can_use_tool','tool_name':'AskUserQuestion','input':{'questions':questions}}})
+  else:send({'id':43,'method':'item/tool/requestUserInput','params':{'threadId':session,'turnId':turn,'questions':questions}})
+ elif 'approval' in message.lower():
   pending=True
   if claude:send({'type':'control_request','request_id':'permission','request':{'subtype':'can_use_tool','tool_name':'Write','input':{'file_path':'fixture.txt','content':'fixture'}}})
   else:send({'id':42,'method':'item/commandExecution/requestApproval','params':{'threadId':session,'turnId':turn,'command':'echo fixture','reason':'Fixture approval'}})

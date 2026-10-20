@@ -8,7 +8,8 @@ import 'crypto.dart';
 // Cache files contain only AES-GCM ciphertext; media is kept in memory.
 class DeviceVault {
   final FlutterSecureStorage storage;
-  DeviceVault({FlutterSecureStorage? storage})
+  final Directory? directory;
+  DeviceVault({FlutterSecureStorage? storage, this.directory})
     : storage =
           storage ??
           const FlutterSecureStorage(
@@ -98,16 +99,97 @@ class DeviceVault {
 
   Future<void> saveGeneration(Map<String, dynamic> v) =>
       storage.write(key: 'agentdeck.generation', value: jsonEncode(v));
-  Future<File> _cache() async => File(
-    '${(await getApplicationSupportDirectory()).path}/transcripts.vault',
-  );
-  Future<List<int>> _key() async {
+  Future<Directory> _directory() async =>
+      directory ?? await getApplicationSupportDirectory();
+  Future<File> _cache() async =>
+      File('${(await _directory()).path}/transcripts.vault');
+  Future<List<int>>? _keyFuture;
+  Future<List<int>> _key() => _keyFuture ??= _loadKey().catchError((Object e) {
+    _keyFuture = null;
+    throw e;
+  });
+  Future<List<int>> _loadKey() async {
     var s = await storage.read(key: 'agentdeck.cache.key');
     if (s == null) {
       s = base64Encode(WireCrypto.random(32));
       await storage.write(key: 'agentdeck.cache.key', value: s);
     }
     return base64Decode(s);
+  }
+
+  Future<File> _outgoing(String id, String suffix) async {
+    if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(id)) {
+      throw const FormatException('无效发件记录');
+    }
+    return File('${(await _directory()).path}/outbox/$id.$suffix.vault');
+  }
+
+  Future<void> _writeOutgoing(
+    String id,
+    String suffix,
+    Map<String, dynamic> value,
+  ) async {
+    final file = await _outgoing(id, suffix);
+    await file.parent.create(recursive: true);
+    final sealed = await WireCrypto.seal(
+      await _key(),
+      'outbox/$id/$suffix',
+      0,
+      0,
+      value,
+    );
+    final tmp = File('${file.path}.tmp');
+    await tmp.writeAsString(jsonEncode(sealed), flush: true);
+    await tmp.rename(file.path);
+  }
+
+  Future<Map<String, dynamic>> _readOutgoing(String id, String suffix) async {
+    final file = await _outgoing(id, suffix);
+    return WireCrypto.open(
+      await _key(),
+      'outbox/$id/$suffix',
+      Map<String, dynamic>.from(jsonDecode(await file.readAsString())),
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> loadOutgoing() async {
+    final dir = Directory('${(await _directory()).path}/outbox');
+    if (!await dir.exists()) return [];
+    final rows = <Map<String, dynamic>>[];
+    await for (final file in dir.list()) {
+      final match = RegExp(
+        r'/([a-f0-9]{32})\.task\.vault$',
+      ).firstMatch(file.path);
+      if (file is File && match != null) {
+        rows.add(await _readOutgoing(match[1]!, 'task'));
+      }
+    }
+    return rows;
+  }
+
+  Future<void> saveOutgoing(String id, Map<String, dynamic> value) =>
+      _writeOutgoing(id, 'task', value);
+  Future<void> saveOutgoingFiles(String id, List<Map<String, dynamic>> files) =>
+      _writeOutgoing(id, 'files', {'files': files});
+  Future<List<Map<String, dynamic>>> loadOutgoingFiles(String id) async =>
+      ((await _readOutgoing(id, 'files'))['files'] as List)
+          .map((v) => Map<String, dynamic>.from(v as Map))
+          .toList();
+  Future<void> removeOutgoingFiles(String id) async {
+    final file = await _outgoing(id, 'files');
+    for (final path in [file.path, '${file.path}.tmp']) {
+      final f = File(path);
+      if (await f.exists()) await f.delete();
+    }
+  }
+
+  Future<void> removeOutgoing(String id) async {
+    final file = await _outgoing(id, 'task');
+    for (final path in [file.path, '${file.path}.tmp']) {
+      final f = File(path);
+      if (await f.exists()) await f.delete();
+    }
+    await removeOutgoingFiles(id);
   }
 
   Future<Map<String, dynamic>> readCache() async {
@@ -136,8 +218,11 @@ class DeviceVault {
       final file = File(p);
       if (await file.exists()) await file.delete();
     }
+    final outbox = Directory('${(await _directory()).path}/outbox');
+    if (await outbox.exists()) await outbox.delete(recursive: true);
     await storage.delete(key: 'agentdeck.device');
     await storage.delete(key: 'agentdeck.cache.key');
+    _keyFuture = null;
     await storage.delete(key: 'agentdeck.project.layout');
     await storage.delete(key: 'agentdeck.generation');
     await storage.delete(key: 'agentdeck.downloads');

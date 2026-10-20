@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:async';
 import 'package:agentdeck/language.dart';
 import 'package:agentdeck/main.dart';
 import 'package:agentdeck/reading_scroll_view.dart';
@@ -68,6 +69,38 @@ class PagingClient extends DirectoryClient {
   }
 }
 
+class DelayedPagingClient extends PagingClient {
+  final gate = Completer<void>();
+  DelayedPagingClient() : super(atStart: false, total: 260) {
+    transcripts['s']!.history({
+      'events': [for (var i = 220; i <= 260; i++) event(i)],
+      'cursor': 260,
+      'before': 220,
+      'has_more': true,
+    }, replace: true);
+  }
+  @override
+  Future<void> loadOlder(String id) async {
+    final t = transcripts[id]!;
+    if (t.loadingOlder || !t.hasMore) return;
+    olderCalls++;
+    t.loadingOlder = true;
+    final version = t.windowVersion;
+    notifyListeners();
+    await gate.future;
+    if (version == t.windowVersion) {
+      t.history({
+        'events': [event(219)],
+        'cursor': 260,
+        'before': 219,
+        'has_more': true,
+      });
+    }
+    t.loadingOlder = false;
+    notifyListeners();
+  }
+}
+
 // Tool-only pages include separate notices, so folded group headers can move
 // the scroll edge away without providing another dialogue message.
 class ToolGapClient extends PagingClient {
@@ -107,6 +140,32 @@ Future<void> mount(WidgetTester t, PagingClient c) async {
 }
 
 void main() {
+  testWidgets('reversing a gesture invalidates the opposite in-flight page', (
+    tester,
+  ) async {
+    final c = DelayedPagingClient();
+    addTearDown(c.dispose);
+    await mount(tester, c);
+    final finder = find.byType(ReadingScrollView);
+    final controller = tester.widget<ReadingScrollView>(finder).controller;
+    controller.jumpTo(controller.position.maxScrollExtent);
+    await tester.pump();
+    for (var i = 0; i < 12 && c.olderCalls == 0; i++) {
+      await tester.drag(finder, const Offset(0, 500));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(c.olderCalls, 1);
+    expect(c.transcripts['s']!.loadingOlder, isTrue);
+    final version = c.transcripts['s']!.windowVersion;
+    await tester.drag(finder, const Offset(0, -400));
+    await tester.pump();
+    expect(c.transcripts['s']!.windowVersion, greaterThan(version));
+    c.gate.complete();
+    await tester.pumpAndSettle();
+    expect(c.transcripts['s']!.before, 220);
+    expect(c.transcripts['s']!.blocks.last.first, 260);
+    expect(tester.takeException(), isNull);
+  });
   for (final older in [true, false]) {
     testWidgets(
       'scroll ${older ? "older" : "newer"} pages automatically through the end',

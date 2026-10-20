@@ -20,12 +20,18 @@ import 'agents.dart';
 import 'input.dart';
 import 'download_manager.dart';
 import 'app_update.dart';
+import 'outbox.dart';
 import 'client_health.dart';
 export 'client_health.dart';
 
 class AgentRequestException extends HttpException {
   final bool notSent;
-  AgentRequestException(super.message, {this.notSent = false});
+  final bool remote;
+  AgentRequestException(
+    super.message, {
+    this.notSent = false,
+    this.remote = false,
+  });
 }
 
 class AgentClient extends ChangeNotifier {
@@ -79,6 +85,12 @@ class AgentClient extends ChangeNotifier {
   );
   DownloadManager? _downloads;
   DownloadManager get downloads => _downloads ??= DownloadManager(this);
+  OutboxManager? _outbox;
+  OutboxManager get outbox => _outbox ??= OutboxManager(this);
+  void notifyOutboxChanged() {
+    if (!_closed) notifyListeners();
+  }
+
   int _downloadLeases = 0;
   bool _backgrounded = false;
   void retainDownloadConnection() {
@@ -338,6 +350,10 @@ class AgentClient extends ChangeNotifier {
           for (final v in cached.skip(max(0, cached.length - 40))) {
             t.add(Map<String, dynamic>.from(v as Map));
           }
+          final savedCursor = (cache['transcript_cursors'] as Map?)?[e.key];
+          if (savedCursor is num && savedCursor.toInt() > t.cursor) {
+            t.cursor = savedCursor.toInt();
+          }
           transcripts[e.key] = t;
         }
         health.resolve(LocalIssueKind.cacheRead);
@@ -346,6 +362,7 @@ class AgentClient extends ChangeNotifier {
       }
       // Corrupt/unavailable history is recoverable from Local, and must never
       // prevent reading valid pairing keys or establishing a fresh connection.
+      await outbox.restore();
       await connect();
     }
     unawaited(updates.initialize());
@@ -537,6 +554,7 @@ class AgentClient extends ChangeNotifier {
       await _saveQueue;
       await _layoutSaveQueue;
       await _downloads?.reset();
+      await _outbox?.reset();
       await vault.clear(keepGateway: true);
       projectLayout = ProjectLayout();
       _savedProjectLayout = projectLayout;
@@ -758,6 +776,7 @@ class AgentClient extends ChangeNotifier {
 
   Future<void> resume() async {
     _backgrounded = false;
+    _outbox?.foreground();
     if (!_suspended || _closed) return;
     _suspended = false;
     // A cancelled handshake must finish before a fresh one can start.
@@ -948,6 +967,7 @@ class AgentClient extends ChangeNotifier {
               AgentRequestException(
                 m['message'] as String,
                 notSent: m['not_sent'] == true,
+                remote: true,
               ),
             );
         // Only the matching caller owns this failure (send, file, usage,
@@ -1046,6 +1066,30 @@ class AgentClient extends ChangeNotifier {
     if (!sessions.any((s) => s.id == session.id)) sessions.insert(0, session);
     await watch(session.id);
     return session;
+  }
+
+  // An outbox job must never switch the visible/watch session in another route.
+  Future<AgentSession> prepareOutgoingSession(
+    String agent,
+    String project,
+    String parent,
+    String id,
+  ) async {
+    final result = await request({
+      'method': 'create',
+      'agent': agent,
+      'project': project,
+      'session': parent,
+      'id': id,
+    });
+    final value = AgentSession.fromJson(Map<String, dynamic>.from(result));
+    final index = sessions.indexWhere((s) => s.id == value.id);
+    if (index < 0) {
+      sessions.insert(0, value);
+    } else {
+      sessions[index] = value;
+    }
+    return value;
   }
 
   Future<void> sendPrompt(
@@ -1343,7 +1387,12 @@ class AgentClient extends ChangeNotifier {
     }
     notifyListeners();
     if (connected) {
-      await send({'method': 'watch', 'session': id, 'recent': true});
+      await send({
+        'method': 'watch',
+        'session': id,
+        'recent': true,
+        'compact': true,
+      });
     }
   }
 
@@ -1355,6 +1404,7 @@ class AgentClient extends ChangeNotifier {
   Future<void> jumpToRecord(String id, int first) async {
     final page = await request({
       'method': 'history_at',
+      'compact': true,
       'session': id,
       'first': first,
     });
@@ -1381,6 +1431,7 @@ class AgentClient extends ChangeNotifier {
     try {
       final page = await request({
         'method': 'history',
+        'compact': true,
         'session': id,
         'before': t.before,
       });
@@ -1410,6 +1461,7 @@ class AgentClient extends ChangeNotifier {
     try {
       final page = await request({
         'method': 'history_after',
+        'compact': true,
         'session': id,
         'after': t.blocks.last.first,
       });
@@ -1447,7 +1499,11 @@ class AgentClient extends ChangeNotifier {
   Future<void> reload(String id) async {
     // Commit a refresh only after a successful reply; failed/late refreshes
     // leave the current transcript and its reading position intact.
-    final page = await request({'method': 'history', 'session': id});
+    final page = await request({
+      'method': 'history',
+      'session': id,
+      'compact': true,
+    });
     if (selected != id) return;
     transcripts
         .putIfAbsent(id, Transcript.new)
@@ -1455,6 +1511,22 @@ class AgentClient extends ChangeNotifier {
     _scheduleCache();
     notifyListeners();
   }
+
+  Future<Map<String, dynamic>> executionDetail(
+    String session,
+    TranscriptBlock block,
+  ) async => Map<String, dynamic>.from(
+    await request({
+          'method': 'item_detail',
+          'session': session,
+          'item': block.key.substring(
+            0,
+            block.key.length - block.kind.length - 1,
+          ),
+          'kind': block.kind,
+        })
+        as Map,
+  );
 
   Future<SessionAttachment> attachment(String session, String href) async {
     final uri = Uri.parse(href);
@@ -1705,9 +1777,13 @@ class AgentClient extends ChangeNotifier {
               'managed': s.managed,
               'completion': s.completion,
               'completed_at': s.completedAt,
+              if (s.issue != null) 'issue': s.issue!.toJson(),
             },
           )
           .toList(),
+      'transcript_cursors': {
+        for (final entry in transcripts.entries) entry.key: entry.value.cursor,
+      },
       'transcripts':
           Map<String, Transcript>.fromEntries(
             transcripts.entries.toList().reversed.take(1),
@@ -1720,7 +1796,10 @@ class AgentClient extends ChangeNotifier {
                   .map(
                     (b) => {
                       'id': 'cache:${b.key}',
-                      'seq': t.cursor,
+                      'seq': b.seq,
+                      'first': b.first,
+                      'position': b.position,
+                      'detail': b.detail,
                       'kind': b.kind,
                       'role': b.role,
                       'item': b.key.substring(
@@ -1762,6 +1841,7 @@ class AgentClient extends ChangeNotifier {
     await _saveQueue;
     await _layoutSaveQueue;
     await _downloads?.reset();
+    await _outbox?.reset();
     await vault.clear();
     projectLayout = ProjectLayout();
     _savedProjectLayout = projectLayout;
@@ -1835,6 +1915,7 @@ class AgentClient extends ChangeNotifier {
   void dispose() {
     _updates?.dispose();
     _closed = true;
+    _outbox?.dispose();
     _downloads?.dispose();
     appLock.dispose();
     _notifyTimer?.cancel();

@@ -342,6 +342,8 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 }
 
 type Request struct {
+	Compact           bool     `json:"compact,omitempty"`
+	Item              string   `json:"item,omitempty"`
 	PermissionMode    string   `json:"permission_mode,omitempty"`
 	PermissionVersion string   `json:"permission_version,omitempty"`
 	Version           string   `json:"version,omitempty"`
@@ -443,6 +445,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	defer func() { stopDesktop() }()
 	var watched string
 	var recentMode bool
+	var compactMode bool
 	last := uint64(0)
 	send := func(v any) error {
 		sent++
@@ -650,6 +653,9 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 						case "send":
 							var files []agent.InputAttachment
 							files, err = s.inputFiles(tk.Device, req.Session, req.Attachments)
+							if err != nil {
+								err = &agent.InputNotSentError{Err: err}
+							}
 							if err == nil {
 								err = s.Manager.SendDelivery(req.Session, req.Text, req.ID, agent.TurnOptions{Model: req.Model, Effort: req.Effort, Speed: req.Speed}, files, req.Delivery)
 							}
@@ -728,9 +734,10 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				if s.Manager != nil && watched != "" {
 					stopDesktop = s.Manager.WatchDesktop(r.Context(), watched)
 				}
-				recentMode = req.Recent
+				recentMode = req.Recent || req.Compact
+				compactMode = req.Compact
 				cursor = req.After
-				if req.Recent && watched != "" {
+				if recentMode && watched != "" {
 					if s.Manager != nil {
 						// ACP history loading can take longer than a heartbeat. Continue
 						// serving the encrypted stream while the adapter imports it.
@@ -754,11 +761,26 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 					cursor = page.Cursor
-					if send(map[string]any{"type": "history", "session": watched, "page": page}) != nil {
+					if send(map[string]any{"type": "history", "session": watched, "page": s.projectHistory(page, compactMode)}) != nil {
 						return
 					}
 				}
 				if send(map[string]any{"type": "watching", "id": req.ID, "session": watched}) != nil {
+					return
+				}
+			case "item_detail":
+				if !executionKind(req.Kind) || req.Item == "" || len(req.Item) > 512 {
+					if send(map[string]any{"type": "error", "id": req.ID, "message": "该记录已不可用"}) != nil {
+						return
+					}
+					continue
+				}
+				event, err := s.Store.TranscriptItem(req.Session, req.Item, req.Kind)
+				if err != nil {
+					if send(map[string]any{"type": "error", "id": req.ID, "message": "该记录已不可用"}) != nil {
+						return
+					}
+				} else if send(map[string]any{"type": "result", "id": req.ID, "result": event}) != nil {
 					return
 				}
 			case "outline":
@@ -776,7 +798,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 					if send(map[string]any{"type": "error", "id": req.ID, "message": "该记录已不可用"}) != nil {
 						return
 					}
-				} else if send(map[string]any{"type": "result", "id": req.ID, "result": page}) != nil {
+				} else if send(map[string]any{"type": "result", "id": req.ID, "result": s.projectHistory(page, req.Compact)}) != nil {
 					return
 				}
 			case "history_after":
@@ -785,7 +807,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 					if send(map[string]any{"type": "error", "id": req.ID, "message": "历史读取失败"}) != nil {
 						return
 					}
-				} else if send(map[string]any{"type": "result", "id": req.ID, "result": page}) != nil {
+				} else if send(map[string]any{"type": "result", "id": req.ID, "result": s.projectHistory(page, req.Compact)}) != nil {
 					return
 				}
 			case "history":
@@ -794,7 +816,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 					if send(map[string]any{"type": "error", "id": req.ID, "message": "历史读取失败"}) != nil {
 						return
 					}
-				} else if send(map[string]any{"type": "result", "id": req.ID, "result": page}) != nil {
+				} else if send(map[string]any{"type": "result", "id": req.ID, "result": s.projectHistory(page, req.Compact)}) != nil {
 					return
 				}
 			case "attachment_open", "attachment_read", "attachment_close":
@@ -902,6 +924,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				}
 				cursor = next
 				if len(events) > 0 {
+					events = s.transcriptEvents(events, compactMode)
 					if send(map[string]any{"type": "events", "session": watched, "events": events, "cursor": cursor}) != nil {
 						return
 					}

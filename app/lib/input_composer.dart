@@ -264,6 +264,7 @@ class InputComposer extends StatefulWidget {
   final String session, agent;
   final TextEditingController controller;
   final bool sending, running, canSend;
+  final bool durableSending;
   final Future<bool> Function(TurnOptions, List<DraftFile>) onSend;
   final Future<bool> Function(TurnOptions, List<DraftFile>, String)? onDelivery;
   final VoidCallback? onStop;
@@ -278,6 +279,7 @@ class InputComposer extends StatefulWidget {
     required this.running,
     required this.canSend,
     required this.onSend,
+    this.durableSending = false,
     this.onStop,
     this.onDelivery,
     this.services,
@@ -323,7 +325,12 @@ class _InputComposerState extends State<InputComposer>
   String committedVoiceText = '';
   TextEditingValue? voiceBase;
   String? voiceRendered;
-  bool get enabled => widget.client.live && canCompose;
+  bool get enabled =>
+      (widget.client.live ||
+          widget.durableSending &&
+              widget.client.device != null &&
+              widget.client.device?['revoked'] != true) &&
+      canCompose;
   bool get canCompose =>
       !widget.sending &&
       !picking &&
@@ -1088,7 +1095,7 @@ class _InputComposerState extends State<InputComposer>
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
-                  onPressed: enabled ? _settings : null,
+                  onPressed: enabled && widget.client.live ? _settings : null,
                   icon: const Icon(Icons.tune, size: 15),
                   label: Text(
                     generationLabel(context),

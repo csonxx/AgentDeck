@@ -4,6 +4,7 @@ import 'package:flutter/rendering.dart';
 
 class ReadingScrollController extends ScrollController {
   double? Function()? _centerExtent;
+  bool correcting = false;
   @override
   ScrollPosition createScrollPosition(
     ScrollPhysics physics,
@@ -22,9 +23,14 @@ class ReadingScrollController extends ScrollController {
 
   void revealPagingEdge({required bool older}) {
     if (!hasClients) return;
-    (position as _ReadingPosition).reveal(
-      older ? position.maxScrollExtent : position.minScrollExtent,
-    );
+    correcting = true;
+    try {
+      (position as _ReadingPosition).reveal(
+        older ? position.maxScrollExtent : position.minScrollExtent,
+      );
+    } finally {
+      correcting = false;
+    }
   }
 }
 
@@ -56,6 +62,76 @@ class _ReadingPosition extends ScrollPositionWithSingleContext {
   void reveal(double value) => forcePixels(value);
 }
 
+// The center row grows upwards in a reverse viewport. Compensate its size
+// change during layout, before paint, so decoding an image or streaming a long
+// answer cannot move the text being read. Changing the pivot starts a new
+// measurement; ordinary scrolling still belongs to ScrollPosition.
+class _ReadingSliverList extends SliverList {
+  final String pivot;
+  final bool preserve;
+  final double? measuredHeight;
+  const _ReadingSliverList({
+    super.key,
+    required super.delegate,
+    required this.pivot,
+    required this.preserve,
+    this.measuredHeight,
+  });
+
+  @override
+  RenderSliverList createRenderObject(BuildContext context) => _ReadingSliver(
+    childManager: context as SliverMultiBoxAdaptorElement,
+    pivot: pivot,
+    preserve: preserve,
+    measuredHeight: measuredHeight,
+  );
+
+  @override
+  void updateRenderObject(BuildContext context, _ReadingSliver renderObject) {
+    renderObject.configure(pivot, preserve, measuredHeight);
+  }
+}
+
+class _ReadingSliver extends RenderSliverList {
+  String pivot;
+  bool preserve;
+  double? _height;
+  _ReadingSliver({
+    required super.childManager,
+    required this.pivot,
+    required this.preserve,
+    double? measuredHeight,
+  }) : _height = measuredHeight;
+
+  void configure(String value, bool enabled, double? measuredHeight) {
+    if (pivot != value) {
+      _height = measuredHeight;
+    } else if (preserve != enabled) {
+      _height = null;
+    }
+    pivot = value;
+    preserve = enabled;
+    markNeedsLayout();
+  }
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    if (geometry?.scrollOffsetCorrection != null) return;
+    final child = firstChild;
+    if (child == null || indexOf(child) != 0) {
+      _height = null;
+      return;
+    }
+    final height = paintExtentOf(child);
+    final previous = _height;
+    _height = height;
+    if (preserve && previous != null && (height - previous).abs() > .01) {
+      geometry = SliverGeometry(scrollOffsetCorrection: height - previous);
+    }
+  }
+}
+
 // Two lazy slivers grow away from a stable reading anchor. Evicting records at
 // either end does not change that anchor's location on screen.
 class ReadingScrollView extends StatefulWidget {
@@ -82,6 +158,7 @@ class ReadingScrollViewState extends State<ReadingScrollView> {
   final _center = GlobalKey();
   final _anchors = <String, GlobalKey>{};
   String? _pivot;
+  double? _pivotHeight;
 
   double? _centerExtent() {
     final sliver = _center.currentContext?.findRenderObject();
@@ -145,6 +222,7 @@ class ReadingScrollViewState extends State<ReadingScrollView> {
     if (selected == null || selected == _pivot) return false;
     widget.controller.rebase(selectedRect!.bottom - bounds.bottom);
     _pivot = selected;
+    _pivotHeight = selectedRect.height;
     return true;
   }
 
@@ -154,6 +232,7 @@ class ReadingScrollViewState extends State<ReadingScrollView> {
     _anchors.removeWhere((key, _) => !keys.contains(key));
     if (!keys.contains(_pivot)) {
       _pivot = keys.firstOrNull;
+      _pivotHeight = null;
       widget.controller.rebase(0);
     }
     final pivot = keys.indexOf(_pivot ?? '');
@@ -190,14 +269,19 @@ class ReadingScrollViewState extends State<ReadingScrollView> {
               },
               itemBuilder: (_, index) => item(pivot - index - 1),
             ),
-          SliverList.builder(
+          _ReadingSliverList(
             key: _center,
-            itemCount: keys.length - pivot,
-            findChildIndexCallback: (key) {
-              final i = indices[(key as ValueKey<String>).value];
-              return i != null && i >= pivot ? i - pivot : null;
-            },
-            itemBuilder: (_, index) => item(pivot + index),
+            pivot: _pivot ?? '',
+            preserve: widget.anchorKeys?.contains(_pivot) ?? pivot > 0,
+            measuredHeight: _pivotHeight,
+            delegate: SliverChildBuilderDelegate(
+              (_, index) => item(pivot + index),
+              childCount: keys.length - pivot,
+              findChildIndexCallback: (key) {
+                final i = indices[(key as ValueKey<String>).value];
+                return i != null && i >= pivot ? i - pivot : null;
+              },
+            ),
           ),
         ],
       ),

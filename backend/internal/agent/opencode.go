@@ -20,13 +20,14 @@ import (
 )
 
 type openCode struct {
-	m         *Manager
-	cfg       HTTPAgentConfig
-	http      *http.Client
-	mu        sync.Mutex
-	sendMu    sync.Mutex
-	detail    string
-	connected bool
+	m          *Manager
+	cfg        HTTPAgentConfig
+	http       *http.Client
+	mu         sync.Mutex
+	sendMu     sync.Mutex
+	questionMu sync.Mutex
+	detail     string
+	connected  bool
 }
 
 func agentHTTP() *http.Client {
@@ -47,6 +48,12 @@ func (o *openCode) Info() AgentInfo {
 		d = "已连接 · 原会话 · 实时事件"
 	}
 	return AgentInfo{ID: "opencode", Name: "OpenCode", Configured: o.cfg.URL != "", Create: true, Send: true, Stop: true, Approve: true, Detail: d}
+}
+
+type openCodeHTTPError struct{ status int }
+
+func (e openCodeHTTPError) Error() string {
+	return fmt.Sprintf("OpenCode 请求失败（HTTP %d），请检查登录、版本与会话状态", e.status)
 }
 func (o *openCode) request(ctx context.Context, method, path, project string, in, out any) error {
 	if o.cfg.URL == "" {
@@ -91,7 +98,7 @@ func (o *openCode) request(ctx context.Context, method, path, project string, in
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("OpenCode 请求失败（HTTP %d），请检查登录、版本与会话状态", res.StatusCode)
+		return openCodeHTTPError{res.StatusCode}
 	}
 	if out == nil {
 		return nil
@@ -133,13 +140,21 @@ func (o *openCode) importSession(v map[string]any) (store.Session, error) {
 	ss.Managed = true
 	ss.Agent = "opencode"
 	ss.Source = "opencode-api"
+	// Native child sessions are execution details of their parent, not extra
+	// user chats. Keep their identity/history for routing without inflating the
+	// project/recent catalog (including rows imported by older Local versions).
+	ss.Parent = ""
+	if parent := str(v["parentID"]); parent != "" {
+		ss.Parent = sessionID("opencode", parent)
+	}
+	ss.CatalogHidden = ss.Parent != "" || int64Number(obj(v["time"])["archived"]) > 0
 	if title := str(v["title"]); title != "" {
 		ss.Title = Redact(title)
 	}
 	if t, ok := obj(v["time"])["updated"].(float64); ok {
 		ss.Updated = time.UnixMilli(int64(t)).UTC().Format(time.RFC3339Nano)
 	}
-	return ss, o.m.Store.Put("sessions", ss.ID, ss)
+	return ss, o.m.Store.PutCatalogSession(ss)
 }
 func (o *openCode) Send(ctx context.Context, ss store.Session, text, request string) error {
 	return o.SendInput(ctx, ss, text, request, TurnOptions{}, nil)
@@ -181,6 +196,9 @@ func (o *openCode) Interrupt(ctx context.Context, ss store.Session) error {
 	return o.request(ctx, "POST", "/session/"+url.PathEscape(nativeID(ss))+"/abort", ss.Project, map[string]any{}, nil)
 }
 func (o *openCode) Approve(ctx context.Context, ss store.Session, key, decision, answer string) error {
+	if strings.HasPrefix(key, openCodeQuestionPrefix) {
+		return o.answerQuestion(ctx, ss, strings.TrimPrefix(key, openCodeQuestionPrefix), decision, answer)
+	}
 	var pending []map[string]any
 	if e := o.request(ctx, "GET", "/permission", ss.Project, nil, &pending); e != nil {
 		return e
@@ -258,6 +276,9 @@ func (o *openCode) sync(ctx context.Context) error {
 				}
 			}
 		}
+		if e := o.syncQuestions(ctx, path); e != nil {
+			return e
+		}
 	}
 	return nil
 }
@@ -309,6 +330,18 @@ func (o *openCode) event(ctx context.Context, d map[string]any) {
 	}
 	p := obj(d["properties"])
 	typ := str(d["type"])
+	if typ == "session.deleted" {
+		id := str(obj(p["info"])["id"])
+		if id == "" {
+			id = str(p["sessionID"])
+		}
+		var ss store.Session
+		if o.m.Store.Get("sessions", sessionID("opencode", id), &ss) == nil && ss.Agent == "opencode" {
+			ss.CatalogHidden = true
+			_ = o.m.Store.PutCatalogSession(ss)
+		}
+		return
+	}
 	if typ == "session.created" || typ == "session.updated" {
 		_, _ = o.importSession(obj(p["info"]))
 		return
@@ -349,13 +382,31 @@ func (o *openCode) event(ctx context.Context, d map[string]any) {
 	case "session.status":
 		status := "completed"
 		t := str(obj(p["status"])["type"])
+		// OpenCode emits idle after session.error as cleanup, not success.
+		// Preserve the failure until a new busy turn proves execution resumed.
+		if t == "idle" && ss.Status == "failed" {
+			return
+		}
+
 		if t == "busy" || t == "retry" {
 			status = "running"
 		}
-		o.m.emitExternal(ss, store.Event{Kind: "status", Status: status})
+		issue := store.SessionIssue{}
+		if t == "retry" {
+			issue = nativeIssue("retrying")
+		}
+		if t != "idle" && t != "busy" && t != "retry" {
+			status = "unknown"
+			issue = nativeIssue("unsupported_state")
+		}
+		o.m.emitExternal(ss, store.Event{Kind: "status", Status: status, Issue: issue})
 	case "session.error":
 		o.m.emitExternal(ss, store.Event{Kind: "notice", Text: "OpenCode 执行失败，请检查工作站的模型或登录配置"})
-		o.m.emitExternal(ss, store.Event{Kind: "status", Status: "failed"})
+		o.m.emitExternal(ss, store.Event{Kind: "status", Status: "failed", Issue: openCodeIssue(obj(p["error"]))})
+	case "question.asked":
+		o.questionEvent(ss, str(p["id"]), jsonText(openCodeQuestionParams(p)), "pending")
+	case "question.replied", "question.rejected":
+		o.questionEvent(ss, str(p["requestID"]), "", "resolved")
 	case "permission.asked":
 		o.m.emitExternal(ss, store.Event{Kind: "approval", Item: str(p["id"]), Text: jsonText(p), Mode: "snapshot", Status: "pending"})
 	case "permission.replied":
@@ -383,6 +434,9 @@ func (o *openCode) stream(ctx context.Context) error {
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
 		return errors.New("OpenCode 实时事件接口不可用")
+	}
+	if e := o.recoverQuestions(ctx); e != nil {
+		return e
 	}
 	s := bufio.NewScanner(res.Body)
 	s.Buffer(make([]byte, 4096), 8<<20)

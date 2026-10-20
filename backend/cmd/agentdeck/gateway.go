@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"agentdeck/internal/feedback"
 	"agentdeck/internal/gateway"
 	"agentdeck/internal/relay"
 	"agentdeck/internal/server"
@@ -190,12 +191,28 @@ func serveGateway(db *store.Store, dir, addr, public, pin, trust, logLevel strin
 		return e
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	feedbackConfig, err := feedback.FromEnv(os.Getenv)
+	if err != nil {
+		return err
+	}
+	feedbackStore, err := feedback.Open(ctx, feedbackConfig)
+	if err != nil {
+		return err
+	}
+	if feedbackStore != nil {
+		defer feedbackStore.Close()
+		g.Feedback = feedbackStore
+		g.Logger.Info("feedback_storage_ready", "driver", feedbackConfig.Driver, "retention_hours", int(feedbackConfig.Retention.Hours()))
+	}
+	feedbackDone := make(chan struct{})
+	go func() { defer close(feedbackDone); g.PruneFeedback(ctx) }()
 	statsDone := make(chan struct{})
 	go func() {
 		defer close(statsDone)
 		g.LogConnectionStats(ctx, connectionLogInterval)
 	}()
-	defer func() { stop(); <-statsDone }()
+	defer func() { stop(); <-statsDone; <-feedbackDone }()
 	defer g.Close()
 	srv := &http.Server{Addr: addr, Handler: g.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 90 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}}}
 	srv.ErrorLog = slog.NewLogLogger(g.Logger.Handler(), slog.LevelError)

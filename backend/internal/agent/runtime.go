@@ -85,22 +85,25 @@ type approval struct {
 	Params map[string]any
 }
 type runtime struct {
-	manager      *Manager
-	session      store.Session
-	cmd          *exec.Cmd
-	input        io.WriteCloser
-	writeMu      sync.Mutex
-	mu           sync.Mutex
-	pending      map[string]chan map[string]any
-	approvals    map[string]approval
-	done         chan struct{}
-	turn         string
-	busy         bool
-	claudeInputs int
-	state        State
-	options      TurnOptions
-	permissions  map[string]any
-	settings     SessionSettings
+	users                int
+	retireIdle, retiring bool
+	idleRetry            bool
+	manager              *Manager
+	session              store.Session
+	cmd                  *exec.Cmd
+	input                io.WriteCloser
+	writeMu              sync.Mutex
+	mu                   sync.Mutex
+	pending              map[string]chan map[string]any
+	approvals            map[string]approval
+	done                 chan struct{}
+	turn                 string
+	busy                 bool
+	claudeInputs         int
+	state                State
+	options              TurnOptions
+	permissions          map[string]any
+	settings             SessionSettings
 }
 
 func UUID() string {
@@ -343,12 +346,34 @@ func (m *Manager) CreatePermission(agent, project, parent, mode string) (store.S
 }
 func (m *Manager) get(id string) (*runtime, error) {
 	m.mu.Lock()
+	if current := m.runs[id]; current != nil {
+		current.mu.Lock()
+		closing := current.retiring
+		current.mu.Unlock()
+		if closing {
+			m.mu.Unlock()
+			select {
+			case <-current.done:
+				m.mu.Lock()
+				if m.runs[id] == current {
+					delete(m.runs, id)
+				}
+				m.mu.Unlock()
+				return m.get(id)
+			case <-time.After(3 * time.Second):
+				return nil, &InputNotSentError{Err: errors.New("原会话未连接")}
+			}
+		}
+	}
 	defer m.mu.Unlock()
 	if r := m.runs[id]; r != nil {
 		select {
 		case <-r.done:
 			delete(m.runs, id)
 		default:
+			r.mu.Lock()
+			r.users++
+			r.mu.Unlock()
 			return r, nil
 		}
 	}
@@ -371,6 +396,10 @@ func (m *Manager) get(id string) (*runtime, error) {
 	if e != nil {
 		return nil, e
 	}
+	r.mu.Lock()
+	r.users = 1
+	r.retireIdle = ss.Agent == "codex"
+	r.mu.Unlock()
 	if ss.Agent == "codex" {
 		var resumed map[string]any
 		if resumed, e = r.call("thread/resume", map[string]any{"threadId": id, "cwd": ss.Project}); e != nil {
@@ -419,6 +448,9 @@ func (m *Manager) SendInput(id, text, request string, o TurnOptions, files []Inp
 	var err error
 	ss, err = m.sessionForInput(id)
 	if err != nil {
+		return err
+	}
+	if err := checkSessionInput(ss); err != nil {
 		return err
 	}
 	if ss.Agent == "claude" {
@@ -481,6 +513,9 @@ func (m *Manager) SendInput(id, text, request string, o TurnOptions, files []Inp
 	}
 	// A chat originally created by the phone can later be opened in Desktop.
 	// Follow that existing owner instead of resuming a competing app-server.
+	if ss.Agent == "codex" {
+		m.releaseIdleCodex(id)
+	}
 	if ss.Agent == "codex" && ss.Source != "desktop" && m.Desktop != nil {
 		localRun := m.liveRuntime(id)
 		if localRun == nil {
@@ -538,6 +573,7 @@ func (m *Manager) SendInput(id, text, request string, o TurnOptions, files []Inp
 	if e != nil {
 		return e
 	}
+	defer r.releaseUse()
 	if ss.Agent == "claude" {
 		if e := m.checkClaudeOwner(id, r.cmd.Process.Pid); e != nil {
 			return e
@@ -616,10 +652,12 @@ func (m *Manager) Interrupt(id string) error {
 	if m.Store.Get("sessions", id, &desktopSession) == nil && desktopSession.Source == "desktop" {
 		return errors.New("请在电脑 Codex 中处理停止或工具审批")
 	}
-	r, e := m.get(id)
-	if e != nil {
-		return e
+	r := m.borrowLiveRuntime(id)
+	if r == nil {
+		return errors.New("原会话未连接")
 	}
+	defer r.releaseUse()
+	var e error
 	if r.session.Agent == "codex" {
 		r.mu.Lock()
 		turn := r.turn
@@ -631,6 +669,9 @@ func (m *Manager) Interrupt(id string) error {
 	return e
 }
 func (m *Manager) Approve(id, key, decision, answer string) error {
+	lock := m.deliveryLock("approval/" + id)
+	lock.Lock()
+	defer lock.Unlock()
 	if decision != "accept" && decision != "decline" {
 		return errors.New("无效审批决定")
 	}
@@ -655,30 +696,54 @@ func (m *Manager) Approve(id, key, decision, answer string) error {
 		return c.Approve(m.Context, ss, key, decision, answer)
 	}
 	var desktopSession store.Session
-	if m.Store.Get("sessions", id, &desktopSession) == nil && desktopSession.Source == "desktop" {
+	if m.Store.Get("sessions", id, &desktopSession) == nil && (desktopSession.Source == "desktop" || desktopSession.Agent == "codex" && strings.HasPrefix(key, "desktop-question/")) {
+		if strings.HasPrefix(key, asyncQuestionPrefix) {
+			return m.answerDesktopAsync(desktopSession, key, decision, answer)
+		}
+		if strings.HasPrefix(key, "desktop-question/") {
+			if _, err := m.allowed(desktopSession.Project); err != nil {
+				return err
+			}
+			handler, ok := m.Desktop.(interface {
+				AnswerQuestions(context.Context, string, string, string, string, string) error
+			})
+			if !ok {
+				return errors.New("当前电脑 Codex 接口不支持提问回答")
+			}
+			if err := handler.AnswerQuestions(m.Context, id, desktopSession.Project, key, decision, answer); err != nil {
+				return err
+			}
+			previous, _ := m.Store.TranscriptItem(id, key, "approval")
+			_, _, err := m.Store.Append(store.Event{Text: previous.Text, ID: "desktop-answer/" + UUID(), Session: id, Agent: "codex", Project: desktopSession.Project, Source: "desktop-live", Kind: "approval", Item: key, Mode: "snapshot", Status: "resolved"})
+			return err
+		}
 		return errors.New("请在电脑 Codex 中处理停止或工具审批")
 	}
-	r, e := m.get(id)
-	if e != nil {
-		return e
+	r := m.borrowLiveRuntime(id)
+	if r == nil {
+		return errors.New("原会话未连接")
 	}
+	defer r.releaseUse()
+	var e error
 	r.mu.Lock()
 	a, ok := r.approvals[key]
-	if ok {
-		delete(r.approvals, key)
-	}
-	r.mu.Unlock()
 	if !ok {
+		r.mu.Unlock()
 		return errors.New("审批已过期")
 	}
-	responses := map[string]string{}
-	_ = json.Unmarshal([]byte(answer), &responses)
-	answerFor := func(key string) string {
-		if value, ok := responses[key]; ok {
-			return value
+	responses := questionAnswers{}
+	if decision == "accept" && len(questionList(a.Params)) > 0 {
+		responses, e = parseQuestionAnswers(answer)
+		if e == nil {
+			e = validateQuestionAnswers(questionList(a.Params), responses, r.session.Agent)
 		}
-		return answer
+		if e != nil {
+			r.mu.Unlock()
+			return e
+		}
 	}
+	delete(r.approvals, key)
+	r.mu.Unlock()
 
 	var result any
 	if r.session.Agent == "claude" {
@@ -690,7 +755,7 @@ func (m *Manager) Approve(id, key, decision, answer string) error {
 			input := obj(a.Params["input"])
 			answers := map[string]any{}
 			for _, q := range arr(input["questions"]) {
-				answers[str(obj(q)["question"])] = answerFor(str(obj(q)["question"]))
+				answers[str(obj(q)["question"])] = claudeQuestionResponse(responses)[str(obj(q)["question"])]
 			}
 			input["answers"] = answers
 			v["updatedInput"] = input
@@ -709,20 +774,19 @@ func (m *Manager) Approve(id, key, decision, answer string) error {
 				v["permissions"] = a.Params["permissions"]
 			}
 		case "item/tool/requestUserInput", "tool/requestUserInput":
-			answers := map[string]any{}
-			for _, q := range arr(a.Params["questions"]) {
-				answers[str(obj(q)["id"])] = map[string]any{"answers": []string{answerFor(str(obj(q)["id"]))}}
-			}
-			v = map[string]any{"answers": answers}
+			v = codexQuestionResponse(responses)
 		default:
 			v = map[string]any{"action": "decline", "content": nil}
 		}
 		result = map[string]any{"id": a.ID, "result": v}
 	}
 	if e = r.write(result); e != nil {
+		r.mu.Lock()
+		r.approvals[key] = a
+		r.mu.Unlock()
 		return e
 	}
-	r.emit(store.Event{Kind: "approval", Item: key, Mode: "snapshot", Text: Redact(jsonText(a.Params)), Status: "resolved"})
+	r.emit(store.Event{Kind: "approval", Item: key, Mode: "snapshot", Text: Redact(jsonText(questionPresentation(a.Params, r.session.Agent))), Status: "resolved"})
 	return nil
 }
 func (m *Manager) Close() {
@@ -902,7 +966,11 @@ func (r *runtime) read(reader io.Reader) {
 			r.mu.Lock()
 			r.approvals[key] = a
 			r.mu.Unlock()
-			r.emit(store.Event{Kind: "approval", Item: key, Text: Redact(jsonText(a.Params)), Mode: "snapshot", Status: "pending"})
+			presentation := a.Params
+			if len(questionList(a.Params)) > 0 {
+				presentation = questionPresentation(a.Params, r.session.Agent)
+			}
+			r.emit(store.Event{Kind: "approval", Item: key, Text: Redact(jsonText(presentation)), Mode: "snapshot", Status: "pending"})
 			continue
 		}
 		if method == "serverRequest/resolved" || str(d["type"]) == "control_cancel_request" {
@@ -920,6 +988,12 @@ func (r *runtime) read(reader io.Reader) {
 			}
 		}
 		r.mu.Lock()
+		if method == "turn/started" {
+			// Native Goal continuations may start without a phone send.
+			// Mark ownership before publishing their running event.
+			r.busy = true
+			r.turn = str(obj(params["turn"])["id"])
+		}
 		if method == "thread/settings/updated" {
 			r.permissions = codexPermissionState(obj(params["threadSettings"]))
 		}
@@ -971,10 +1045,8 @@ func (r *runtime) read(reader io.Reader) {
 		for _, ev := range events {
 			r.emit(ev)
 		}
-		if method == "turn/started" {
-			r.mu.Lock()
-			r.turn = str(obj(params["turn"])["id"])
-			r.mu.Unlock()
+		if method == "turn/completed" && r.session.Agent == "codex" {
+			r.retireAfterTurn()
 		}
 		if str(d["type"]) == "result" && d["is_error"] == true {
 			r.emit(store.Event{Kind: "notice", Text: Redact(jsonText(d["errors"]))})

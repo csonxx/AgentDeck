@@ -222,12 +222,19 @@ func (m *Manager) SessionPermissions(id string) (SessionPermissions, error) {
 					return current, nil
 				}
 			}
+			var cached map[string]any
+			if m.Store.Get("agentconfig", "codex-last-permissions/"+id, &cached) == nil {
+				v := permissionView("codex", cached, "last_turn")
+				v.Editable = v.Mode != "" && len(v.Choices) > 0
+				return v, nil
+			}
 			return SessionPermissions{Label: "权限暂不可读", Detail: "原会话当前未连接，读取权限不会启动或接管会话", Source: "unknown"}, nil
 		}
 		r, e := m.get(id)
 		if e != nil {
 			return SessionPermissions{}, e
 		}
+		defer r.releaseUse()
 		r.mu.Lock()
 		out := permissionView(ss.Agent, r.permissions, "live")
 		r.mu.Unlock()
@@ -294,7 +301,12 @@ func (m *Manager) ChangePermissions(id, version, mode string) (SessionPermission
 	ctx, cancel := context.WithTimeout(nonNil(m.Context), 10*time.Second)
 	defer cancel()
 	localRun := m.liveRuntime(id)
-	if ss.Agent == "codex" && (!ss.Managed || ss.Source == "desktop" || localRun == nil) {
+	desktopOwner := false
+	if ss.Agent == "codex" && localRun == nil && m.Desktop != nil {
+		owner, err := m.Desktop.Read(ctx, id)
+		desktopOwner = err == nil && owner.ID == id && owner.Host == "local" && owner.Kind == "codex" && (owner.Project == "" || owner.Project == ss.Project)
+	}
+	if ss.Agent == "codex" && (!ss.Managed || ss.Source == "desktop" || desktopOwner) {
 		if b, ok := m.Desktop.(interface {
 			SetPermissions(context.Context, string, string, string, string) (SessionPermissions, error)
 		}); ok {
@@ -331,13 +343,18 @@ func (m *Manager) ChangePermissions(id, version, mode string) (SessionPermission
 		}
 	}
 	if ss.Agent == "codex" || ss.Agent == "claude" {
-		m.mu.Lock()
-		r := m.runs[id]
-		m.mu.Unlock()
-		if r == nil {
-			return before, errors.New("原会话未连接")
+		r, err := m.get(id)
+		if err != nil {
+			return before, err
 		}
+		defer r.releaseUse()
 		if ss.Agent == "codex" {
+			r.mu.Lock()
+			fresh := permissionView("codex", r.permissions, "live")
+			r.mu.Unlock()
+			if fresh.Version != version {
+				return fresh, errors.New("权限已变更，请刷新后重试")
+			}
 			params := codexPermissionParams(mode, ss.Project)
 			params["threadId"] = id
 			if _, e = r.call("thread/settings/update", params); e != nil {

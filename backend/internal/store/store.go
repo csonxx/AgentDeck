@@ -18,36 +18,47 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// SessionIssue contains only allowlisted presentation, never raw provider errors.
+type SessionIssue struct {
+	Code        string `json:"code"`
+	Message     string `json:"message"`
+	Action      string `json:"action,omitempty"`
+	BlocksInput bool   `json:"blocks_input,omitempty"`
+}
 type Event struct {
-	Project string `json:"project,omitempty"`
-	Seq     uint64 `json:"seq"`
-	First   uint64 `json:"first,omitempty"`
-	ID      string `json:"id"`
-	Session string `json:"session"`
-	Agent   string `json:"agent"`
-	Kind    string `json:"kind"`
-	Role    string `json:"role,omitempty"`
-	Text    string `json:"text,omitempty"`
-	Item    string `json:"item,omitempty"`
-	Mode    string `json:"mode,omitempty"` // delta or snapshot, per item
-	Status  string `json:"status,omitempty"`
-	Media   string `json:"media,omitempty"`
-	Time    string `json:"time"`
-	Source  string `json:"source"`
+	Position uint64       `json:"position,omitempty"` // presentation only; never a paging cursor
+	Detail   bool         `json:"detail,omitempty"`   // wire summary; full contents remain in the vault
+	Issue    SessionIssue `json:"issue,omitzero"`
+	Project  string       `json:"project,omitempty"`
+	Seq      uint64       `json:"seq"`
+	First    uint64       `json:"first,omitempty"`
+	ID       string       `json:"id"`
+	Session  string       `json:"session"`
+	Agent    string       `json:"agent"`
+	Kind     string       `json:"kind"`
+	Role     string       `json:"role,omitempty"`
+	Text     string       `json:"text,omitempty"`
+	Item     string       `json:"item,omitempty"`
+	Mode     string       `json:"mode,omitempty"` // delta or snapshot, per item
+	Status   string       `json:"status,omitempty"`
+	Media    string       `json:"media,omitempty"`
+	Time     string       `json:"time"`
+	Source   string       `json:"source"`
 }
 type Session struct {
-	Completion    uint64 `json:"completion,omitempty"`
-	CompletedAt   string `json:"completed_at,omitempty"`
-	CatalogHidden bool   `json:"catalog_hidden,omitempty"`
-	Project       string `json:"project,omitempty"`
-	Managed       bool   `json:"managed,omitempty"`
-	Parent        string `json:"parent,omitempty"`
-	ID            string `json:"id"`
-	Agent         string `json:"agent"`
-	Title         string `json:"title"`
-	Source        string `json:"source"`
-	Updated       string `json:"updated"`
-	Status        string `json:"status"`
+	Issue         SessionIssue `json:"issue,omitzero"`
+	Completion    uint64       `json:"completion,omitempty"`
+	CompletedAt   string       `json:"completed_at,omitempty"`
+	CatalogHidden bool         `json:"catalog_hidden,omitempty"`
+	Project       string       `json:"project,omitempty"`
+	Managed       bool         `json:"managed,omitempty"`
+	Parent        string       `json:"parent,omitempty"`
+	ID            string       `json:"id"`
+	Agent         string       `json:"agent"`
+	Title         string       `json:"title"`
+	Source        string       `json:"source"`
+	Updated       string       `json:"updated"`
+	Status        string       `json:"status"`
 }
 type Device struct {
 	LastConnected string `json:"last_connected,omitempty"`
@@ -349,9 +360,16 @@ func (s *Store) appendInTx(t *bolt.Tx, ev Event, preserveSession, desktop bool, 
 		if ev.Kind == "status" && ev.Mode == "title" {
 			ss.Title = ev.Text
 		}
-		stale := olderDesktopEvent(ev, ss)
+		stale := olderDesktopEvent(ev, ss) || (ss.Issue.BlocksInput && ss.Source == "desktop" && ev.Source != "desktop-live" && ev.Status != "")
 		if !stale {
 			ss.Updated = ev.Time
+		}
+		if !stale && ev.Kind == "status" {
+			// A log tail must not reopen a Desktop safety stop. Only a fresh
+			// authoritative owner snapshot may clear that restriction.
+			if !(ss.Issue.BlocksInput && ss.Source == "desktop" && ev.Source != "desktop-live") {
+				ss.Issue = ev.Issue
+			}
 		}
 		if !stale && ev.Status != "" && ev.Kind != "approval" {
 			if ev.Agent == "claude" {

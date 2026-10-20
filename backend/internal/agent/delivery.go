@@ -25,6 +25,9 @@ func (m *Manager) SendDelivery(id, text, request string, o TurnOptions, files []
 	if e != nil {
 		return e
 	}
+	if err := checkSessionInput(ss); err != nil {
+		return err
+	}
 	if ss.Agent == "claude" && !m.ClaudeDesktopInput {
 		if handled, err := m.sendClaudeRemote(ss, text, request, o, files); handled {
 			return err
@@ -351,6 +354,7 @@ func (m *Manager) steerInput(ss store.Session, text, request string, o TurnOptio
 	if e != nil {
 		return e
 	}
+	defer r.releaseUse()
 	r.mu.Lock()
 	busy, turn := r.busy, r.turn
 	r.mu.Unlock()

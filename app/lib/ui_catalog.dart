@@ -1,5 +1,186 @@
 // App-owned interface strings only. Conversation content is never translated.
 const uiCatalog = <String, List<String>>{
+  "平台已因安全检查结束此会话，请在电脑端查看；原会话不能继续发送": [
+    "The platform ended this chat after a safety check. Review it on the desktop; this chat cannot accept more messages.",
+    "平台已因安全檢查結束此會話，請在電腦端查看；原會話不能繼續傳送",
+    "Платформа завершила чат после проверки безопасности. Откройте его на компьютере; новые сообщения в этот чат недоступны.",
+  ],
+  "平台已暂停此会话，请在电脑端完成安全复核后刷新": [
+    "The platform paused this chat. Complete the safety review on the desktop, then refresh.",
+    "平台已暫停此會話，請在電腦端完成安全覆核後重新整理",
+    "Платформа приостановила чат. Пройдите проверку безопасности на компьютере и обновите чат.",
+  ],
+  "Agent 拒绝了本次请求，请查看原会话说明": [
+    "The agent declined this request. Review the explanation in the original chat.",
+    "Agent 拒絕了本次請求，請查看原會話說明",
+    "Агент отклонил запрос. Посмотрите объяснение в исходном чате.",
+  ],
+  "会话上下文已达上限，请在电脑端压缩上下文或新建会话": [
+    "The chat reached its context limit. Compact it on the desktop or start a new chat.",
+    "會話上下文已達上限，請在電腦端壓縮上下文或新增會話",
+    "Достигнут предел контекста. Сократите контекст на компьютере или создайте новый чат.",
+  ],
+  "Agent 额度或速率已达上限，请查看账号用量后再试": [
+    "The agent reached a usage or rate limit. Check account usage before retrying.",
+    "Agent 額度或速率已達上限，請查看帳號用量後再試",
+    "Достигнут лимит использования или частоты. Проверьте расход аккаунта перед повтором.",
+  ],
+  "Agent 登录或授权已失效，请在电脑端重新授权后再试": [
+    "Agent authentication expired. Authorize it again on the desktop before retrying.",
+    "Agent 登入或授權已失效，請在電腦端重新授權後再試",
+    "Авторизация агента недействительна. Войдите на компьютере и повторите попытку.",
+  ],
+  "Agent 上游连接失败，请检查工作站网络后再试": [
+    "The upstream agent connection failed. Check the workstation network before retrying.",
+    "Agent 上游連線失敗，請檢查工作站網路後再試",
+    "Соединение с сервисом агента потеряно. Проверьте сеть рабочей станции.",
+  ],
+  "Agent 正在自动重试，请等待原会话结果": [
+    "The agent is retrying automatically. Wait for the original chat result.",
+    "Agent 正在自動重試，請等待原會話結果",
+    "Агент повторяет запрос автоматически. Дождитесь результата в исходном чате.",
+  ],
+  "本次输出达到上限，请核对已有回复后决定是否继续": [
+    "This response reached an output limit. Review the existing response before continuing.",
+    "本次輸出達到上限，請核對已有回覆後決定是否繼續",
+    "Достигнут предел ответа. Просмотрите полученный ответ перед продолжением.",
+  ],
+  "Agent 正在等待手机暂不支持的操作，请在电脑端处理后刷新": [
+    "The agent needs an action not supported on the phone yet. Handle it on the desktop, then refresh.",
+    "Agent 正在等待手機暫不支援的操作，請在電腦端處理後重新整理",
+    "Агент ожидает действие, пока недоступное на телефоне. Выполните его на компьютере и обновите чат.",
+  ],
+  "Agent 返回了尚未兼容的会话状态，请在电脑端核对后刷新": [
+    "The agent returned an unsupported chat state. Check it on the desktop, then refresh.",
+    "Agent 回傳了尚未相容的會話狀態，請在電腦端核對後重新整理",
+    "Агент вернул неподдерживаемое состояние чата. Проверьте его на компьютере и обновите чат.",
+  ],
+  "Agent 执行失败，请在电脑端查看具体原因后再试": [
+    "The agent failed. Review the reason on the desktop before retrying.",
+    "Agent 執行失敗，請在電腦端查看具體原因後再試",
+    "Ошибка выполнения агента. Проверьте причину на компьютере перед повтором.",
+  ],
+  "需要处理": ["Action required", "需要處理", "Требуется действие"],
+  "状态未知": ["Unknown state", "狀態未知", "Неизвестное состояние"],
+  "执行失败": ["Execution failed", "執行失敗", "Ошибка выполнения"],
+
+  '查看': ['View', '檢視', 'Просмотр'],
+  '移除': ['Remove', '移除', 'Удалить'],
+  '工作站配对已变化': [
+    'Workstation pairing changed',
+    '工作站配對已變更',
+    'Привязка рабочей станции изменилась',
+  ],
+  '无效发件记录': [
+    'Invalid outbox record',
+    '無效寄件記錄',
+    'Недопустимая запись исходящих',
+  ],
+  "发件箱": ["Outbox", "寄件匣", "Исходящие"],
+  "{0} 条消息待处理": [
+    "{0} messages need attention",
+    "{0} 則訊息待處理",
+    "Сообщений к обработке: {0}",
+  ],
+  "离开会话后继续发送；断网恢复后自动重试。": [
+    "Sending continues after leaving the chat. Retries resume when connected.",
+    "離開會話後繼續傳送；網路恢復後自動重試。",
+    "Отправка продолжается вне чата. После восстановления связи повторяется автоматически.",
+  ],
+  "没有待发送消息": ["No pending messages", "沒有待傳送訊息", "Нет ожидающих сообщений"],
+  "核对使用原请求，不会重复执行；仍无法确认时请查看原会话。": [
+    "Checking reuses the original request. If still unconfirmed, review the original chat.",
+    "核對使用原請求，不會重複執行；仍無法確認時請查看原會話。",
+    "Проверка использует исходный запрос без повторного выполнения. Если результат неясен, проверьте исходный чат.",
+  ],
+  "核对发送结果": ["Check delivery", "核對傳送結果", "Проверить отправку"],
+  "移除本机发送记录？": [
+    "Remove this local delivery record?",
+    "移除本機傳送記錄？",
+    "Удалить локальную запись отправки?",
+  ],
+  "取消待发送消息？": [
+    "Cancel this pending message?",
+    "取消待傳送訊息？",
+    "Отменить ожидающее сообщение?",
+  ],
+  "移除记录不会撤回可能已送达的消息。": [
+    "Removing the record does not recall a message that may already be delivered.",
+    "移除記錄不會撤回可能已送達的訊息。",
+    "Удаление записи не отзывает сообщение, которое могло быть доставлено.",
+  ],
+  "取消后将停止自动重试。": [
+    "Automatic retries will stop.",
+    "取消後將停止自動重試。",
+    "Автоматические повторы будут остановлены.",
+  ],
+  "正在保存消息…": ["Saving message…", "正在儲存訊息…", "Сохранение сообщения…"],
+  "等待发送": ["Waiting to send", "等待傳送", "Ожидание отправки"],
+  "发件箱读取失败，请重试": [
+    "Could not read the outbox. Try again.",
+    "寄件匣讀取失敗，請重試",
+    "Не удалось прочитать исходящие. Повторите попытку.",
+  ],
+  "发件箱已关闭": ["Outbox is closed", "寄件匣已關閉", "Исходящие закрыты"],
+  "发送记录保存失败，消息未提交，请重试": [
+    "Could not save the message. It was not submitted. Try again.",
+    "傳送記錄儲存失敗，訊息未提交，請重試",
+    "Не удалось сохранить сообщение. Оно не отправлено. Повторите попытку.",
+  ],
+  "正在准备发送…": ["Preparing to send…", "正在準備傳送…", "Подготовка к отправке…"],
+  "正在核对发送结果…": ["Checking delivery…", "正在核對傳送結果…", "Проверка отправки…"],
+  "正在上传附件…": ["Uploading attachments…", "正在上傳附件…", "Загрузка вложений…"],
+  "已加入 Agent 队列": [
+    "Added to the agent queue",
+    "已加入 Agent 佇列",
+    "Добавлено в очередь агента",
+  ],
+  "已提交，等待原会话确认": [
+    "Submitted; awaiting the original chat",
+    "已提交，等待原會話確認",
+    "Передано; ожидается подтверждение исходного чата",
+  ],
+  "已送达工作站": [
+    "Delivered to workstation",
+    "已送達工作站",
+    "Доставлено на рабочую станцию",
+  ],
+  "已送达，发送记录保存失败": [
+    "Delivered; could not save the delivery record",
+    "已送達，傳送記錄儲存失敗",
+    "Доставлено; не удалось сохранить запись отправки",
+  ],
+  "发送失败，消息已保留": [
+    "Sending failed; message retained",
+    "傳送失敗，訊息已保留",
+    "Ошибка отправки; сообщение сохранено",
+  ],
+  "发送结果待确认": [
+    "Delivery needs confirmation",
+    "傳送結果待確認",
+    "Требуется подтверждение отправки",
+  ],
+  "等待连接，恢复后自动重试": [
+    "Waiting for connection; retries resume automatically",
+    "等待連線，恢復後自動重試",
+    "Ожидание связи; повтор начнётся автоматически",
+  ],
+  "发送记录保存失败，消息仍在发件箱": [
+    "Could not save delivery status. The message remains in the outbox.",
+    "傳送記錄儲存失敗，訊息仍在寄件匣",
+    "Не удалось сохранить статус. Сообщение остаётся в исходящих.",
+  ],
+  "正在发送，请稍后再操作": [
+    "Sending; try again shortly",
+    "正在傳送，請稍後再操作",
+    "Идёт отправка. Повторите действие позже。",
+  ],
+
+  '需要你的回答': ['Your answer is needed', '需要你的回答', 'Нужен ваш ответ'],
+  '提问已处理': ['Question handled', '提問已處理', 'Вопрос обработан'],
+  '可多选': ['Select one or more', '可多選', 'Можно выбрать несколько'],
+  '其他回答': ['Custom answer', '其他回答', 'Свой ответ'],
+  '跳过回答': ['Skip question', '略過回答', 'Пропустить вопрос'],
   '轻量版': ['Lite', '輕量版', 'Облегчённая'],
   '带语音版': ['With voice', '含語音版', 'С голосом'],
   '{0} · {1}': ['{0} · {1}', '{0} · {1}', '{0} · {1}'],
@@ -1290,6 +1471,11 @@ const uiCatalog = <String, List<String>>{
     'Этот тип ссылок не поддерживается на телефоне.',
   ],
   '重试': ['Retry', '重試', 'Повторить'],
+  '执行详情加载失败，请重试': [
+    'Could not load execution details. Try again.',
+    '執行詳情載入失敗，請重試',
+    'Не удалось загрузить подробности выполнения. Повторите попытку.',
+  ],
   '此格式暂不支持预览，附件可供 agent 读取。': [
     'Preview is not available for this format. The agent can still read the attachment.',
     '此格式暫不支援預覽，附件可供 Agent 讀取。',

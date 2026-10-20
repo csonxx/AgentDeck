@@ -1,6 +1,30 @@
 import 'dart:typed_data';
 
+class SessionIssue {
+  final String code, message, action;
+  final bool blocksInput;
+  const SessionIssue({
+    required this.code,
+    required this.message,
+    this.action = '',
+    this.blocksInput = false,
+  });
+  factory SessionIssue.fromJson(Map<String, dynamic> m) => SessionIssue(
+    code: m['code'] as String? ?? '',
+    message: m['message'] as String? ?? '',
+    action: m['action'] as String? ?? '',
+    blocksInput: m['blocks_input'] == true,
+  );
+  Map<String, dynamic> toJson() => {
+    'code': code,
+    'message': message,
+    'action': action,
+    'blocks_input': blocksInput,
+  };
+}
+
 class AgentSession {
+  final SessionIssue? issue;
   final String id, agent, title, source, status, updated, project, parent;
   final bool managed;
   final int completion;
@@ -17,6 +41,7 @@ class AgentSession {
     this.managed = false,
     this.completion = 0,
     this.completedAt = '',
+    this.issue,
   });
   String get displayTitle =>
       parent.isNotEmpty && source != 'desktop' ? '$title · 手机分支' : title;
@@ -32,6 +57,9 @@ class AgentSession {
     parent: m['parent'] as String? ?? '',
     completion: (m['completion'] as num?)?.toInt() ?? 0,
     completedAt: m['completed_at'] as String? ?? '',
+    issue: m['issue'] is Map && (m['issue']['code'] as String? ?? '').isNotEmpty
+        ? SessionIssue.fromJson(Map<String, dynamic>.from(m['issue']))
+        : null,
   );
 }
 
@@ -173,6 +201,8 @@ class TranscriptBlock {
   final String key, kind, media;
   String role, text, status;
   int first = 0, seq = 0;
+  int position = 0;
+  bool detail = false;
   TranscriptBlock({
     required this.key,
     required this.kind,
@@ -200,6 +230,10 @@ class Transcript {
   int latestLiveCursor = 0;
   int revision = 0;
   int windowVersion = 0;
+  // Direction changes invalidate an in-flight history reply without clearing
+  // what the user is reading. Its eventual response must not evict the new
+  // reading edge or resurrect a window replaced by jump-to-latest.
+  void cancelPaging() => windowVersion++;
   void liveSnapshot(Map<String, dynamic> page) {
     if ((!detached && !readingHistory) || blocks.isEmpty) {
       refreshLatest(page);
@@ -233,6 +267,8 @@ class Transcript {
             'item': b.key.substring(0, b.key.length - b.kind.length - 1),
             'seq': b.seq,
             'first': b.first,
+            'position': b.position,
+            'detail': b.detail,
             'kind': b.kind,
             'role': b.role,
             'text': b.text,
@@ -320,6 +356,8 @@ class Transcript {
     }
     if (seq <= b.seq && b.seq != 0) return;
     b.seq = seq;
+    b.position = (e['position'] as num?)?.toInt() ?? b.position;
+    b.detail = e['detail'] == true;
     if (kind == 'queued_message') b.role = e['role'] as String? ?? b.role;
     revision++;
     final text = cleaned;

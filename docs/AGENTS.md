@@ -13,6 +13,10 @@ Use **Settings** at the upper right of Home to show or hide Codex, Claude Code, 
 | TRAE | 官方 CLI ACP，stdio / official CLI ACP over stdio | 同上；创建、发送、停止、单次审批和已公开思考/工具/图片。 / Same ACP limits, with create, send, cancel, one-time approvals and exposed thoughts/tools/images. |
 | WorkBuddy | 官方 OAuth + 本地助理 OpenAPI / official OAuth and Local Assistant OpenAPI | 每个授权账号一个「本地助理」，在线状态、发送及增量轮询。当前官方本地接口不提供项目切换、新会话、停止或通用工具审批；这些按钮不显示。 / One Local Assistant per authorized account, online status, sending and incremental polling. Its local API does not provide project switching, new chats, cancellation or general tool permissions; unsupported controls are hidden. |
 
+Codex 原生会话使用单一写入者。手机创建的 CLI 会话完成一轮后，S-LOCAL 关闭自己的空闲执行进程；电脑可接管同一 ID，后续手机发送会跟随 Desktop。读取权限不恢复 CLI；空闲时修改权限会短暂恢复原 ID、确认原生设置后释放。正在执行、等待审批及 active Goal 保持原执行方；Goal 完成后自动复查释放。这里没有移除原生写锁，也不保证两个独立执行进程可以同时写入一个会话。
+
+Codex enforces a single native writer. S-LOCAL retires its own idle mobile-created executor after a turn, allowing Desktop to take the same ID; later phone sends follow Desktop. Permission reads never resume a CLI; an idle permission edit briefly resumes the original ID, confirms native settings and releases it. Active turns, approvals and active Goals retain their executor, with release rechecked after Goal completion. Native locks remain enforced; two independent executors cannot write the same chat concurrently.
+
 没有登录或未配置时显示真实错误；不生成示例对话。ACP 恢复失败不自动创建分支；Agent 不支持的能力不以“成功”返回。
 
 Missing login/configuration reports a real error without sample conversations. ACP restore failures do not silently fork. Unsupported operations do not return success.
@@ -114,3 +118,37 @@ OpenCode exposes session rules with Ask / Allow / Deny; native updates append or
 电脑端原生未读状态通过账号及本机连接身份匹配后，经加密连接同步到 App；电脑标记已读后，App 会清除对应蓝点。App 本地查看也会清除手机蓝点，回执保存在手机加密缓存中。**App 回写 Desktop 已读暂未打通**：当前 Desktop 拒绝外部客户端调用原生已读工具；没有直接改写 Desktop 状态文件、关闭校验或重启 Desktop。
 
 Native Desktop unread state is matched to the current account and local execution host, then sent over the encrypted connection. Desktop marking a chat read clears its App dot. Reading on the phone stores a local receipt in its encrypted cache. **Phone-to-Desktop read receipts are not accepted yet**: the installed Desktop rejects external native read-tool clients. No native state file is modified, authorization check disabled, or Desktop restarted.
+
+
+### 交互提问 / Interactive questions
+
+Codex 标准 `requestUserInput`（包含 Desktop 原会话）、Claude `AskUserQuestion` 与 OpenCode `question` 的选项说明、原生单选/多选和自定义答案在独立提问卡片展示；ACP 许可卡片展示 Agent 实际提供的所有许可选项。回复仍经加密通道回到对应原会话，后台重新检查归属和有效期。独立 Option Picker、MCP 任意表单和未公开的 WorkBuddy 交互不属于上述接口，未宣称支持。[详细用法与边界](INPUTS.md#提问与原生选项--questions-and-native-choices)。
+
+Codex standard `requestUserInput` (including original Desktop chats), Claude `AskUserQuestion` and OpenCode `question` render full descriptions, native single/multiple choices and custom answers in separate question cards. ACP permission cards show every option actually offered by the agent. Replies use the encrypted transport and original chat, with server-side ownership and expiry checks. Independent Option Picker, arbitrary MCP forms and unexposed WorkBuddy interactions are not claimed as supported. [Usage and boundaries](INPUTS.md#提问与原生选项--questions-and-native-choices).
+
+### OpenCode 子会话 / Child sessions
+
+OpenCode 原生 `parentID` 非空的会话归属于父会话，不再作为项目或最新会话中的独立聊天计数；不根据标题猜测。原生归档会话同样隐藏，取消归档后可恢复。历史仍按原 ID 加密保存，不删除子 Agent 输出；父会话的任务调用和结果继续展示。需要升级 S-LOCAL，App 重连后同步目录。
+
+OpenCode sessions with a native `parentID` belong to their parent and do not inflate project/recent chat counts. Titles are not used for classification. Archived sessions are hidden and can reappear after unarchiving. Child history remains encrypted under its original ID; parent task calls/results remain visible. Upgrade S-LOCAL and reconnect the app to refresh the catalog.
+
+
+## 异常状态与兼容范围 / Exceptional states and compatibility
+
+从 0.4.45 起，执行状态与结构化异常原因分别同步；会话页不再把失败或未知状态统一显示成就绪。需同步升级 App 与 S-LOCAL，网关只转发密文，无需为此更新网关服务代码。
+
+From 0.4.45, execution state and structured issues travel separately. Failed/unknown states no longer appear ready. Upgrade App and S-LOCAL together; Gateway only relays ciphertext and needs no service code change.
+
+| 原生信号 / Native signal | 行为 / Behavior |
+| --- | --- |
+| Codex `misalignmentPolicyViolation` | 显示平台安全终止或需电脑复核；不继续发送、排队或自动创建分支。复核仅在原生 Desktop 完成，App 不复制开发者级续行指令。/ Show safety termination or required desktop review; no sends, queue insertion or automatic forks. Review stays in the official desktop. |
+| Codex context / usage / auth / network structured errors | 分别提示上下文上限、额度/速率、授权、上游连接问题。未知错误使用明确的通用失败提示，不靠正文关键词判断。/ Distinguish context, limits, auth and connection errors; unknown codes use a generic failure, never message-text heuristics. |
+| Codex Desktop pending requests | 原生已支持的提问继续使用手机提问卡；尚未映射的请求提示电脑处理，不默默忽略。/ Supported questions retain native answer cards; unmapped requests explicitly require desktop handling. |
+| OpenCode `session.error` / `session.status` | 根据已公开的错误类型区分授权、上下文、输出和限额；retry 显示原生重试，error 后的 idle 清理不能覆盖失败，新 busy 回合清除旧异常。/ Structured error types retain their causes; native retries are visible, cleanup idle does not erase failures and a new busy turn clears them. |
+| Claude CLI stream-json | 公开的 API 错误及 result 失败显示原因；未识别错误保留通用失败，不采集私有错误正文。真实 Desktop 仍暂停验收。/ Exposed API/result failures retain safe causes; unknown errors stay generic. Real Desktop acceptance remains paused. |
+| ACP (Qoder/TRAE) | 区分正常结束、取消、输出/回合上限、单次拒绝与未知 stop reason；单次拒绝不封锁整条会话。/ Distinguish completion, cancellation, output/turn limits, per-request refusal and unknown stop reasons; a refusal does not permanently lock the chat. |
+| 新增或未公开状态 / New or private state | 明确显示尚未兼容/需电脑处理；不宣称任意 MCP 表单、独立 Option Picker、私有 WorkBuddy 交互均已兼容。/ Display unsupported state/action explicitly; arbitrary MCP forms, independent Option Picker and private WorkBuddy interactions are not claimed supported. |
+
+旧日志、目录元数据和去重不能抹去安全限制；只有新的权威原生状态才能解除。发送前的原生检查避免用过期缓存执行。发件箱遇到尚未提交的受限会话会保留失败记录；已发出但丢确认的消息仍沿原编号核对，不能换编号盲重发。
+
+Old logs, catalog metadata and deduplication cannot erase a safety restriction; a fresh authoritative state can clear it. Native send preflight avoids relying on stale caches. The outbox retains unsent blocked items; lost acknowledgements still check the original command ID without blindly resubmitting a new turn.

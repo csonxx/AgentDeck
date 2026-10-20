@@ -114,6 +114,28 @@ void main() {
     expect(t.blocks.single.text, 'Refreshed history');
     expect(t.loadingOlder, isFalse);
   });
+  for (final older in [true, false]) {
+    test(
+      'direction reversal discards delayed ${older ? "older" : "newer"} page',
+      () async {
+        final c = DelayedHistoryClient()..selected = 'fixture';
+        addTearDown(c.dispose);
+        c.health.transition(ConnectionPhase.live);
+        final t = Transcript()..add(message(1, 'Visible message'));
+        t.hasMore = true;
+        t.detached = true;
+        c.transcripts['fixture'] = t;
+        final pending = older ? c.loadOlder('fixture') : c.loadNewer('fixture');
+        t.cancelPaging();
+        c.calls.single.complete(page(2, 'Obsolete opposite page'));
+        await pending;
+        expect(t.blocks.single.text, 'Visible message');
+        expect(t.hasMore, isTrue);
+        expect(t.detached, isTrue);
+        expect(t.loadingOlder || t.loadingNewer, isFalse);
+      },
+    );
+  }
   test(
     'transport, sync, connection failure and local storage recover independently',
     () {

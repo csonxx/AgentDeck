@@ -33,6 +33,35 @@ func desktopKey(kind string, ev Event, value string) string {
 	return "desktop/" + kind + "/" + hex.EncodeToString(h[:])
 }
 
+// Preserve a cached protocol reply's row when its presentation becomes readable.
+// Call only for a strictly validated structured user reply, never ordinary text.
+func (s *Store) ExistingDesktopReplyItem(session, source, original, text string) (string, error) {
+	var item string
+	err := s.db.View(func(t *bolt.Tx) error {
+		ev := Event{Session: session, Kind: "message", Role: "user"}
+		kind := "log"
+		if source == "desktop-live" {
+			kind = "native"
+		}
+		keys := []string{desktopKey(kind, ev, original+":0"), desktopKey(kind, ev, original), desktopKey("text", ev, presentation.Clean(text))}
+		for _, key := range keys {
+			var alias desktopAlias
+			if err := s.get(t, "agentconfig", key, &alias); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					continue
+				}
+				return err
+			}
+			if alias.Item != "" {
+				item = alias.Item
+				break
+			}
+		}
+		return nil
+	})
+	return item, err
+}
+
 // Resolve native snapshots and rollout records atomically without merging
 // distinct repeated messages. Alias values are encrypted with the event store.
 func (s *Store) reconcileDesktop(t *bolt.Tx, ev *Event) (bool, error) {
@@ -40,6 +69,9 @@ func (s *Store) reconcileDesktop(t *bolt.Tx, ev *Event) (bool, error) {
 		var ss Session
 		if err := s.get(t, "sessions", ev.Session, &ss); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return false, err
+		}
+		if ss.Issue != ev.Issue {
+			return false, nil
 		}
 		if ss.Status == ev.Status && ev.Status == "completed" && ev.Item != "" {
 			var marker completionMarker
@@ -143,4 +175,18 @@ func olderDesktopEvent(ev Event, ss Session) bool {
 	a, ea := time.Parse(time.RFC3339Nano, ev.Time)
 	b, eb := time.Parse(time.RFC3339Nano, ss.Updated)
 	return ea == nil && eb == nil && a.Before(b)
+}
+
+// Losing a read-only owner subscription must not leave a stale "running" or
+// "ready" claim. CAS prevents overwriting a fresh turn or safety restriction.
+func (s *Store) MarkDesktopUnobserved(id string) error {
+	var previous Session
+	if err := s.Get("sessions", id, &previous); err != nil {
+		return err
+	}
+	if previous.Status == "unknown" || previous.Issue.Code != "" || previous.Updated == "" {
+		return nil
+	}
+	_, _, err := s.appendMode(Event{ID: "desktop-unobserved/" + id + "/" + previous.Updated, Session: id, Agent: previous.Agent, Project: previous.Project, Source: "desktop-live", Kind: "status", Status: "unknown"}, false, false, previous.Updated)
+	return err
 }

@@ -9,6 +9,7 @@ class DeckApplication : Application() {
         FlutterEngine(this).also {
             DownloadBridge.attach(this, it)
             UpdateBridge.attach(this, it)
+            OutboxBridge.attach(this, it)
             it.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
         }
     }

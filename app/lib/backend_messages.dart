@@ -1,5 +1,86 @@
 // App-owned backend messages. Keep wire values and conversation bodies unchanged.
 const backendUiMessages = <String, List<String>>{
+  "提问回答格式无效": [
+    "Invalid question answer format.",
+    "提問回答格式無效",
+    "Неверный формат ответа.",
+  ],
+  "提问已过期": ["This question has expired.", "提問已過期", "Срок ответа истёк."],
+  "请回答每个问题，并核对单选或多选": [
+    "Answer every question and check single or multiple selection.",
+    "請回答每個問題，並核對單選或多選",
+    "Ответьте на все вопросы и проверьте выбор вариантов.",
+  ],
+  "回答中有重复选项": [
+    "The answer contains duplicate choices.",
+    "回答中有重複選項",
+    "Ответ содержит повторяющиеся варианты.",
+  ],
+  "请选择提问提供的选项": [
+    "Choose one of the offered options.",
+    "請選擇提問提供的選項",
+    "Выберите из предложенных вариантов.",
+  ],
+  "回答包含不属于此提问的问题": [
+    "The answer includes an unrelated question.",
+    "回答包含不屬於此提問的問題",
+    "Ответ относится к другому вопросу.",
+  ],
+  "提问题目标识重复": [
+    "The agent returned duplicate question IDs.",
+    "提問題目識別碼重複",
+    "Агент вернул повторяющиеся ID вопросов.",
+  ],
+  "提问已过期或不属于当前会话": [
+    "The question expired or belongs to another chat.",
+    "提問已過期或不屬於目前會話",
+    "Вопрос истёк или относится к другому чату.",
+  ],
+  "提问或审批已过期": [
+    "The question or approval has expired.",
+    "提問或審批已過期",
+    "Вопрос или запрос разрешения истёк.",
+  ],
+  "电脑 Codex 提问状态读取失败，请刷新": [
+    "Could not read the desktop Codex question. Refresh to retry.",
+    "電腦 Codex 提問狀態讀取失敗，請重新整理",
+    "Не удалось прочитать вопрос Codex. Обновите чат.",
+  ],
+  "电脑 Codex 提问会话或项目不匹配": [
+    "The desktop Codex question does not match this chat or project.",
+    "電腦 Codex 提問會話或專案不符",
+    "Вопрос Codex относится к другому чату или проекту.",
+  ],
+  "提问已过期或已在其他设备处理，请刷新": [
+    "This question expired or was handled on another device. Refresh the chat.",
+    "提問已過期或已在其他裝置處理，請重新整理",
+    "Вопрос истёк или обработан на другом устройстве. Обновите чат.",
+  ],
+  "电脑 Codex 尚未确认回答，请刷新核对，勿重复提交": [
+    "Desktop Codex has not confirmed the answer. Refresh before submitting again.",
+    "電腦 Codex 尚未確認回答，請重新整理核對，勿重複提交",
+    "Codex ещё не подтвердил ответ. Обновите чат, прежде чем отправлять повторно.",
+  ],
+  "当前电脑 Codex 接口不支持提问回答": [
+    "This desktop Codex interface cannot accept question answers.",
+    "目前電腦 Codex 介面不支援提問回答",
+    "Этот интерфейс Codex не поддерживает ответы на вопросы.",
+  ],
+  "审批选项格式无效": [
+    "Invalid permission choice format.",
+    "審批選項格式無效",
+    "Неверный формат разрешения.",
+  ],
+  "审批决定与选项不一致": [
+    "The permission decision does not match the selected option.",
+    "審批決定與選項不一致",
+    "Решение не соответствует выбранному разрешению.",
+  ],
+  "审批选项已过期": [
+    "This permission option has expired.",
+    "審批選項已過期",
+    "Этот вариант разрешения истёк.",
+  ],
   "Claude 不支持此图片格式，消息未发送": [
     "Claude does not support this image format. Message not sent.",
     "Claude 不支援此圖片格式，訊息未傳送",

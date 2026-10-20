@@ -288,7 +288,23 @@ func (c *acpConnector) SendInput(ctx context.Context, s store.Session, text, req
 			status = "failed"
 			c.m.emitExternal(s, store.Event{Kind: "notice", Text: AgentNames[c.id] + " 执行失败，请检查登录、网络或模型配置"})
 		}
-		c.m.emitExternal(s, store.Event{Kind: "status", Status: status})
+		issue := store.SessionIssue{}
+		if err != nil {
+			issue = nativeIssue("execution_error")
+		} else {
+			switch string(result.StopReason) {
+			case "end_turn", "cancelled":
+			case "max_tokens", "max_turn_requests":
+				issue = nativeIssue("output_limit")
+			case "refusal":
+				issue = nativeIssue("safety_refusal")
+				status = "failed"
+			default:
+				issue = nativeIssue("unsupported_state")
+				status = "unknown"
+			}
+		}
+		c.m.emitExternal(s, store.Event{Kind: "status", Status: status, Issue: issue})
 	}()
 	return nil
 }
@@ -318,18 +334,41 @@ func (c *acpConnector) Approve(ctx context.Context, s store.Session, key, decisi
 		return errors.New("审批已失效或不属于当前会话")
 	}
 	out := acp.RequestPermissionOutcome{Cancelled: &acp.RequestPermissionOutcomeCancelled{}}
-	kind := acp.PermissionOptionKindRejectOnce
-	if decision == "accept" {
-		kind = acp.PermissionOptionKindAllowOnce
+	var choice struct {
+		Option string `json:"permission_option"`
 	}
-	for _, v := range p.options {
-		if v.Kind == kind {
+	if answer != "" && answer != "{}" {
+		if json.Unmarshal([]byte(answer), &choice) != nil || choice.Option == "" {
+			return errors.New("审批选项格式无效")
+		}
+		for _, v := range p.options {
+			if string(v.OptionId) != choice.Option {
+				continue
+			}
+			allow := v.Kind == acp.PermissionOptionKindAllowOnce || v.Kind == acp.PermissionOptionKindAllowAlways
+			if allow != (decision == "accept") {
+				return errors.New("审批决定与选项不一致")
+			}
 			out = acp.RequestPermissionOutcome{Selected: &acp.RequestPermissionOutcomeSelected{OptionId: v.OptionId}}
 			break
 		}
-	}
-	if decision == "accept" && out.Selected == nil {
-		return errors.New("Agent 没有提供单次允许选项")
+		if out.Selected == nil {
+			return errors.New("审批选项已过期")
+		}
+	} else {
+		kind := acp.PermissionOptionKindRejectOnce
+		if decision == "accept" {
+			kind = acp.PermissionOptionKindAllowOnce
+		}
+		for _, v := range p.options {
+			if v.Kind == kind {
+				out = acp.RequestPermissionOutcome{Selected: &acp.RequestPermissionOutcomeSelected{OptionId: v.OptionId}}
+				break
+			}
+		}
+		if decision == "accept" && out.Selected == nil {
+			return errors.New("Agent 没有提供单次允许选项")
+		}
 	}
 	p.reply <- out
 	delete(r.approvals, key)
@@ -434,7 +473,7 @@ func (r *acpRuntime) RequestPermission(ctx context.Context, p acp.RequestPermiss
 	r.approvals[key] = acpApproval{p.Options, ch}
 	session := r.s
 	r.mu.Unlock()
-	r.c.m.emitExternal(session, store.Event{Kind: "approval", Item: key, Text: jsonText(p.ToolCall), Mode: "snapshot", Status: "pending"})
+	r.c.m.emitExternal(session, store.Event{Kind: "approval", Item: key, Text: jsonText(map[string]any{"toolCall": p.ToolCall, "permission_options": p.Options}), Mode: "snapshot", Status: "pending"})
 	defer func() { r.mu.Lock(); delete(r.approvals, key); r.mu.Unlock() }()
 	select {
 	case outcome := <-ch:

@@ -53,6 +53,7 @@ func (s *Store) SyncClaudeCatalog(entries []Session) error {
 				continue
 			}
 			entry.Managed = old.Managed
+			entry.Issue = old.Issue
 			if old.Managed && old.Updated > entry.Updated {
 				entry.Updated = old.Updated
 			}

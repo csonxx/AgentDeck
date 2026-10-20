@@ -1,4 +1,5 @@
 import 'package:agentdeck/language.dart';
+import 'outbox_fixtures.dart';
 import 'package:agentdeck/core/input.dart';
 import 'package:agentdeck/input_composer.dart';
 import 'package:agentdeck/core/agents.dart';
@@ -19,7 +20,7 @@ class EmptyGatewayVault extends DeviceVault {
   Future<Map<String, dynamic>?> loadGatewayAccount() async => null;
 }
 
-class MemoryLayoutVault extends DeviceVault {
+class MemoryLayoutVault extends MemoryOutgoingVault {
   Map<String, dynamic>? layout;
   @override
   Future<Map<String, dynamic>?> loadProjectLayout() async => layout;
@@ -67,6 +68,14 @@ class OperableClient extends AgentClient {
     transcripts.putIfAbsent(id, Transcript.new);
     notifyListeners();
   }
+
+  @override
+  Future<AgentSession> prepareOutgoingSession(
+    String agent,
+    String project,
+    String parent,
+    String id,
+  ) => createSession(agent, project, parent: parent);
 
   @override
   Future<AgentSession> createSession(
@@ -148,7 +157,7 @@ class PagingClient extends OperableClient {
 
 void main() {
   testWidgets(
-    'unsupported images preserve the draft before adopting a desktop chat or uploading',
+    'unsupported images retain durable input before adopting a desktop chat or uploading',
     (tester) async {
       final c = AttachmentGuardClient();
       addTearDown(c.dispose);
@@ -183,9 +192,11 @@ void main() {
       expect(c.forkedFrom, isEmpty);
       expect(c.uploads, 0);
       c.capabilities.complete({'images': false, 'files': true});
-      expect(await pending, isFalse);
+      expect(await pending, isTrue);
       await tester.pumpAndSettle();
-      expect(composer.controller.text, 'Keep this draft');
+      expect(composer.controller.text, isEmpty);
+      expect(c.outbox.tasks.single.text, 'Keep this draft');
+      expect(c.outbox.tasks.single.state, 'failed');
       expect(c.forkedFrom, isEmpty);
       expect(c.uploads, 0);
       expect(c.sent, isEmpty);

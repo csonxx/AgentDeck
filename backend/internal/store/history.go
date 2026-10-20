@@ -49,6 +49,9 @@ func (s *Store) mergeItem(t *bolt.Tx, ev Event) error {
 	}
 	ev.Mode = "snapshot"
 	ev.First = first
+	if ev.Position == 0 {
+		ev.Position = prev.Position
+	}
 	if err := s.put(t, "transcript", sessionIndexKey(ev.Session, first), ev); err != nil {
 		return err
 	}
@@ -203,4 +206,25 @@ func (s *Store) LiveEvents(session string, after uint64, limit int) ([]Event, ui
 		return nil
 	})
 	return out, cursor, err
+}
+
+// TranscriptItem reads the latest encrypted snapshot without loading a large
+// chat. This is owner-side state, not a public RPC.
+func (s *Store) TranscriptItem(session, item, kind string) (Event, error) {
+	var out Event
+	hash := sha256.Sum256([]byte(session + "\x00" + item + "\x00" + kind))
+	err := s.db.View(func(t *bolt.Tx) error {
+		var first uint64
+		if err := s.get(t, "itemkeys", hex.EncodeToString(hash[:]), &first); err != nil {
+			return err
+		}
+		if err := s.get(t, "transcript", sessionIndexKey(session, first), &out); err != nil {
+			return err
+		}
+		if out.Session != session || out.Item != item || out.Kind != kind {
+			return errors.New("invalid transcript item identity")
+		}
+		return nil
+	})
+	return out, err
 }

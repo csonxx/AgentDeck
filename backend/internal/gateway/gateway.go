@@ -48,6 +48,7 @@ type Server struct {
 	attempts           int
 	Feishu             *Feishu
 	Logger             *slog.Logger
+	Feedback           FeedbackService
 }
 
 func New(db *store.Store, url, pin, trust string, rotation time.Duration) *Server {
@@ -200,7 +201,7 @@ func (g *Server) Close() {
 func (g *Server) Handler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		write(w, map[string]any{"service": "agentdeck-gateway", "version": 2, "feishu_configured": g.Feishu != nil})
+		write(w, map[string]any{"service": "agentdeck-gateway", "version": 2, "feishu_configured": g.Feishu != nil, "feedback_configured": g.Feedback != nil})
 	})
 	m.HandleFunc("GET /v2/local/tunnel", g.tunnel)
 	m.HandleFunc("POST /v2/local/grants", g.register)
@@ -209,6 +210,7 @@ func (g *Server) Handler() http.Handler {
 	m.HandleFunc("/v2/relay/", g.proxy)
 	g.authRoutes(m)
 	g.releaseRoutes(m)
+	g.feedbackRoutes(m)
 	return g.observe(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")

@@ -1,4 +1,5 @@
 import 'package:agentdeck/language.dart';
+import 'outbox_fixtures.dart';
 import 'dart:async';
 import 'package:agentdeck/core/client.dart';
 import 'package:agentdeck/core/model.dart';
@@ -11,7 +12,7 @@ class DesktopClient extends AgentClient {
   final adoption = Completer<AgentSession>();
   final ack = Completer<void>();
   String? parent, sent;
-  DesktopClient() {
+  DesktopClient() : super(vault: MemoryOutgoingVault()) {
     health.transition(ConnectionPhase.live);
     codexDesktop = true;
     projects = [AgentProject(id: 'p', name: 'fixture', path: '/fixture')];
@@ -28,6 +29,13 @@ class DesktopClient extends AgentClient {
     selected = 'original';
     transcripts['original'] = Transcript();
   }
+  @override
+  Future<AgentSession> prepareOutgoingSession(
+    String agent,
+    String project,
+    String parent,
+    String id,
+  ) => createSession(agent, project, parent: parent);
   @override
   Future<AgentSession> createSession(
     String agent,

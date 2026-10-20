@@ -222,6 +222,7 @@ func (n *Normalizer) Parse(raw []byte, agent, source string, st *State) ([]store
 		}
 		return jsonText(v)
 	}
+	var messageErr error
 	message := func(m map[string]any) {
 		role := str(m["role"])
 		if role != "user" && role != "assistant" {
@@ -235,6 +236,30 @@ func (n *Normalizer) Parse(raw []byte, agent, source string, st *State) ([]store
 			id = digest(string(raw))
 		}
 		content := m["content"]
+		if agent == "codex" && role == "user" {
+			rawText, _ := content.(string)
+			if parts := arr(content); len(parts) == 1 {
+				kind := str(obj(parts[0])["type"])
+				if kind == "text" || kind == "input_text" || kind == "output_text" {
+					rawText = str(obj(parts[0])["text"])
+				}
+			}
+			if canonical := asyncReplyItemID(rawText); canonical != "" {
+				item := canonical + ":0"
+				if n.Store != nil {
+					previous, err := n.Store.ExistingDesktopReplyItem(st.Session, source, id, rawText)
+					if err != nil {
+						messageErr = err
+						return
+					}
+					if previous != "" {
+						item = previous
+					}
+				}
+				emit("message", role, asyncReplyDisplay(rawText), item, "snapshot", "")
+				return
+			}
+		}
 		if s, ok := content.(string); ok {
 			emit("message", role, s, id, "snapshot", "")
 			return
@@ -290,6 +315,7 @@ func (n *Normalizer) Parse(raw []byte, agent, source string, st *State) ([]store
 			stop := str(m["stop_reason"])
 			if d["isApiErrorMessage"] == true {
 				emit("status", "", "", "", "", "failed")
+				out[len(out)-1].Issue = claudeSessionIssue(d)
 			} else if stop == "end_turn" || stop == "stop_sequence" {
 				emit("status", "", "", "", "", "completed")
 			}
@@ -324,8 +350,11 @@ func (n *Normalizer) Parse(raw []byte, agent, source string, st *State) ([]store
 				status = "failed"
 			}
 			emit("status", "", status, "", "", status)
+			if status == "failed" {
+				out[len(out)-1].Issue = claudeSessionIssue(d)
+			}
 		}
-		return out, nil
+		return out, messageErr
 	}
 	// The app-server bridge records JSON-RPC notifications without response bodies.
 	if method := str(d["method"]); method != "" {
@@ -344,6 +373,18 @@ func (n *Normalizer) Parse(raw []byte, agent, source string, st *State) ([]store
 		case "turn/completed":
 			status := str(obj(p["turn"])["status"])
 			emit("status", "", status, "", "", status)
+			if status == "failed" {
+				out[len(out)-1].Issue = codexSessionIssue(obj(obj(p["turn"])["error"]))
+			}
+		case "error":
+			// willRetry errors are transient and must not end a running turn.
+			if p["willRetry"] == true {
+				emit("status", "", "", "", "", "running")
+				out[len(out)-1].Issue = nativeIssue("retrying")
+			} else {
+				emit("status", "", "", "", "", "failed")
+				out[len(out)-1].Issue = codexSessionIssue(obj(p["error"]))
+			}
 		case "item/agentMessage/delta":
 			emit("message", "assistant", str(p["delta"]), item, "delta", "")
 		case "item/reasoning/summaryTextDelta":
@@ -391,7 +432,7 @@ func (n *Normalizer) Parse(raw []byte, agent, source string, st *State) ([]store
 				}
 			}
 		}
-		return out, nil
+		return out, messageErr
 	}
 	if t == "event_msg" {
 		switch str(p["type"]) {
@@ -402,7 +443,7 @@ func (n *Normalizer) Parse(raw []byte, agent, source string, st *State) ([]store
 		case "turn_aborted":
 			emit("status", "", "", "", "", "interrupted")
 		}
-		return out, nil
+		return out, messageErr
 	}
 	if t == "response_item" {
 		switch str(p["type"]) {
@@ -422,7 +463,7 @@ func (n *Normalizer) Parse(raw []byte, agent, source string, st *State) ([]store
 			s := resultText(p["output"], str(p["call_id"]))
 			emit("tool_result", "", s, str(p["call_id"])+":result", "snapshot", "")
 		}
-		return out, nil
+		return out, messageErr
 	}
 	// codex exec --json item lifecycle.
 	if s := str(d["thread_id"]); s != "" {
@@ -452,7 +493,7 @@ func (n *Normalizer) Parse(raw []byte, agent, source string, st *State) ([]store
 			emit("file_change", "", jsonText(v["changes"]), id, "snapshot", "")
 		}
 	}
-	return out, nil
+	return out, messageErr
 }
 
 func imageURL(v map[string]any) string {

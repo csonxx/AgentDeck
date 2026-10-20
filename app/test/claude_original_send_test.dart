@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'outbox_fixtures.dart';
 import 'package:agentdeck/core/client.dart';
 import 'package:agentdeck/core/model.dart';
 import 'package:agentdeck/language.dart';
@@ -8,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 class OriginalClaudeClient extends AgentClient {
   final commands = <Map<String, dynamic>>[];
-  OriginalClaudeClient() {
+  OriginalClaudeClient() : super(vault: MemoryOutgoingVault()) {
     health.transition(ConnectionPhase.live);
     projects = [AgentProject(id: 'p', name: 'fixture', path: '/fixture')];
     sessions = [

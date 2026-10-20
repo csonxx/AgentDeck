@@ -131,3 +131,42 @@ On other platforms, supply non-private mono 16kHz WAV files and the above refere
 0.4.6 GM1900 原生 release：上述 6 句实际运行同一手机 worker，错误仍为 9/142；预热后首段 430–759 ms，短句释放后的校正 233–369 ms。34.66 秒带停顿组合句为 11/142 错误，停顿处单块校正最多 428 ms。首次复制/校验/加载 12.75 秒。计时为非麦克风的合成 PCM 重放，从送入模型起，不包括长按触发、录音器启动/停止、用户语音或噪声。生产包约 274.7 MB；音频及测速界面不在生产包。
 
 Native 0.4.6 release on GM1900 ran the same phone worker: 9/142 errors across the six sentences, 430–759 ms to first warmed partial text, and 233–369 ms correction after releasing short phrases. A 34.66-second combined sample with pauses had 11/142 errors and at most 428 ms compute on a pause-correction chunk. Initial copy/hash/load took 12.75 seconds. These are synthetic PCM replay measurements without a microphone, timed from model feeding and excluding hold detection/recorder startup-stop/user speech/noise. The production package is about 274.7 MB and contains neither fixture audio nor the measurement screen.
+
+
+## 提问与原生选项 / Questions and native choices
+
+Agent 提问显示为「需要你的回答」，与执行许可分开。完整展示题目、选项说明，按原生定义提供单选、多选和其他回答；没有默认替用户提交。多题须完成后一起提交。提交中禁用重复操作，失败保留当前选择。已在电脑或其他设备处理的提问会失效，后端会再次核对当前会话和项目，不能拿另一会话的提问 ID 代答。
+
+Questions appear as “Your answer is needed”, separately from tool permissions. The app shows question text, option descriptions, native single/multiple selection and custom input where offered. No answer is auto-submitted. All questions are answered together; sending disables duplicate taps and errors preserve selections. The workstation rechecks the original session, project and pending request before replying.
+
+| Agent / 入口 | 答案回传 / Native response |
+| --- | --- |
+| Codex 后端管理的 app-server 会话 / Local-managed app-server | `item/tool/requestUserInput`，按问题 ID 回传 `answers: string[]` / Question IDs and answer arrays |
+| Codex Desktop 原会话 / Original Desktop chat | 从 owner 的实时 `requests` 读取，重新核对后通过 `thread-follower-submit-user-input` 回传，保持原会话；不启动替代 CLI / Read the owner's requests, revalidate, reply through the native follower interface; no replacement CLI |
+| Codex Desktop 异步选择题 / Desktop asynchronous choices | 从原生 `agentMessage.questions` 读取题目和选项；回答通过原 owner 的普通用户输入发送，执行中 steer、结束后同 ID 续聊。保持原生 questionItemId，不获取写锁、不启动 CLI。 / Read native message questions; send ordinary human replies through the original owner, steering an active turn or continuing the same ID after completion. Preserve native question IDs without another writer. |
+| Claude Code CLI / Desktop | `AskUserQuestion`，支持 `multiSelect`，在 SDK 边界按原生 string answer map 回传 / Preserves multi-select through the SDK string answer map |
+| OpenCode | `question.asked/replied/rejected`、`GET /question`、`POST /question/:id/reply`；按题目原顺序传二维答案数组 / Original-order answer arrays and pending recovery on reconnect |
+| Qoder / TRAE ACP | 完整展示原生 `request_permission.options`，只回传用户明确选择的原生 `optionId`，不伪造 Agent 未提供的提问接口 / Exact native permission options and explicit option IDs; no invented question endpoint |
+
+异步选择题支持原生选项及其他回答，多个题目一次提交；在电脑回答后，手机卡片同步收起。回答接收未确认时只核对原生记录，不自动重复发送；已确认的相同回答可安全重复提交请求而不再发送给 Agent。跳过异步回答仅在 App 收起卡片，不向 Agent 发送“同意”、不停止任务。问题和回答仍加密存储。当前 0.4.45 App 已有这些卡片的渲染能力，更新 S-LOCAL 即可，无需重新安装 APK。
+
+Async choices support native options and custom text, with grouped submission and desktop-to-phone resolution. An unknown acknowledgement is confirmed against native records without resending; confirmed identical retries do not send again. Skipping only dismisses the App card and neither approves a tool nor stops execution. Storage remains encrypted. The existing 0.4.45 App already renders these cards; upgrade S-LOCAL without reinstalling the APK.
+
+工作站仍通过现有加密通道传输提问和答案，网关不解析明文。本次 Claude 只做协议测试，不启用或操作 Desktop 调试入口。较新的 Codex 原生 Option Picker / 动态工具和 MCP 任意表单不等同于 `requestUserInput`；当前 Desktop follower 接口未提供这些类型的通用回答入口，不宣称支持。WorkBuddy 未提供的交互也不伪装成可回答。
+
+Questions and answers use the existing encrypted transport; the gateway does not read plaintext. Claude validation for this change uses protocol fixtures, without enabling its Desktop debugger. Newer Codex Option Picker/dynamic tools and arbitrary MCP forms are distinct protocols; the current Desktop follower API has no generic reply route for them, so they are not claimed as supported. WorkBuddy interactions without an exposed API are not presented as answerable.
+
+
+## 执行过程按需读取 / Execution details on demand
+
+0.4.46 App 与更新后的 S-LOCAL 配合使用：打开会话、历史翻页和实时推送只传思考/工具/文件变更的短摘要。展开「执行过程」只列摘要；点击具体一项才拉取该记录的最新全文，加载中转圈，失败可重试。已展开项继续同步更新；收起后释放详情，后续更新不会在后台重新下载全文。消息、图片、提问和执行许可维持原交互。
+
+With App 0.4.46 and the updated S-LOCAL, initial history, paging and live pushes carry short execution summaries. Expanding the group lists summaries; opening a specific item fetches its latest body with progress/retry. Open items stay current; closing releases the body and stops further detail fetches. Messages, media, questions and permissions retain their normal behavior.
+
+提问卡按原生来源位置展示，不再因为后端补发而堆到最后；没有独立文字消息的提问也保留前序位置。展示顺序与持久化游标分开，保留完整历史和分页边界。旧缓存的已处理异步卡片在读取时补齐位置。
+
+Question cards follow their native source position, including questions without a separate text message and older resolved cached cards. Presentation order is independent of durable paging coordinates, preserving history boundaries.
+
+协议兼容：新 App 对 watch/history/history_after/history_at 请求声明 `compact: true`；执行摘要带 `detail: true`，具体项经现有加密通道调用 `item_detail(session,item,kind)`。仅允许思考、工具调用/输出及文件变更，不开放任意 RPC 或文件读取。旧 App 不声明 compact，继续收到原格式；旧 Local 不支持 compact 时，新 App 仍兼容全文，但需要升级 Local 才有按需加载的流量收益。
+
+New clients opt into compact history/live snapshots and retrieve individual execution details over the existing encrypted channel. The endpoint accepts only supported execution record kinds and preserves exact session/item identity. Older clients retain the full protocol; older Locals remain usable but require an upgrade for deferred-transfer savings.

@@ -142,10 +142,13 @@ func TestRuntimeApprovalAndStop(t *testing.T) {
 				deadline := time.Now().Add(5 * time.Second)
 				for time.Now().Before(deadline) {
 					if kind == "message" {
-						run, _ := m.get(ss.ID)
-						run.mu.Lock()
-						busy := run.busy
-						run.mu.Unlock()
+						run := m.liveRuntime(ss.ID)
+						busy := false
+						if run != nil {
+							run.mu.Lock()
+							busy = run.busy
+							run.mu.Unlock()
+						}
 						if busy {
 							time.Sleep(20 * time.Millisecond)
 							continue
@@ -226,11 +229,15 @@ func TestRuntimeNativePermissionInheritanceAcrossCreateForkAndResume(t *testing.
 			r := m.runs[ss.ID]
 			delete(m.runs, ss.ID)
 			m.mu.Unlock()
-			r.close()
-			<-r.done
-			if _, err := m.get(ss.ID); err != nil {
+			if r != nil {
+				r.close()
+				<-r.done
+			}
+			resumed, err := m.get(ss.ID)
+			if err != nil {
 				t.Fatal("resume replaced native permission policy", err)
 			}
+			resumed.releaseUse()
 		})
 	}
 }

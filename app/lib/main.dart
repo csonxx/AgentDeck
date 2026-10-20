@@ -3,7 +3,6 @@ import 'language.dart';
 import 'dart:io';
 import 'dart:async';
 import 'core/local_speech.dart';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart'
     show LicenseRegistry, LicenseEntryWithLineBreaks;
@@ -34,9 +33,12 @@ import 'app_lock.dart';
 import 'activity_group.dart';
 import 'app_update_page.dart';
 import 'progressive_text.dart';
-import 'approval_details.dart';
+import 'approval_tile.dart';
+export 'approval_tile.dart' show ApprovalTile;
 import 'reading_scroll_view.dart';
 import 'core/conversation_presentation.dart';
+import 'core/outbox.dart';
+import 'outbox_page.dart';
 import 'client_status.dart';
 import 'loading_image.dart';
 export 'running_indicator.dart';
@@ -841,6 +843,7 @@ class _DeckHomeState extends State<DeckHome> {
             ],
           ),
         ),
+        OutboxSummary(client: c),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
           child: Column(
@@ -1156,6 +1159,15 @@ class _DeckHomeState extends State<DeckHome> {
           ],
         ),
       ),
+      const SizedBox(height: 12),
+      ListTile(
+        leading: const Icon(Icons.outbox_outlined),
+        title: Text(context.tr('发件箱')),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute<void>(builder: (_) => OutboxPage(client: c)),
+        ),
+      ),
       const SizedBox(height: 26),
       ListTile(
         contentPadding: EdgeInsets.zero,
@@ -1217,6 +1229,18 @@ class _DeckHomeState extends State<DeckHome> {
   );
 }
 
+String sessionStatusText(BuildContext context, AgentSession s) => context.tr(
+  s.issue != null
+      ? '需要处理'
+      : switch (s.status) {
+          'failed' => '执行失败',
+          'interrupted' => '已中断',
+          'unknown' => '状态未知',
+          'waiting' => '等待确认',
+          _ => '就绪',
+        },
+);
+
 class StatusLabel extends StatelessWidget {
   final String status;
   const StatusLabel(this.status, {super.key});
@@ -1228,6 +1252,7 @@ class StatusLabel extends StatelessWidget {
       'completed' => context.tr('已完成'),
       'failed' => context.tr('失败'),
       'interrupted' => context.tr('已中断'),
+      'unknown' => context.tr('状态未知'),
       _ => context.tr('空闲'),
     },
     style: TextStyle(
@@ -1608,19 +1633,15 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
 
   final prompt = TextEditingController();
   late AgentSession active;
-  bool sending = false;
-  String sendStage = '';
-  final List<InputReceipt> inputReceipts = [];
+  bool savingMessage = false;
+  List<OutgoingMessage> get outgoing => c.outbox.forSession(active.id);
+  bool get sending => savingMessage || outgoing.any((t) => t.running);
+  String get sendStage =>
+      outgoing.where((t) => t.pending).lastOrNull?.stage ?? '正在保存消息…';
+  List<Object?> get sendStageArgs => const [];
+  List<InputReceipt> get inputReceipts =>
+      outgoing.where((t) => t.showReceipt).map((t) => t.receipt).toList();
   InputReceipt? get receipt => inputReceipts.lastOrNull;
-  set receipt(InputReceipt? value) {
-    if (value == null) {
-      if (inputReceipts.isNotEmpty) {
-        inputReceipts.removeLast();
-      }
-    } else {
-      inputReceipts.add(value);
-    }
-  }
 
   Transcript? _sectionTranscript;
   int _sectionRevision = -1;
@@ -1633,7 +1654,6 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
       !_sections.any(
         (section) => section.activity && _activityExpanded(section),
       );
-  List<Object?> sendStageArgs = const [];
   bool follow = true;
   String? focusedRecord;
   GlobalKey focusAnchor = GlobalKey();
@@ -1649,6 +1669,19 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
   }
 
   void _updated() {
+    active = c.sessions.where((s) => s.id == active.id).firstOrNull ?? active;
+    if (readingRoute?.isCurrent == true) {
+      final moved = outgoing.where((t) => t.session != active.id).lastOrNull;
+      if (moved != null) {
+        final target = c.sessions
+            .where((s) => s.id == moved.session)
+            .firstOrNull;
+        if (target != null) {
+          active = target;
+          unawaited(c.watch(target.id).catchError((Object _) {}));
+        }
+      }
+    }
     _schedulePaging();
     if (follow) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1935,6 +1968,7 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
       showChildren: false,
       tile: _block,
       onToggle: () => setState(() {
+        readingView.currentState?.anchorReadingPosition();
         if (section.contains(focusedRecord)) focusedRecord = null;
         activityOverrides[section.key] = !expanded;
       }),
@@ -1946,152 +1980,17 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
     List<DraftFile> files, {
     String delivery = 'send',
   }) async {
-    final trackInput =
-        delivery == 'send' || delivery == 'queue' && active.agent == 'claude';
-    bool nativeSubmitted = false;
-    InputReceipt? submission;
     final text = prompt.text.trim();
-    if (text.isEmpty && files.isEmpty || sending) return false;
-    setState(() {
-      sending = true;
-      if (trackInput) {
-        submission = InputReceipt(
-          id: AgentClient.requestID(),
-          matchText: text,
-          baselineUpdated:
-              c.sessions.where((s) => s.id == active.id).firstOrNull?.updated ??
-              active.updated,
-          text: [
-            text,
-            ...files.map((f) => f.name),
-          ].where((v) => v.isNotEmpty).join('\n'),
-          cursor: c.transcripts[active.id]?.cursor ?? 0,
-        );
-        receipt = submission;
-      }
-      sendStageArgs = const [];
-      sendStage = !active.managed
-          ? ((active.agent == 'codex' && c.codexDesktop) ||
-                    active.agent == 'claude'
-                ? '正在连接电脑原会话…'
-                : '正在建立续聊会话…')
-          : '正在发送…';
-    });
-    bool requestStarted = false;
+    if (text.isEmpty && files.isEmpty || savingMessage) return false;
+    setState(() => savingMessage = true);
     try {
-      if (files.any((file) => file.image)) {
-        setState(() => sendStage = '正在检查图片支持…');
-        await c.validateAttachments(active.agent, active.id, files);
-      }
-      if (!active.managed) {
-        final projects = c.projects
-            .where((p) => p.path == active.project)
-            .toList();
-        if (projects.isEmpty) {
-          throw const HttpException('此项目尚未授权，需在后端配置 project-roots');
-        }
-        active = await c.createSession(
-          active.agent,
-          projects.first.id,
-          parent: active.id,
-        );
-        if (trackInput) {
-          submission?.cursor = c.transcripts[active.id]?.cursor ?? 0;
-        }
-      }
+      await c.outbox.enqueue(active, text, options, files, delivery);
       if (mounted) {
-        setState(
-          () =>
-              sendStage = active.source == 'desktop' ? '正在发送到电脑原会话…' : '正在发送…',
-        );
+        if (prompt.text.trim() == text) prompt.clear();
+        setState(() => follow = true);
       }
-      if (!options.inherited) {
-        await c.saveTurnOptions(active.id, options);
-      }
-      final uploads = <String>[];
-      for (final file in files) {
-        uploads.add(
-          await c.uploadFile(
-            active.id,
-            file,
-            progress: (done, total) {
-              if (mounted) {
-                setState(() {
-                  sendStage = '上传 {0} {1}%';
-                  sendStageArgs = [file.name, (done * 100 / total).round()];
-                });
-              }
-            },
-          ),
-        );
-      }
-      if (mounted) {
-        setState(
-          () =>
-              sendStage = active.source == 'desktop' ? '正在发送到电脑原会话…' : '正在发送…',
-        );
-      }
-      requestStarted = true;
-      await c.sendDelivery(
-        active.id,
-        text,
-        options,
-        uploads,
-        delivery,
-        requestId: submission?.id,
-      );
-      if (trackInput) {
-        nativeSubmitted = c.consumeSubmittedInput(submission!.id);
-        submission?.nativeMessageID = c.consumeSubmittedMessageID(
-          submission!.id,
-        );
-        final queued = c.consumeQueuedInput(submission!.id);
-        if (queued) {
-          inputReceipts.remove(submission);
-          try {
-            c.queues[active.id] = await c.queue(active.id);
-          } catch (_) {
-            // The encrypted stream will deliver the durable queue snapshot.
-          }
-        } else if (nativeSubmitted) {
-          submission?.phase = InputDeliveryPhase.submitted;
-        } else if (delivery == 'send') {
-          submission?.phase = InputDeliveryPhase.accepted;
-        } else {
-          inputReceipts.remove(submission);
-        }
-      }
-      if (mounted &&
-          active.source == 'desktop' &&
-          delivery != 'send' &&
-          !nativeSubmitted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.tr(
-                delivery == 'queue'
-                    ? '已加入 Codex 原生队列'
-                    : delivery == 'steer'
-                    ? '已引导当前任务'
-                    : '已发送到电脑原会话',
-              ),
-            ),
-          ),
-        );
-      }
-      if (mounted) {
-        prompt.clear();
-      }
-      follow = true;
       return true;
     } catch (e) {
-      if (trackInput) {
-        if (requestStarted && !(e is AgentRequestException && e.notSent)) {
-          submission?.phase = InputDeliveryPhase.uncertain;
-        } else {
-          inputReceipts.remove(submission);
-        }
-      }
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -2099,7 +1998,7 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
       }
       return false;
     } finally {
-      if (mounted) setState(() => sending = false);
+      if (mounted) setState(() => savingMessage = false);
     }
   }
 
@@ -2134,27 +2033,16 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
       final blocks = _sectionBlocks;
       final latest =
           c.sessions.where((s) => s.id == active.id).firstOrNull ?? active;
-      for (final r in inputReceipts) {
-        r.reconcile(blocks);
-      }
-      inputReceipts.removeWhere(
-        (r) =>
-            r.responded(blocks) ||
-            (r.observed(blocks) &&
-                !r.waiting(
-                  blocks,
-                  status: latest.status,
-                  updated: latest.updated,
-                )),
-      );
       final waiting = inputReceipts.any(
         (r) =>
+            r.phase != InputDeliveryPhase.preparing &&
             r.waiting(blocks, status: latest.status, updated: latest.updated),
       );
       final pending =
           latest.status == 'pending' || (waiting && latest.status != 'running');
       final running =
           c.live &&
+              latest.issue?.blocksInput != true &&
               (latest.status == 'running' ||
                   latest.status == 'waiting' ||
                   pending ||
@@ -2188,9 +2076,6 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
       final activityCount = sections.where((s) => s.activity).length;
       final receiptLabel = sending
           ? context.tr(sendStage, sendStageArgs)
-          : receipt?.phase == InputDeliveryPhase.uncertain &&
-                receipt?.observed(blocks) != true
-          ? context.tr('未确认送达，请先核对会话，避免重复发送')
           : waiting
           ? context.tr(
               receipt?.phase == InputDeliveryPhase.submitted &&
@@ -2199,7 +2084,10 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
                   : '已送达，等待 Agent 响应…',
             )
           : '';
-      final showRunningTail = running && transcript?.detached != true;
+      final showRunningTail =
+          running &&
+          transcript?.detached != true &&
+          !outgoing.any((t) => t.pending);
       final rowByKey = {for (final row in rows) _rowKey(row): row};
       final rowKeys = [
         'padding-bottom',
@@ -2280,12 +2168,33 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
                     ),
                   ] else
                     Text(
-                      c.live ? context.tr('就绪') : context.tr('状态待同步'),
+                      c.live
+                          ? sessionStatusText(context, latest)
+                          : context.tr('状态待同步'),
                       style: const TextStyle(color: muted, fontSize: 12),
                     ),
                 ],
               ),
             ),
+            if (latest.issue != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: Semantics(
+                  liveRegion: true,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF4E5),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      context.tr(latest.issue!.message),
+                      style: const TextStyle(fontSize: 12, height: 1.5),
+                    ),
+                  ),
+                ),
+              ),
             if (!c.live && !c.demo)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -2326,6 +2235,7 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                   ),
                   onPressed: () => setState(() {
+                    readingView.currentState?.anchorReadingPosition();
                     expandAllActivities = !expandAllActivities;
                     activityOverrides.clear();
                     focusedRecord = null;
@@ -2350,7 +2260,9 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
                     },
                     child: NotificationListener<ScrollNotification>(
                       onNotification: (notification) {
-                        if (notification.depth != 0) return false;
+                        if (notification.depth != 0 || scroll.correcting) {
+                          return false;
+                        }
                         if (notification is ScrollStartNotification &&
                             notification.dragDetails != null) {
                           readingView.currentState?.anchorReadingPosition();
@@ -2364,13 +2276,23 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
                               : (notification as OverscrollNotification)
                                     .overscroll;
                           if (delta != 0 && !jumping) {
+                            final direction = delta > 0 ? 1 : -1;
+                            if (direction != pagingDirection) {
+                              seekingDialogue = 0;
+                              if (direction > 0 &&
+                                      transcript?.loadingNewer == true ||
+                                  direction < 0 &&
+                                      transcript?.loadingOlder == true) {
+                                transcript?.cancelPaging();
+                              }
+                            }
                             // Keep newly streamed items out of the window being
                             // read. Existing items can still receive updates;
                             // forward paging rejoins the live tail.
                             if (delta > 0 && transcript != null) {
                               transcript.readingHistory = true;
                             }
-                            pagingDirection = delta > 0 ? 1 : -1;
+                            pagingDirection = direction;
                             _schedulePaging();
                           }
                           final v =
@@ -2563,7 +2485,9 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
                         agent: active.agent,
                         running: running,
                       ),
+                    ConversationOutbox(client: c, session: active.id),
                     InputComposer(
+                      durableSending: true,
                       client: c,
                       session: active.id,
                       agent: active.agent,
@@ -2573,7 +2497,9 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
                           running &&
                           (active.managed ||
                               active.agent == 'codex' && c.codexDesktop),
-                      canSend: c.agentInfo(active.agent).canSend,
+                      canSend:
+                          c.agentInfo(active.agent).canSend &&
+                          latest.issue?.blocksInput != true,
                       onSend: submit,
                       onDelivery: (options, files, mode) =>
                           submit(options, files, delivery: mode),
@@ -2619,11 +2545,85 @@ class _TranscriptTileState extends State<TranscriptTile> {
   String? _text, _status, _session;
   bool? _connected;
   late bool _expanded = widget.initiallyExpanded;
+  String? _detailText;
+  int _detailSeq = 0, _detailGeneration = 0;
+  bool _detailLoading = false, _detailError = false;
+  Timer? _detailTimer;
+  String get _bodyText => block.detail ? (_detailText ?? '') : block.text;
+
+  void _clearDetail() {
+    _detailGeneration++;
+    _detailTimer?.cancel();
+    _detailTimer = null;
+    _detailText = null;
+    _detailSeq = 0;
+    _detailLoading = false;
+    _detailError = false;
+  }
+
+  Future<void> _loadDetail() async {
+    _detailTimer?.cancel();
+    _detailTimer = null;
+    if (!mounted || !_expanded || !block.detail || _detailLoading) return;
+    final generation = ++_detailGeneration;
+    setState(() {
+      _detailLoading = true;
+      _detailError = false;
+      _rendered = null;
+    });
+    try {
+      final event = await client.executionDetail(session, block);
+      final item = block.key.substring(
+        0,
+        block.key.length - block.kind.length - 1,
+      );
+      if (event['session'] != session ||
+          event['item'] != item ||
+          event['kind'] != block.kind ||
+          event['detail'] == true) {
+        throw const FormatException();
+      }
+      if (!mounted || generation != _detailGeneration || !_expanded) return;
+      setState(() {
+        _detailText = event['text'] as String? ?? '';
+        _detailSeq = (event['seq'] as num).toInt();
+        _rendered = null;
+      });
+    } catch (_) {
+      if (mounted && generation == _detailGeneration) {
+        setState(() {
+          _detailError = true;
+          _rendered = null;
+        });
+      }
+    } finally {
+      if (mounted && generation == _detailGeneration) {
+        setState(() {
+          _detailLoading = false;
+          _rendered = null;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _detailTimer?.cancel();
+    _detailGeneration++;
+    super.dispose();
+  }
+
   @override
   void didUpdateWidget(covariant TranscriptTile oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.session != session || oldWidget.block.key != block.key) {
+      _clearDetail();
+      _expanded = widget.initiallyExpanded;
+      _rendered = null;
+    }
     if (widget.initiallyExpanded != oldWidget.initiallyExpanded) {
       _expanded = widget.initiallyExpanded;
+      if (!_expanded) _clearDetail();
       _rendered = null;
     }
   }
@@ -2636,6 +2636,14 @@ class _TranscriptTileState extends State<TranscriptTile> {
 
   @override
   Widget build(BuildContext context) {
+    if (_expanded &&
+        block.detail &&
+        !_detailLoading &&
+        !_detailError &&
+        _detailTimer == null &&
+        (_detailText == null || _detailSeq < block.seq)) {
+      _detailTimer = Timer(const Duration(milliseconds: 150), _loadDetail);
+    }
     // Reuse unchanged Markdown subtrees during stream ticks and typing.
     if (_rendered == null ||
         _text != block.text ||
@@ -2653,7 +2661,7 @@ class _TranscriptTileState extends State<TranscriptTile> {
 
   Widget markdown(BuildContext context) => ProgressiveText(
     key: ValueKey('message-body-${block.key}'),
-    text: block.text,
+    text: _bodyText,
     builder: (text) => markdownBody(context, text),
   );
   Widget markdownBody(BuildContext context, String text) => MarkdownBody(
@@ -2836,10 +2844,14 @@ class _TranscriptTileState extends State<TranscriptTile> {
         ),
         child: ExpansionTile(
           initiallyExpanded: _expanded,
-          onExpansionChanged: (value) => setState(() {
-            _expanded = value;
-            _rendered = null;
-          }),
+          onExpansionChanged: (value) {
+            setState(() {
+              _expanded = value;
+              if (!value) _clearDetail();
+              _rendered = null;
+            });
+            if (value && block.detail) unawaited(_loadDetail());
+          },
           shape: const Border(),
           collapsedShape: const Border(),
           dense: true,
@@ -2864,24 +2876,47 @@ class _TranscriptTileState extends State<TranscriptTile> {
           ),
           children: _expanded
               ? [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: block.kind == 'thinking'
-                        ? markdown(context)
-                        : ProgressiveText(
-                            key: ValueKey('tool-body-${block.key}'),
-                            text: block.text,
-                            step: 4000,
-                            builder: (text) => SelectableText(
-                              text,
-                              style: const TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize: 12,
-                                height: 1.6,
+                  if (_detailLoading)
+                    const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  if (_detailError)
+                    Column(
+                      children: [
+                        Text(
+                          context.tr('执行详情加载失败，请重试'),
+                          style: const TextStyle(fontSize: 12, color: muted),
+                        ),
+                        TextButton(
+                          onPressed: _loadDetail,
+                          child: Text(context.tr('重试')),
+                        ),
+                      ],
+                    ),
+                  if (!block.detail || _detailText != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: block.kind == 'thinking'
+                          ? markdown(context)
+                          : ProgressiveText(
+                              key: ValueKey('tool-body-${block.key}'),
+                              text: _bodyText,
+                              step: 4000,
+                              builder: (text) => SelectableText(
+                                text,
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 12,
+                                  height: 1.6,
+                                ),
                               ),
                             ),
-                          ),
-                  ),
+                    ),
                 ]
               : const [],
         ),
@@ -2978,172 +3013,6 @@ class _TranscriptTileState extends State<TranscriptTile> {
               label: Text(context.tr('复制')),
             ),
         ],
-      ),
-    );
-  }
-}
-
-class ApprovalTile extends StatefulWidget {
-  final TranscriptBlock block;
-  final AgentClient client;
-  final String session;
-  const ApprovalTile({
-    super.key,
-    required this.block,
-    required this.client,
-    required this.session,
-  });
-  @override
-  State<ApprovalTile> createState() => _ApprovalTileState();
-}
-
-class _ApprovalTileState extends State<ApprovalTile> {
-  bool busy = false;
-  final Map<String, String> answers = {};
-  Future<void> decide(String decision) async {
-    setState(() => busy = true);
-    try {
-      await widget.client.approve(
-        widget.session,
-        widget.block.key.replaceFirst(RegExp(r':approval$'), ''),
-        decision,
-        answer: jsonEncode(answers),
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(context.trError(e))));
-      }
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final b = widget.block;
-    if (b.status != 'pending') return const SizedBox.shrink();
-    Map<String, dynamic> params = {};
-    try {
-      params = Map<String, dynamic>.from(jsonDecode(b.text));
-    } catch (_) {}
-    final questions =
-        (params['questions'] ??
-                (params['input'] is Map ? params['input']['questions'] : null))
-            as List? ??
-        [];
-    final title =
-        (params['tool_name'] ??
-                params['command'] ??
-                params['reason'] ??
-                context.tr('Agent 请求操作许可'))
-            .toString();
-    final description =
-        (params['description'] ??
-                params['reason'] ??
-                params['input'] ??
-                params['permissions'] ??
-                '')
-            .toString();
-    return Card(
-      color: const Color(0xFFFFF3DD),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              context.tr('需要你的确认'),
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-            ),
-            if (description.isNotEmpty)
-              Text(
-                description,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12),
-              ),
-            TextButton(
-              onPressed: () => showApprovalDetails(context, params, b.text),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.unfold_more, size: 18),
-                  const SizedBox(width: 6),
-                  Flexible(child: Text(context.tr('展开完整执行内容'))),
-                ],
-              ),
-            ),
-            for (final q in questions)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(q['question']?.toString() ?? ''),
-                    TextFormField(
-                      key: ValueKey(
-                        '${q['id'] ?? q['question']}:${answers[(q['id'] ?? q['question']).toString()]}',
-                      ),
-                      initialValue:
-                          answers[(q['id'] ?? q['question']).toString()] ?? '',
-                      decoration: InputDecoration(
-                        labelText: context.tr('你的回答'),
-                      ),
-                      onChanged: (v) =>
-                          answers[(q['id'] ?? q['question']).toString()] = v,
-                    ),
-
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        for (final o in q['options'] as List? ?? [])
-                          ActionChip(
-                            label: Text(o['label']?.toString() ?? ''),
-                            onPressed: () {
-                              setState(
-                                () =>
-                                    answers[(q['id'] ?? q['question'])
-                                            .toString()] =
-                                        o['label']?.toString() ?? '',
-                              );
-                            },
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                TextButton(
-                  onPressed: busy ? null : () => decide('decline'),
-                  child: Text(context.tr('拒绝')),
-                ),
-                const Spacer(),
-                FilledButton(
-                  onPressed: busy ? null : () => decide('accept'),
-                  child: Text(
-                    busy
-                        ? context.tr('提交中…')
-                        : questions.isEmpty
-                        ? context.tr('允许此次')
-                        : context.tr('提交回答'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }

@@ -39,7 +39,7 @@ func testDesktopInputWire(t *testing.T, rich bool) {
 			return
 		}
 		defer c.Close()
-		for step := 0; step < 3; step++ {
+		for step := 0; step < 5; step++ {
 			var h [4]byte
 			if _, e = io.ReadFull(c, h[:]); e != nil {
 				done <- e
@@ -66,6 +66,21 @@ func testDesktopInputWire(t *testing.T, rich bool) {
 					t.Error("wrong owner discovery")
 				}
 			case 2:
+				if v["method"] != "thread-stream-following-changed" || params["following"] != true {
+					t.Error("missing input state preflight")
+				}
+				e = writeDesktopTest(c, map[string]any{"type": "broadcast", "method": "thread-stream-state-changed", "version": 11, "sourceClientId": "owner", "params": map[string]any{"hostId": "local", "conversationId": "original", "change": map[string]any{"type": "snapshot", "conversationState": desktopTestState("original", "/authorized/project", "Fixture", "completed")}}})
+				if e != nil {
+					done <- e
+					return
+				}
+				continue
+			case 3:
+				if v["method"] != "thread-stream-following-changed" || params["following"] != false {
+					t.Error("missing input state unsubscribe")
+				}
+				continue
+			case 4:
 				if v["method"] != "thread-follower-start-turn" || v["version"] != float64(2) || v["targetClientId"] != "owner" {
 					t.Error("not the original desktop executor")
 				}

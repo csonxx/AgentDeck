@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"agentdeck/internal/store"
 	"context"
 	"encoding/json"
 	"errors"
@@ -221,6 +222,9 @@ func (b *DesktopBridge) EnqueueNative(ctx context.Context, id, text, request, pr
 	defer c.conn.Close()
 	state, e := c.snapshot(id, project)
 	if e != nil {
+		return e
+	}
+	if e = checkSessionInput(store.Session{Issue: desktopSessionIssue(state)}); e != nil {
 		return e
 	}
 	queue, e := b.stableQueue(id)

@@ -117,7 +117,7 @@ func diagnosticRoute(path string) string {
 		return "/v2/relay/:binding"
 	}
 	switch path {
-	case "/healthz", "/v2/time-sync", "/v2/auth/flows", "/v2/auth/poll", "/v2/auth/login", "/v2/auth/authorize", "/v2/auth/callback", "/v2/auth/done", "/v2/account/locals", "/v2/account/bind", "/v2/local/tunnel", "/v2/local/grants", "/v2/local/unlink":
+	case "/healthz", "/v2/time-sync", "/v2/auth/flows", "/v2/auth/poll", "/v2/auth/login", "/v2/auth/authorize", "/v2/auth/callback", "/v2/auth/done", "/v2/account/locals", "/v2/account/bind", "/v2/local/tunnel", "/v2/local/grants", "/v2/local/unlink", "/v2/feedback/create", "/v2/feedback/list", "/v2/feedback/get", "/v2/feedback/delete":
 		return path
 	default:
 		return "unmatched"

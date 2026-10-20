@@ -11,9 +11,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:agentdeck/core/client.dart';
 import 'package:agentdeck/core/model.dart';
 import 'package:agentdeck/core/clock.dart';
-import 'package:agentdeck/core/vault.dart';
+import 'outbox_fixtures.dart';
 
-class MemoryVault extends DeviceVault {
+class MemoryVault extends MemoryOutgoingVault {
   List<dynamic> downloads = [];
   @override
   Future<List<dynamic>> loadDownloads() async => downloads;
@@ -49,15 +49,47 @@ class MemoryVault extends DeviceVault {
   @override
   Future<void> clear({bool keepGateway = false}) async {
     value = null;
+    outgoing.clear();
+    blobs.clear();
     cache = {};
     layout = null;
   }
 }
 
+class LostAckClient extends AgentClient {
+  bool loseNextAck = false;
+  final List<String> outboxCommandIds = [];
+  LostAckClient({super.vault, super.trustedRoots, super.clock});
+  @override
+  Future<void> sendDelivery(
+    String session,
+    String text,
+    TurnOptions options,
+    List<String> files,
+    String delivery, {
+    String? requestId,
+  }) async {
+    if (text.startsWith('outbox lost ACK')) outboxCommandIds.add(requestId!);
+    await super.sendDelivery(
+      session,
+      text,
+      options,
+      files,
+      delivery,
+      requestId: requestId,
+    );
+    if (loseNextAck) {
+      loseNextAck = false;
+      throw const HttpException('fixture ACK lost at client boundary');
+    }
+  }
+}
+
 Future<void> until(bool Function() f) async {
+  final callSite = StackTrace.current;
   final end = DateTime.now().add(const Duration(seconds: 15));
   while (!f()) {
-    if (DateTime.now().isAfter(end)) fail('Condition timed out');
+    if (DateTime.now().isAfter(end)) fail('Condition timed out\n$callSite');
     await Future<void>.delayed(const Duration(milliseconds: 50));
   }
 }
@@ -78,7 +110,11 @@ void main() {
         final clock = ProtocolClock(
           wallMillis: () => DateTime.now().millisecondsSinceEpoch + wallOffset,
         );
-        final c = AgentClient(vault: vault, trustedRoots: roots, clock: clock);
+        final c = LostAckClient(
+          vault: vault,
+          trustedRoots: roots,
+          clock: clock,
+        );
         addTearDown(c.dispose);
         final bundle = await File('$pairDir/pair.json').readAsString();
         if (proxy) {
@@ -204,6 +240,57 @@ void main() {
               (s) => s.id == session.id && s.status == 'completed',
             ),
           );
+          if (agent == 'codex') {
+            final previousCompletion = c.sessions
+                .firstWhere((s) => s.id == session.id)
+                .completion;
+            c.loseNextAck = true;
+            final message = 'outbox lost ACK ${AgentClient.requestID()}';
+            final pending = await c.outbox.enqueue(
+              session,
+              message,
+              const TurnOptions(),
+              [],
+              'send',
+            );
+            await until(() => pending.state == 'retrying');
+            pending.retryAfter = 0;
+            c.outbox.foreground();
+            await until(
+              () => pending.state == 'accepted' || pending.state == 'done',
+            );
+            expect(c.outboxCommandIds.length, 2);
+            expect(c.outboxCommandIds.toSet(), {pending.commandID});
+            await until(
+              () => c.transcripts[session.id]!.blocks.any(
+                (b) =>
+                    b.kind == 'message' &&
+                    b.role == 'user' &&
+                    b.text == message,
+              ),
+            );
+            expect(
+              c.transcripts[session.id]!.blocks
+                  .where(
+                    (b) =>
+                        b.kind == 'message' &&
+                        b.role == 'user' &&
+                        b.text == message,
+                  )
+                  .length,
+              1,
+            );
+            // An ACK only confirms acceptance, not execution completion. A
+            // same-ID resume can still be running when the ACK is recovered.
+            await until(
+              () => c.sessions.any(
+                (s) =>
+                    s.id == session.id &&
+                    s.status == 'completed' &&
+                    s.completion > previousCompletion,
+              ),
+            );
+          }
           final completed = c.sessions.firstWhere((s) => s.id == session.id);
           expect(completed.completion, greaterThan(0));
           expect(c.isUnread(completed), isTrue);
@@ -347,6 +434,44 @@ void main() {
               ),
             );
           }
+          await until(
+            () => c.sessions.any(
+              (s) => s.id == session.id && s.status == 'completed',
+            ),
+          );
+          await c.sendPrompt(session.id, 'question wire test');
+          await until(
+            () =>
+                c.transcripts[session.id]?.blocks.any(
+                  (b) =>
+                      b.kind == 'approval' &&
+                      b.status == 'pending' &&
+                      b.text.contains('questions'),
+                ) ??
+                false,
+          );
+          final question = c.transcripts[session.id]!.blocks.lastWhere(
+            (b) =>
+                b.kind == 'approval' &&
+                b.status == 'pending' &&
+                b.text.contains('questions'),
+          );
+          await c.approve(
+            session.id,
+            question.key.replaceFirst(RegExp(r':approval$'), ''),
+            'accept',
+            answer: jsonEncode({
+              'choice': 'A',
+              'features': ['A', 'B'],
+            }),
+          );
+          await until(
+            () =>
+                c.transcripts[session.id]?.blocks.any(
+                  (b) => b.text == 'QUESTION_OK',
+                ) ??
+                false,
+          );
           await until(
             () => c.sessions.any(
               (s) => s.id == session.id && s.status == 'completed',
@@ -688,7 +813,8 @@ void main() {
               (vault.cache['transcripts'] as Map?)?['e2e-session'] as List?;
           return list != null &&
               list.isNotEmpty &&
-              (list.last as Map)['seq'] == cursor;
+              (vault.cache['transcript_cursors'] as Map?)?['e2e-session'] ==
+                  cursor;
         });
         final restored = AgentClient(vault: vault, trustedRoots: roots);
         addTearDown(restored.dispose);

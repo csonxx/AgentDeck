@@ -14,7 +14,7 @@ import (
 )
 
 func TestDesktopWakeOnlyForExplicitUnownedOriginalInput(t *testing.T) {
-	for _, mode := range []string{"wake", "owned", "passive", "rejected", "lost-ack", "invalid-id"} {
+	for _, mode := range []string{"wake", "owned", "passive", "rejected", "lost-ack", "invalid-id", "safety"} {
 		t.Run(mode, func(t *testing.T) {
 			dir, e := os.MkdirTemp("/tmp", "ad-wake-")
 			if e != nil {
@@ -30,7 +30,7 @@ func TestDesktopWakeOnlyForExplicitUnownedOriginalInput(t *testing.T) {
 			var workers sync.WaitGroup
 			var opened, turns, discoveries atomic.Int32
 			var ready atomic.Bool
-			ready.Store(mode == "owned" || mode == "lost-ack")
+			ready.Store(mode == "owned" || mode == "lost-ack" || mode == "safety")
 			finished := make(chan struct{})
 			go func() {
 				defer close(finished)
@@ -61,6 +61,20 @@ func TestDesktopWakeOnlyForExplicitUnownedOriginalInput(t *testing.T) {
 								if mode == "rejected" {
 									out["error"] = "unsupported-version"
 								}
+							case "thread-stream-following-changed":
+								if obj(in["params"])["following"] != true {
+									continue
+								}
+								state := desktopTestState(idForWakeTest, "/authorized/project", "Fixture", "completed")
+								if mode == "safety" {
+									turn := obj(arr(state["turns"])[0])
+									turn["status"] = "failed"
+									turn["error"] = map[string]any{"codexErrorInfo": "misalignmentPolicyViolation"}
+								}
+								if e := writeDesktopTest(c, map[string]any{"type": "broadcast", "method": "thread-stream-state-changed", "version": 11, "sourceClientId": "native-owner", "params": map[string]any{"hostId": "local", "conversationId": idForWakeTest, "change": map[string]any{"type": "snapshot", "conversationState": state}}}); e != nil {
+									return
+								}
+								continue
 							case "thread-follower-start-turn":
 								turns.Add(1)
 								p := obj(in["params"])
@@ -121,6 +135,9 @@ func TestDesktopWakeOnlyForExplicitUnownedOriginalInput(t *testing.T) {
 			}
 			if mode == "passive" && !errors.Is(err, errDesktopNoOwner) {
 				t.Fatal("missing owner confused with transport error")
+			}
+			if mode == "safety" && turns.Load() != 0 {
+				t.Fatal("safety stop received a start-turn or branch")
 			}
 			if mode == "lost-ack" && turns.Load() != 1 {
 				t.Fatal("unconfirmed send retried")

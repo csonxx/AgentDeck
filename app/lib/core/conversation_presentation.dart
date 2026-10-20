@@ -21,7 +21,19 @@ List<TranscriptSection> transcriptSections(
   List<TranscriptSection> previous = const [],
 }) {
   final sections = <TranscriptSection>[];
-  for (final b in blocks) {
+  final indices = {for (var i = 0; i < blocks.length; i++) blocks[i].key: i};
+  // Presentation anchors never replace the canonical pagination coordinates.
+  final ordered = blocks.toList()
+    ..sort((a, b) {
+      final order = (a.position > 0 ? a.position : a.first).compareTo(
+        b.position > 0 ? b.position : b.first,
+      );
+      if (order != 0) return order;
+      if ((a.position > 0) != (b.position > 0)) return a.position > 0 ? 1 : -1;
+      final first = a.first.compareTo(b.first);
+      return first != 0 ? first : indices[a.key]!.compareTo(indices[b.key]!);
+    });
+  for (final b in ordered) {
     if (isActivity(b)) {
       if (sections.isNotEmpty && sections.last.activity) {
         sections.last.blocks.add(b);

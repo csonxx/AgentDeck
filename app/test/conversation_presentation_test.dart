@@ -100,33 +100,34 @@ void main() {
       expect(divided.map((s) => s.key).toSet().length, divided.length);
     },
   );
-  testWidgets(
-    'definite pre-write rejection preserves only the editable draft',
-    (tester) async {
-      final c = SlowDeliveryClient();
-      addTearDown(c.dispose);
-      await c.watch('a');
-      await tester.pumpWidget(conversation(c));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField), 'not submitted');
-      await tester.pump();
-      await tester.tap(find.byTooltip('发送消息'));
-      await tester.pump();
-      c.ack.completeError(
-        AgentRequestException('bridge unavailable', notSent: true),
-      );
-      await tester.pump();
-      await tester.pump(const Duration(seconds: 1));
-      expect(
-        tester.widget<TextField>(find.byType(TextField)).controller!.text,
-        'not submitted',
-      );
-      expect(find.text('not submitted'), findsOneWidget);
-      expect(find.text('未确认送达，请先核对会话，避免重复发送'), findsNothing);
-      expect(find.byType(RunningIndicator), findsNothing);
-      expect(c.sends, 1);
-    },
-  );
+  testWidgets('definite pre-write rejection remains in the encrypted outbox', (
+    tester,
+  ) async {
+    final c = SlowDeliveryClient();
+    addTearDown(c.dispose);
+    await c.watch('a');
+    await tester.pumpWidget(conversation(c));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'not submitted');
+    await tester.pump();
+    await tester.tap(find.byTooltip('发送消息'));
+    await tester.pump();
+    c.ack.completeError(
+      AgentRequestException('bridge unavailable', notSent: true, remote: true),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      '',
+    );
+    expect(c.outbox.tasks.single.text, 'not submitted');
+    expect(c.outbox.tasks.single.state, 'failed');
+    expect(find.text('not submitted'), findsOneWidget);
+    expect(find.text('未确认送达，请先核对会话，避免重复发送'), findsNothing);
+    expect(find.byType(RunningIndicator), findsNothing);
+    expect(c.sends, 1);
+  });
   test(
     'activity sections preserve order and never hide approvals or media',
     () {
@@ -397,7 +398,7 @@ void main() {
   );
 
   testWidgets(
-    'uncertain delivery preserves draft and input without automatic retry',
+    'transport failure retains the outgoing input for idempotent retry',
     (tester) async {
       final c = SlowDeliveryClient();
       addTearDown(c.dispose);
@@ -413,9 +414,11 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       expect(
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
-        'uncertain input',
+        '',
       );
-      expect(find.text('未确认送达，请先核对会话，避免重复发送'), findsOneWidget);
+      expect(c.outbox.tasks.single.text, 'uncertain input');
+      expect(find.text('等待连接，恢复后自动重试'), findsOneWidget);
+      expect(c.outbox.tasks.single.state, 'retrying');
       expect(c.sends, 1);
       c.event(
         'message',
@@ -426,8 +429,14 @@ void main() {
       );
       await tester.pump();
       expect(find.text('未确认送达，请先核对会话，避免重复发送'), findsNothing);
+      final requestId = c.requestId;
+      c.ack = Completer<void>()..complete();
+      c.outbox.tasks.single.retryAfter = 0;
+      c.outbox.foreground();
+      await tester.pump();
+      expect(c.requestId, requestId);
       expect(find.text('已送达，等待 Agent 响应…'), findsOneWidget);
-      expect(c.sends, 1);
+      expect(c.sends, 2);
     },
   );
 
