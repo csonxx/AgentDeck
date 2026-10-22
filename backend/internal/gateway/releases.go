@@ -66,6 +66,7 @@ func (g *Server) PublishAndroidRelease(r AndroidRelease) error {
 }
 
 func (g *Server) releaseRoutes(m *http.ServeMux) {
+	g.localReleaseRoutes(m)
 	m.HandleFunc("GET /v2/app/releases/android", func(w http.ResponseWriter, r *http.Request) {
 		key, e := releaseKey(r.URL.Query().Get("edition"))
 		if e != nil {
@@ -102,6 +103,7 @@ func (g *Server) releaseRoutes(m *http.ServeMux) {
 }
 
 func (g *Server) releaseAdminRoutes(m *http.ServeMux) {
+	g.localReleaseAdminRoutes(m)
 	m.HandleFunc("POST /releases/android", func(w http.ResponseWriter, r *http.Request) {
 		var release AndroidRelease
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))

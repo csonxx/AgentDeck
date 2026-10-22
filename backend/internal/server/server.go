@@ -1,6 +1,7 @@
 package server
 
 import (
+	"agentdeck/internal/localipc"
 	"context"
 	"crypto/ecdh"
 	"crypto/sha256"
@@ -9,7 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -49,29 +50,31 @@ type ticket struct {
 	Clock   *secure.Clock
 }
 type Server struct {
-	Store       *store.Store
-	Pin         string
-	PublicURL   string
-	TLSTrust    string
-	Rotation    time.Duration
-	Clock       *secure.Clock
-	RelayClock  func() *secure.Clock
-	mu          sync.Mutex
-	tickets     map[string]ticket
-	replay      map[string]time.Time
-	window      time.Time
-	attempts    int
-	active      int
-	appStreams  map[string]map[uint64]appStream
-	appStreamID uint64
-	Manager     *agent.Manager
-	Normalizer  *agent.Normalizer
-	commandMu   sync.Mutex
-	uploadMu    sync.Mutex
-	ingestMu    sync.Mutex
-	pairMu      sync.Mutex
-	RelayBundle func(Bundle) (Bundle, error)
-	Association *Association
+	Stop           func()
+	updateDraining bool
+	Store          *store.Store
+	Pin            string
+	PublicURL      string
+	TLSTrust       string
+	Rotation       time.Duration
+	Clock          *secure.Clock
+	RelayClock     func() *secure.Clock
+	mu             sync.Mutex
+	tickets        map[string]ticket
+	replay         map[string]time.Time
+	window         time.Time
+	attempts       int
+	active         int
+	appStreams     map[string]map[uint64]appStream
+	appStreamID    uint64
+	Manager        *agent.Manager
+	Normalizer     *agent.Normalizer
+	commandMu      sync.Mutex
+	uploadMu       sync.Mutex
+	ingestMu       sync.Mutex
+	pairMu         sync.Mutex
+	RelayBundle    func(Bundle) (Bundle, error)
+	Association    *Association
 }
 
 func New(s *store.Store, pin, url string, rotation time.Duration) *Server {
@@ -342,43 +345,49 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 }
 
 type Request struct {
-	Compact           bool     `json:"compact,omitempty"`
-	Item              string   `json:"item,omitempty"`
-	PermissionMode    string   `json:"permission_mode,omitempty"`
-	PermissionVersion string   `json:"permission_version,omitempty"`
-	Version           string   `json:"version,omitempty"`
-	Speed             string   `json:"speed,omitempty"`
-	Download          string   `json:"download,omitempty"`
-	GoalVersion       string   `json:"goal_version,omitempty"`
-	GoalAction        string   `json:"goal_action,omitempty"`
-	Delivery          string   `json:"delivery,omitempty"`
-	QueueID           string   `json:"queue_id,omitempty"`
-	QueueVersion      string   `json:"queue_version,omitempty"`
-	Model             string   `json:"model,omitempty"`
-	Effort            string   `json:"effort,omitempty"`
-	Attachments       []string `json:"attachments,omitempty"`
-	Upload            string   `json:"upload,omitempty"`
-	Name              string   `json:"name,omitempty"`
-	MIME              string   `json:"mime,omitempty"`
-	Kind              string   `json:"kind,omitempty"`
-	Bytes             string   `json:"bytes,omitempty"`
-	Size              int      `json:"size,omitempty"`
-	Offset            int      `json:"offset,omitempty"`
-	Limit             int      `json:"limit,omitempty"`
-	Project           string   `json:"project,omitempty"`
-	Agent             string   `json:"agent,omitempty"`
-	Text              string   `json:"text,omitempty"`
-	Approval          string   `json:"approval,omitempty"`
-	Decision          string   `json:"decision,omitempty"`
-	ID                string   `json:"id"`
-	Method            string   `json:"method"`
-	Session           string   `json:"session,omitempty"`
-	After             uint64   `json:"after,omitempty"`
-	Before            uint64   `json:"before,omitempty"`
-	First             uint64   `json:"first,omitempty"`
-	Recent            bool     `json:"recent,omitempty"`
-	Media             string   `json:"media,omitempty"`
-	Href              string   `json:"href,omitempty"`
+	ResetCredit       string            `json:"reset_credit,omitempty"`
+	ResetAccount      string            `json:"reset_account,omitempty"`
+	ResetIntent       string            `json:"reset_intent,omitempty"`
+	ResetCursor       string            `json:"reset_cursor,omitempty"`
+	Confirmed         bool              `json:"confirmed,omitempty"`
+	Timing            *clientOpenTiming `json:"timing,omitempty"`
+	Compact           bool              `json:"compact,omitempty"`
+	Item              string            `json:"item,omitempty"`
+	PermissionMode    string            `json:"permission_mode,omitempty"`
+	PermissionVersion string            `json:"permission_version,omitempty"`
+	Version           string            `json:"version,omitempty"`
+	Speed             string            `json:"speed,omitempty"`
+	Download          string            `json:"download,omitempty"`
+	GoalVersion       string            `json:"goal_version,omitempty"`
+	GoalAction        string            `json:"goal_action,omitempty"`
+	Delivery          string            `json:"delivery,omitempty"`
+	QueueID           string            `json:"queue_id,omitempty"`
+	QueueVersion      string            `json:"queue_version,omitempty"`
+	Model             string            `json:"model,omitempty"`
+	Effort            string            `json:"effort,omitempty"`
+	Attachments       []string          `json:"attachments,omitempty"`
+	Upload            string            `json:"upload,omitempty"`
+	Name              string            `json:"name,omitempty"`
+	MIME              string            `json:"mime,omitempty"`
+	Kind              string            `json:"kind,omitempty"`
+	Bytes             string            `json:"bytes,omitempty"`
+	Size              int               `json:"size,omitempty"`
+	Offset            int               `json:"offset,omitempty"`
+	Limit             int               `json:"limit,omitempty"`
+	Project           string            `json:"project,omitempty"`
+	Agent             string            `json:"agent,omitempty"`
+	Text              string            `json:"text,omitempty"`
+	Approval          string            `json:"approval,omitempty"`
+	Decision          string            `json:"decision,omitempty"`
+	ID                string            `json:"id"`
+	Method            string            `json:"method"`
+	Session           string            `json:"session,omitempty"`
+	After             uint64            `json:"after,omitempty"`
+	Before            uint64            `json:"before,omitempty"`
+	First             uint64            `json:"first,omitempty"`
+	Recent            bool              `json:"recent,omitempty"`
+	Media             string            `json:"media,omitempty"`
+	Href              string            `json:"href,omitempty"`
 }
 
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
@@ -419,12 +428,19 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(1 << 20)
 	_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(90 * time.Second)) })
-	requests := make(chan secure.Box, 8)
+	type streamRequest struct {
+		box     secure.Box
+		arrived time.Time
+	}
+	requests := make(chan streamRequest, 8)
 	done := make(chan struct{})
 	stop := make(chan struct{})
 	defer close(stop)
+	commandContext, stopCommands := context.WithCancel(r.Context())
+	defer stopCommands()
 	go func() {
 		defer close(done)
+		defer stopCommands()
 		for {
 			var b secure.Box
 			if e := conn.ReadJSON(&b); e != nil {
@@ -432,12 +448,15 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 			}
 			_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 			select {
-			case requests <- b:
+			case requests <- streamRequest{box: b, arrived: time.Now()}:
 			case <-stop:
 				return
 			}
 		}
 	}()
+	commands := make(chan streamCommand, 8)
+	commandResults := make(chan map[string]any, 8)
+	go s.runStreamCommands(tk.Device, commands, commandResults, commandContext.Done())
 	asyncResults := make(chan map[string]any, 8)
 	asyncSlots := make(chan struct{}, 2)
 	var sent, received, cursor uint64
@@ -446,6 +465,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	var watched string
 	var recentMode bool
 	var compactMode bool
+	var clientTimingCheck time.Time
 	last := uint64(0)
 	send := func(v any) error {
 		sent++
@@ -540,13 +560,25 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	defer ping.Stop()
 	for {
 		select {
+		case response := <-commandResults:
+			if send(response) != nil {
+				return
+			}
+			if pushQueue(true) != nil {
+				return
+			}
+			if response["type"] == "result" && sessions("") != nil {
+				return
+			}
 		case response := <-asyncResults:
 			if send(response) != nil {
 				return
 			}
 		case <-done:
 			return
-		case b := <-requests:
+		case incoming := <-requests:
+			b := incoming.box
+			started := time.Now()
 			epoch := tk.Clock.Epoch(s.Rotation)
 			if b.Seq != received+1 || b.Epoch < epoch-1 || b.Epoch > epoch+1 {
 				return
@@ -561,7 +593,18 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			switch req.Method {
-			case "goal_list", "usage", "models", "session_settings", "session_permissions", "input_capabilities", "transcribe", "transcribe_preview", "upload_preview":
+			case "client_timing":
+				accepted := false
+				if time.Since(clientTimingCheck) >= time.Second {
+					accepted = logClientTiming(req)
+					if accepted {
+						clientTimingCheck = time.Now()
+					}
+				}
+				if send(map[string]any{"type": "result", "id": req.ID, "result": map[string]bool{"accepted": accepted}}) != nil {
+					return
+				}
+			case "usage_resets", "usage_reset_history", "usage_reset_prepare", "usage_reset_consume", "goal_list", "usage", "models", "session_settings", "session_permissions", "input_capabilities", "transcribe", "transcribe_preview", "upload_preview":
 				select {
 				case asyncSlots <- struct{}{}:
 					go func(req Request, owner string) {
@@ -606,95 +649,10 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			case "session_permissions_change", "goal_change", "create", "send", "interrupt", "approve", "queue_cancel", "queue_edit", "queue_steer", "queue_delete":
-				var result any
-				notSent := false
-				err := errors.New("工作站未启用项目操作")
-				if s.Manager != nil && req.ID != "" && len(req.ID) <= 100 {
-					s.commandMu.Lock()
-					commandKey := tk.Device + "/" + req.ID
-					requestHash := sha256.Sum256(plain)
-					hash := hex.EncodeToString(requestHash[:])
-					var previous struct {
-						Result  any
-						Error   string
-						Hash    string
-						NotSent bool
-					}
-					if s.Store.Get("commands", commandKey, &previous) == nil {
-						result = previous.Result
-						notSent = previous.NotSent
-						err = nil
-						if previous.Hash != hash {
-							previous.Error = "请求标识已用于不同操作"
-							notSent = true
-						}
-						if previous.Error != "" {
-							err = errors.New(previous.Error)
-						}
-					} else {
-						previous.Hash = hash
-						previous.Error = "操作结果尚未确认，请检查会话后再发送"
-						if saveErr := s.Store.Put("commands", commandKey, previous); saveErr != nil {
-							s.commandMu.Unlock()
-							return
-						}
-						previous.Error = ""
-						if s.Store.Get("devices", tk.Device, &dev) != nil {
-							s.commandMu.Unlock()
-							return
-						}
-						switch req.Method {
-						case "session_permissions_change":
-							result, err = s.Manager.ChangePermissions(req.Session, req.PermissionVersion, req.PermissionMode)
-						case "goal_change":
-							err = s.Manager.ChangeGoal(req.Session, req.GoalVersion, req.GoalAction, req.ID)
-						case "create":
-							result, err = s.Manager.CreatePermission(req.Agent, req.Project, req.Session, req.PermissionMode)
-						case "send":
-							var files []agent.InputAttachment
-							files, err = s.inputFiles(tk.Device, req.Session, req.Attachments)
-							if err != nil {
-								err = &agent.InputNotSentError{Err: err}
-							}
-							if err == nil {
-								err = s.Manager.SendDelivery(req.Session, req.Text, req.ID, agent.TurnOptions{Model: req.Model, Effort: req.Effort, Speed: req.Speed}, files, req.Delivery)
-							}
-							if err == nil {
-								result = s.Manager.NativeSubmission(req.Session, req.ID)
-								_ = s.markUploadsUsed(tk.Device, req.Session, req.Attachments)
-							}
-						case "queue_edit", "queue_steer", "queue_delete":
-							action := strings.TrimPrefix(req.Method, "queue_")
-							err = s.Manager.ChangeQueue(req.Session, req.QueueID, req.QueueVersion, action, req.Text, req.ID)
-						case "queue_cancel":
-							err = s.Manager.CancelDelivery(req.Session, req.QueueID)
-						case "interrupt":
-							err = s.Manager.Interrupt(req.Session)
-						case "approve":
-							err = s.Manager.Approve(req.Session, req.Approval, req.Decision, req.Text)
-						}
-						previous.Result = result
-						if err != nil {
-							previous.Error = err.Error()
-							previous.NotSent = agent.InputDefinitelyNotSent(err)
-							notSent = previous.NotSent
-						}
-						_ = s.Store.Put("commands", commandKey, previous)
-					}
-					s.commandMu.Unlock()
-				}
-				if pushQueue(true) != nil {
-					return
-				}
-				if err != nil {
-					if send(map[string]any{"type": "error", "id": req.ID, "message": err.Error(), "not_sent": notSent}) != nil {
-						return
-					}
-				} else {
-					if send(map[string]any{"type": "result", "id": req.ID, "result": result}) != nil {
-						return
-					}
-					if sessions("") != nil {
+				select {
+				case commands <- streamCommand{request: req, hash: sha256.Sum256(plain)}:
+				default:
+					if send(map[string]any{"type": "error", "id": req.ID, "message": "输入服务正在处理，请稍后重试", "not_sent": true}) != nil {
 						return
 					}
 				}
@@ -728,12 +686,6 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				stopDesktop = func() {}
 				watched = req.Session
 				queueState = ""
-				if pushQueue(true) != nil {
-					return
-				}
-				if s.Manager != nil && watched != "" {
-					stopDesktop = s.Manager.WatchDesktop(r.Context(), watched)
-				}
 				recentMode = req.Recent || req.Compact
 				compactMode = req.Compact
 				cursor = req.After
@@ -756,16 +708,35 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 							}
 						}()
 					}
+					readStarted := time.Now()
 					page, err := s.Store.History(watched, 0, 40)
 					if err != nil {
 						return
 					}
 					cursor = page.Cursor
-					if send(map[string]any{"type": "history", "session": watched, "page": s.projectHistory(page, compactMode)}) != nil {
+					projected := s.projectHistory(page, compactMode)
+					writeStarted := time.Now()
+					if send(map[string]any{"type": "history", "id": req.ID, "session": watched, "page": projected}) != nil {
 						return
 					}
+					// Durations and record counts only: no keys, message bodies or
+					// attachment paths. Separate Local work from phone/network delay.
+					slog.Info("session_open", "session", watched,
+						"request", req.ID,
+						"wait_ms", started.Sub(incoming.arrived).Milliseconds(),
+						"history_ms", writeStarted.Sub(readStarted).Milliseconds(),
+						"write_ms", time.Since(writeStarted).Milliseconds(),
+						"total_ms", time.Since(incoming.arrived).Milliseconds(), "records", len(page.Events))
 				}
 				if send(map[string]any{"type": "watching", "id": req.ID, "session": watched}) != nil {
+					return
+				}
+				// Cached history is the first-screen dependency. Queue inspection
+				// and native subscription setup must not delay showing it.
+				if s.Manager != nil && watched != "" {
+					stopDesktop = s.Manager.WatchDesktop(r.Context(), watched)
+				}
+				if pushQueue(true) != nil {
 					return
 				}
 			case "item_detail":
@@ -943,16 +914,12 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 // or revoke phones; this is a separate boundary from the HTTPS viewing service.
 func (s *Server) Admin(ctx context.Context, dir string) error {
 	path := filepath.Join(dir, "control.sock")
-	_ = os.Remove(path)
-	ln, e := net.Listen("unix", path)
+	ln, e := localipc.Listen(dir, "control")
 	if e != nil {
 		return e
 	}
-	if e = os.Chmod(path, 0600); e != nil {
-		ln.Close()
-		return e
-	}
 	m := http.NewServeMux()
+	s.updateRoutes(m, dir)
 	m.HandleFunc("POST /ingest", func(w http.ResponseWriter, r *http.Request) {
 		if s.Normalizer == nil {
 			fail(w, 503)
@@ -1096,9 +1063,7 @@ func (s *Server) Admin(ctx context.Context, dir string) error {
 	return e
 }
 func AdminClient(dir string) *http.Client {
-	return &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(dir, "control.sock"))
-	}}}
+	return localipc.Client(dir, "control")
 }
 func (s *Server) String() string {
 	return fmt.Sprintf("AgentDeck %s rotation=%s", s.PublicURL, s.Rotation)

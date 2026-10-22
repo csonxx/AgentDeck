@@ -1,5 +1,121 @@
 // App-owned backend messages. Keep wire values and conversation bodies unchanged.
 const backendUiMessages = <String, List<String>>{
+  "暂时无法读取 Codex 重置卡，请检查电脑登录和 CLI 版本": [
+    "Could not read Codex reset cards. Check desktop login and CLI version.",
+    "暫時無法讀取 Codex 重置卡，請檢查電腦登入和 CLI 版本",
+    "Не удалось прочитать карты Codex. Проверьте вход и версию CLI.",
+  ],
+  "Codex 未返回可核对的账号，请更新电脑 CLI": [
+    "Codex returned no verifiable account. Update the desktop CLI.",
+    "Codex 未傳回可核對的帳號，請更新電腦 CLI",
+    "Codex не вернул проверяемый аккаунт. Обновите CLI.",
+  ],
+  "无效的重置卡请求": [
+    "Invalid reset card request.",
+    "無效的重置卡請求",
+    "Недопустимый запрос карты сброса.",
+  ],
+  "电脑 Codex 账号已变化，请刷新后重新确认": [
+    "The desktop Codex account changed. Refresh and confirm again.",
+    "電腦 Codex 帳號已變更，請重新整理後再次確認",
+    "Аккаунт Codex изменился. Обновите данные и подтвердите снова.",
+  ],
+  "当前没有可用重置卡": [
+    "No reset cards are available.",
+    "目前沒有可用重置卡",
+    "Нет доступных карт сброса.",
+  ],
+  "当前没有可重置的核心额度，五小时或每周额度需剩余不超过 10%": [
+    "A five-hour or weekly core limit must have 10% or less remaining to reset.",
+    "目前沒有可重置的核心額度，五小時或每週額度需剩餘不超過 10%",
+    "Для сброса должно остаться не более 10% пятичасового или недельного основного лимита.",
+  ],
+  "这张重置卡已不可用，请刷新": [
+    "This reset card is unavailable. Refresh to check.",
+    "這張重置卡已無法使用，請重新整理",
+    "Эта карта недоступна. Обновите данные.",
+  ],
+  "上次重置结果尚未确认，请先核对原请求": [
+    "The previous reset is unconfirmed. Check the original request first.",
+    "上次重置結果尚未確認，請先核對原請求",
+    "Прошлый сброс не подтверждён. Сначала проверьте исходный запрос.",
+  ],
+  "重置确认保存失败，尚未使用重置卡": [
+    "Could not save confirmation. No reset card has been used.",
+    "重置確認儲存失敗，尚未使用重置卡",
+    "Не удалось сохранить подтверждение. Карта не использована.",
+  ],
+  "请先明确确认使用一张重置卡": [
+    "Explicitly confirm using one reset card first.",
+    "請先明確確認使用一張重置卡",
+    "Сначала подтвердите использование одной карты.",
+  ],
+  "重置确认不属于当前手机或已失效": [
+    "This confirmation belongs to another phone or is no longer valid.",
+    "重置確認不屬於目前手機或已失效",
+    "Подтверждение относится к другому телефону или недействительно.",
+  ],
+  "请使用原重置请求核对结果，勿新建请求": [
+    "Use the original reset request to check the result. Do not create a new request.",
+    "請使用原重置請求核對結果，勿新增請求",
+    "Проверьте результат через исходный запрос. Не создавайте новый.",
+  ],
+  "确认已过期，请重新查看额度后确认": [
+    "Confirmation expired. Check usage and confirm again.",
+    "確認已過期，請重新查看額度後確認",
+    "Подтверждение истекло. Проверьте лимиты и подтвердите снова.",
+  ],
+  "电脑 Codex 账号已变化，未使用重置卡": [
+    "The desktop Codex account changed. No reset card was used.",
+    "電腦 Codex 帳號已變更，未使用重置卡",
+    "Аккаунт Codex изменился. Карта не использована.",
+  ],
+  "重置回执保存失败，未提交": [
+    "Could not save the reset receipt. Nothing was submitted.",
+    "重置回執儲存失敗，未提交",
+    "Не удалось сохранить запись сброса. Запрос не отправлен.",
+  ],
+  "历史游标无效": [
+    "Invalid history cursor.",
+    "歷史游標無效",
+    "Недопустимый курсор истории.",
+  ],
+  "无法核对 Codex 历史账号": [
+    "Could not verify the Codex history account.",
+    "無法核對 Codex 歷史帳號",
+    "Не удалось проверить аккаунт истории Codex.",
+  ],
+  "Codex 历史账号暂不可用": [
+    "The Codex history account is unavailable.",
+    "Codex 歷史帳號暫時無法使用",
+    "Аккаунт истории Codex недоступен.",
+  ],
+  "重置卡历史暂不可用，请检查电脑登录或稍后重试": [
+    "Reset card history is unavailable. Check desktop login or try later.",
+    "重置卡歷史暫時無法使用，請檢查電腦登入或稍後重試",
+    "История карт недоступна. Проверьте вход на компьютере или повторите позже.",
+  ],
+  "重置卡历史格式暂不支持": [
+    "This reset card history format is not supported yet.",
+    "重置卡歷史格式暫不支援",
+    "Этот формат истории карт пока не поддерживается.",
+  ],
+  "重置卡历史游标无效": [
+    "Invalid reset card history cursor.",
+    "重置卡歷史游標無效",
+    "Недопустимый курсор истории карт.",
+  ],
+  "Codex 重置卡请求未授权": [
+    "The Codex reset card request is not authorized.",
+    "Codex 重置卡請求未授權",
+    "Запрос карты Codex не авторизован.",
+  ],
+
+  "工作站正在更新，请稍后重试": [
+    "The workstation is updating. Please try again shortly.",
+    "工作站正在更新，請稍後重試",
+    "Рабочая станция обновляется. Повторите попытку немного позже.",
+  ],
   "提问回答格式无效": [
     "Invalid question answer format.",
     "提問回答格式無效",

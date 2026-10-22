@@ -105,10 +105,22 @@
       node.querySelector('form').hidden=r.approved;
     });
   }
+  function renderUpdates(s){
+    const phases={starting:'正在启动验证',current:'已是最新版本',downloading:'后台下载中',waiting_idle:'等待空闲安装',restarting:'正在重启',activating:'正在恢复消息接收',paused:'已暂停自动安装',retrying:'稍后自动重试',rejected:'校验未通过',manual_install:'尚未安装更新管理器'};
+    $('update-phase').textContent=phases[s.phase]||s.phase;
+    $('local-version').textContent=s.version==='dev'?'开发版本':s.version+' · '+(s.os||'')+'/'+(s.arch||'');
+    $('local-available').textContent=s.available||'—';
+    $('auto-update').disabled=!s.managed;$('auto-update').checked=!!s.auto_update;$('check-update').disabled=!s.managed;
+    $('update-progress').hidden=s.phase!=='downloading';$('update-progress').max=s.bytes||1;$('update-progress').value=s.downloaded||0;
+    $('update-detail').textContent=!s.managed?'当前是手动启动。首次安装更新管理器后即可自动更新，原配对和会话数据保留。':s.problem||s.last_rollback||(s.phase==='downloading'?((s.downloaded||0)/1048576).toFixed(1)+' / '+((s.bytes||0)/1048576).toFixed(1)+' MB':s.checked?'最近检查：'+date(s.checked):'启动后检查，此后每 6 小时检查一次。');
+  }
+  $('check-update').addEventListener('click',async()=>{try{await api('updates/check',{});note('已开始在后台检查工作站更新。');await refresh();}catch(e){note(e.message);}});
+  $('auto-update').addEventListener('change',async()=>{try{await api('updates/policy',{auto_update:$('auto-update').checked});await refresh();}catch(e){note(e.message);await refresh();}});
   async function refresh(){
     if(refreshing)return;refreshing=true;
     try{
-      const [status,apps]=await Promise.allSettled([api('status'),api('apps')]);
+      const [status,apps,updates]=await Promise.allSettled([api('status'),api('apps'),api('updates/status')]);
+      if(updates.status==='fulfilled')renderUpdates(updates.value);else{$('update-phase').textContent='暂时无法读取';$('update-detail').textContent='工作站重启时会自动重新连接。';}
       if(apps.status==='fulfilled')renderApps(apps.value);else appsUnavailable('暂时无法读取 App 连接状态，正在自动重试。');
       if(status.status==='rejected')throw status.reason;
       const s=status.value;updateStatus(s);const rows=s.online&&s.state!=='unlinking'?await api('pending'):[];renderPending(rows,s);$('refreshed').textContent='状态更新于 '+new Date().toLocaleTimeString('zh-CN',{hour12:false});

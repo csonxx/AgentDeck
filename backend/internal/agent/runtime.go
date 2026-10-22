@@ -25,6 +25,8 @@ type Project struct {
 	Path string `json:"path"`
 }
 type Manager struct {
+	updateMu           sync.Mutex
+	updateDraining     bool
 	CodexReadHome      string
 	readStateMu        sync.Mutex
 	readStateChecked   time.Time
@@ -73,6 +75,9 @@ type Manager struct {
 	goalMu             sync.Mutex
 	goalCache          []Goal
 	goalChecked        time.Time
+	resetMu            sync.Mutex
+	resetRPC           func(context.Context, string, map[string]any) (map[string]any, error)
+	resetHistoryRead   func(context.Context, string, string, string) (map[string]any, error)
 	usageMu            sync.Mutex
 	usageCache         map[string]AccountUsage
 	ClaudeUsageFile    string

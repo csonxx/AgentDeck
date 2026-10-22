@@ -237,6 +237,11 @@ func (m *Manager) deliveryLock(id string) *sync.Mutex {
 	return m.deliveryLocks[id]
 }
 func (m *Manager) dispatchDelivery(ctx context.Context, d store.Delivery) {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
+	if m.updateDraining {
+		return
+	}
 	lock := m.deliveryLock(d.Session)
 	lock.Lock()
 	defer lock.Unlock()

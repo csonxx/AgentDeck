@@ -287,7 +287,21 @@ func (s *Server) inputRequest(owner string, req Request) (any, error) {
 	if s.Manager == nil {
 		return nil, errors.New("工作站未启用会话输入")
 	}
+	if strings.HasPrefix(req.Method, "usage_reset") {
+		var device store.Device
+		if req.Agent != "codex" || s.Store.Get("devices", owner, &device) != nil {
+			return nil, errors.New("Codex 重置卡请求未授权")
+		}
+	}
 	switch req.Method {
+	case "usage_resets":
+		return s.Manager.CodexResetState()
+	case "usage_reset_history":
+		return s.Manager.CodexResetHistory(req.ResetCursor)
+	case "usage_reset_prepare":
+		return s.Manager.PrepareCodexReset(owner, req.ResetCredit, req.ResetAccount)
+	case "usage_reset_consume":
+		return s.Manager.ConsumeCodexReset(owner, req.ResetIntent, req.ID, req.Confirmed)
 	case "goal_list":
 		return s.Manager.Goals()
 	case "usage":

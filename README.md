@@ -9,9 +9,10 @@ View and continue your workstation's coding-agent chats from your phone. Project
 - 按 Agent、项目或最近会话查看对话，接收文字、图片和附件。
 - 发送消息、创建会话、停止执行，回答 Agent 的提问和权限请求。
 - 查看会话实际使用的模型、effort 和权限，修改 Agent 支持的选项。
+- 在 Codex 用量页查看重置卡详情和使用记录，手动确认后使用。
 - 离开会话后继续发送；断线后恢复。工具过程默认折叠，点具体项再加载详情。
 
-Browse chats by agent, project or recency. Read text and attachments, send messages, create or stop chats, answer questions and approve tools. Model and permission controls follow each agent's capabilities. Sending survives leaving a chat; folded execution details load when opened.
+Browse chats by agent, project or recency. Read text and attachments, send messages, create or stop chats, answer questions and approve tools. Model and permission controls follow each agent's capabilities. Sending survives leaving a chat; folded execution details load when opened. Codex Usage also shows reset card details and history, with explicit confirmation before use.
 
 | Agent | 接入情况 / Integration |
 | --- | --- |
@@ -25,20 +26,28 @@ Browse chats by agent, project or recency. Read text and attachments, send messa
 
 The main tested platform is macOS with an Android arm64 phone. See [integrations](docs/AGENTS.md) for setup, limits and test coverage.
 
+S-LOCAL 也支持通过网关自动更新，覆盖 macOS、Windows、Linux 的 arm64/amd64；首次安装、已有服务迁移和版本发布见 [工作站安装与自动更新](docs/LOCAL_UPDATES.md)。
+
+S-LOCAL also supports gateway updates on macOS, Windows and Linux (arm64/amd64). See [installation and updates](docs/LOCAL_UPDATES.md) for setup, migration and publication.
+
 ## 怎么使用 / Getting started
 
 ### 1. 安装手机 App / Install the app
 
-| 0.4.46 · Android arm64 | 下载 / Download | 大小 / Size |
+| 0.4.48 · Android arm64 | 下载 / Download | 大小 / Size |
 | --- | --- | --- |
-| 轻量版 / Lite | [APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.46/a3d4157651908b962f0d9c5761e0a47c092f4bf46ef7fa8af26b4e005f55aa10/agentdeck-0.4.46-arm64-v8a-lite.apk) | 33.2 MB |
-| 带语音版 / With voice | [APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.46/f549bca8c506928cdef5b125807eb0356f8e916b85afc638dbc0a0272b5572cc/agentdeck-0.4.46-arm64-v8a-voice.apk) | 273.3 MB |
+| 轻量版 / Lite | [APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.48/99c1c4837b15c440b3387be8f68becd25e378b9780f1409c421a2850a252c8fd/agentdeck-0.4.48-arm64-v8a-lite.apk) | 33.3 MB |
+| 带语音版 / With voice | [APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.48/9c64099f512fc52ad62ee9e1b49a92aadf1583bb159269a4f2a79ce67fdcef45/agentdeck-0.4.48-arm64-v8a-voice.apk) | 273.3 MB |
 
 两版的会话功能相同，语音版增加手机离线识别。可覆盖切换并保留配对，不能同时安装。后续在 **设置 → 应用更新** 选择版本、下载和安装。
 
 Both editions have the same chat features; Voice adds offline speech recognition. They replace one another while retaining pairing. Use **Settings → App updates** for later downloads and edition changes.
 
 ### 2. 启动电脑后端 / Start the workstation backend
+
+直接使用 [macOS / Windows / Linux 安装包](docs/LOCAL_UPDATES.md#安装包--downloads)，无需安装 Go；它会配置登录后启动和网关自动更新。以下源码方式适合开发或手动管理。
+
+Use a [workstation installer](docs/LOCAL_UPDATES.md#安装包--downloads) for background startup and gateway updates; no Go installation is needed. The source setup below is for development or manual operation.
 
 需要 Go 1.25+，并先让所需 Agent 在电脑上独立登录、正常运行。后端使用同一个系统用户。已有安装就在原目录更新，保留 `~/.agentdeck`。
 

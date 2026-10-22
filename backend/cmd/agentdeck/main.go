@@ -45,6 +45,9 @@ func run() error {
 	if len(os.Args) < 2 {
 		return errors.New("usage: agentdeck serve | console | local-login | pair | pair-pending | pair-approve | devices | revoke | bridge | gateway-locals | gateway-accounts | gateway-add-local | gateway-revoke")
 	}
+	if handled, err := localCommand(os.Args[1:]); handled {
+		return err
+	}
 	home, _ := os.UserHomeDir()
 	cmd := os.Args[1]
 	if cmd == "claude-stdio" {
@@ -398,6 +401,7 @@ func run() error {
 	follower := &agent.Follower{Normalizer: normal, Roots: roots, Lookback: *lookback, HistoryBytes: *historyBytes, Index: index, ClaudeIndex: claudeIndex}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	s.Stop = stop
 	voiceArgs, voiceErr := loadVoiceCommand(*voiceFile)
 	if voiceErr != nil {
 		return voiceErr
@@ -460,6 +464,9 @@ func run() error {
 		}()
 	}
 	defer s.Manager.Close()
+	if os.Getenv("AGENTDECK_UPDATE_TRIAL") == "1" {
+		s.HoldForUpdate()
+	}
 	if !*noConsole {
 		controls, err := startConsole(*dir, *consoleListen)
 		if err != nil {

@@ -1,10 +1,10 @@
 package gateway
 
 import (
+	"agentdeck/internal/localipc"
 	"context"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,13 +12,8 @@ import (
 
 func (g *Server) Admin(ctx context.Context, dir string) error {
 	path := filepath.Join(dir, "control.sock")
-	_ = os.Remove(path)
-	ln, e := net.Listen("unix", path)
+	ln, e := localipc.Listen(dir, "control")
 	if e != nil {
-		return e
-	}
-	if e = os.Chmod(path, 0600); e != nil {
-		ln.Close()
 		return e
 	}
 	m := http.NewServeMux()

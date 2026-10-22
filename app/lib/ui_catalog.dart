@@ -1,5 +1,142 @@
 // App-owned interface strings only. Conversation content is never translated.
 const uiCatalog = <String, List<String>>{
+  "重置卡": ["Reset cards", "重置卡", "Карты сброса"],
+  "刷新重置卡": ["Refresh reset cards", "重新整理重置卡", "Обновить карты сброса"],
+  "上次重置记录暂不可读，请先核对电脑使用记录": [
+    "The previous reset record is unavailable. Check the desktop history first.",
+    "上次重置記錄暫不可讀，請先核對電腦使用記錄",
+    "Прошлая запись сброса недоступна. Сначала проверьте историю на компьютере.",
+  ],
+  "未提供": ["Not provided", "未提供", "Не указано"],
+  "确认使用一张": ["Use one reset card", "確認使用一張", "Использовать одну карту"],
+  "下一张可用重置卡": [
+    "Next available reset card",
+    "下一張可用重置卡",
+    "Следующая доступная карта",
+  ],
+  "使用 Codex 重置卡？": [
+    "Use a Codex reset card?",
+    "使用 Codex 重置卡？",
+    "Использовать карту сброса Codex?",
+  ],
+  "将消耗一张重置卡，重置当前账号符合条件的五小时和每周额度，影响该账号所有项目。周额度的下一次重置时间可能变化。此操作不能撤销。": [
+    "This uses one card to reset eligible five-hour and weekly limits for this account across all projects. The next weekly reset time may change. This cannot be undone.",
+    "將消耗一張重置卡，重置目前帳號符合條件的五小時和每週額度，影響該帳號所有專案。週額度的下次重置時間可能變更。此操作無法復原。",
+    "Будет использована одна карта для сброса подходящих пятичасовых и недельных лимитов аккаунта во всех проектах. Время следующего недельного сброса может измениться. Отменить действие нельзя.",
+  ],
+  "已使用一张重置卡，额度已重置": [
+    "One card used. Usage limits have been reset.",
+    "已使用一張重置卡，額度已重置",
+    "Использована одна карта. Лимиты сброшены.",
+  ],
+  "本次重置已完成，没有重复消耗重置卡": [
+    "This reset is already complete. No additional card was used.",
+    "本次重置已完成，沒有重複消耗重置卡",
+    "Этот сброс уже выполнен. Дополнительная карта не использована.",
+  ],
+  "当前没有可用重置卡，本次未重置": [
+    "No reset cards are available. Limits were not reset.",
+    "目前沒有可用重置卡，本次未重置",
+    "Нет доступных карт. Лимиты не сброшены.",
+  ],
+  "当前额度无需重置，本次未消耗重置卡": [
+    "The limits do not need a reset. No card was used.",
+    "目前額度無需重置，本次未消耗重置卡",
+    "Сброс лимитов не требуется. Карта не использована.",
+  ],
+  "结果尚未确认，请刷新记录核对。再次操作只会使用原请求编号。": [
+    "The result is unconfirmed. Refresh the history to check. A retry keeps the original request ID.",
+    "結果尚未確認，請重新整理記錄核對。再次操作只會使用原請求編號。",
+    "Результат не подтверждён. Обновите историю. Повтор использует исходный ID запроса.",
+  ],
+  "请先查看使用记录，勿新建重置请求": [
+    "Check the history before starting another reset request.",
+    "請先查看使用記錄，勿新增重置請求",
+    "Сначала проверьте историю, прежде чем создавать новый запрос сброса.",
+  ],
+  "核对原重置请求？": [
+    "Check the original reset request?",
+    "核對原重置請求？",
+    "Проверить исходный запрос сброса?",
+  ],
+  "复用上次的请求编号。若上次尚未执行，将完成原先确认的一次重置；已完成则不会再次消耗。": [
+    "Uses the previous request ID. If it has not run, this completes the reset you confirmed. If complete, no additional card is used.",
+    "沿用上次的請求編號。若上次尚未執行，將完成先前確認的一次重置；已完成則不會再次消耗。",
+    "Используется прежний ID запроса. Если сброс не выполнен, будет выполнен ранее подтверждённый сброс. Если выполнен, новая карта не расходуется.",
+  ],
+  "结束本次核对？": [
+    "Finish checking this request?",
+    "結束本次核對？",
+    "Завершить проверку запроса?",
+  ],
+  "请先核对使用记录和最新额度。清除本机待核对标记不会撤回已发生的重置，也不会再使用任何重置卡。": [
+    "Check the history and current limits first. Clearing this local marker does not undo a reset or use any cards.",
+    "請先核對使用記錄和最新額度。清除本機待核對標記不會撤回已發生的重置，也不會再使用任何重置卡。",
+    "Сначала проверьте историю и текущие лимиты. Удаление местной отметки не отменяет сброс и не использует карты.",
+  ],
+  "已核对，清除标记": [
+    "Checked, clear marker",
+    "已核對，清除標記",
+    "Проверено, удалить отметку",
+  ],
+  "可用数量暂不可读": [
+    "Available count is unavailable",
+    "可用數量暫不可讀",
+    "Количество доступных карт недоступно",
+  ],
+  "可用 {0} 张": ["{0} available", "可用 {0} 張", "Доступно: {0}"],
+  "电脑接口仅提供数量，未提供卡片详情": [
+    "The desktop API provides a count but no card details.",
+    "電腦介面僅提供數量，未提供卡片詳情",
+    "API компьютера вернул количество без сведений о картах.",
+  ],
+  "五小时或每周核心额度剩余不超过 10% 时可使用": [
+    "Available when five-hour or weekly core usage has 10% or less remaining.",
+    "五小時或每週核心額度剩餘不超過 10% 時可使用",
+    "Доступно, когда осталось не более 10% пятичасового или недельного основного лимита.",
+  ],
+  "当前核心额度暂不可读，暂不能使用重置卡": [
+    "Core usage limits are unavailable. Reset cards cannot be used yet.",
+    "目前核心額度暫不可讀，暫時無法使用重置卡",
+    "Основные лимиты недоступны. Пока нельзя использовать карту.",
+  ],
+  "Codex 重置卡": ["Codex reset card", "Codex 重置卡", "Карта сброса Codex"],
+  "获得时间：{0}": ["Received: {0}", "獲得時間：{0}", "Получена: {0}"],
+  "到期时间：{0}": ["Expires: {0}", "到期時間：{0}", "Истекает: {0}"],
+  "使用这张": ["Use this card", "使用這張", "Использовать эту карту"],
+  "使用下一张可用重置卡": [
+    "Use the next available card",
+    "使用下一張可用重置卡",
+    "Использовать следующую карту",
+  ],
+  "有一笔重置结果待核对": [
+    "One reset result needs checking",
+    "有一筆重置結果待核對",
+    "Нужно проверить результат одного сброса",
+  ],
+  "核对原请求": ["Check original request", "核對原請求", "Проверить исходный запрос"],
+  "查看记录后结束核对": [
+    "Finish after reviewing history",
+    "查看記錄後結束核對",
+    "Завершить после проверки истории",
+  ],
+  "重置卡记录": ["Reset card history", "重置卡記錄", "История карт сброса"],
+  "记录起始：{0}": ["History since: {0}", "記錄起始：{0}", "История с: {0}"],
+  "获得重置卡": ["Reset card received", "獲得重置卡", "Получена карта сброса"],
+  "已使用重置卡": ["Reset card used", "已使用重置卡", "Карта сброса использована"],
+  "未知重置卡事件": [
+    "Unknown reset card event",
+    "未知重置卡事件",
+    "Неизвестное событие карты",
+  ],
+  "重试读取记录": ["Retry loading history", "重試讀取記錄", "Повторить загрузку истории"],
+  "当前返回范围内暂无记录": [
+    "No events in the returned period",
+    "目前傳回範圍內暫無記錄",
+    "За указанный период событий нет",
+  ],
+  "更多记录": ["More history", "更多記錄", "Ещё записи"],
+
   "平台已因安全检查结束此会话，请在电脑端查看；原会话不能继续发送": [
     "The platform ended this chat after a safety check. Review it on the desktop; this chat cannot accept more messages.",
     "平台已因安全檢查結束此會話，請在電腦端查看；原會話不能繼續傳送",

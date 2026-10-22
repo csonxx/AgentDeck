@@ -2031,6 +2031,13 @@ class _ConversationPageState extends State<ConversationPage> with RouteAware {
         _sections = transcriptSections(_sectionBlocks, previous: _sections);
       }
       final blocks = _sectionBlocks;
+      final paintedSession = active.id;
+      final paintedRevision = transcript?.revision ?? -1;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && readingRoute?.isCurrent == true) {
+          c.historyPresented(paintedSession, paintedRevision);
+        }
+      });
       final latest =
           c.sessions.where((s) => s.id == active.id).firstOrNull ?? active;
       final waiting = inputReceipts.any(

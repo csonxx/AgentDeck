@@ -6,6 +6,9 @@ bool validGatewayPrefix(String path) =>
     path.isEmpty || RegExp(r'^(/[a-zA-Z0-9_-]{1,80})+$').hasMatch(path);
 
 class WireCrypto {
+  // cryptography_flutter registers the platform factory before main. Native
+  // AES handles catalogs/caches without lengthy pure-Dart work on the UI isolate;
+  // standalone Dart tools retain the compatible fallback and wire format.
   static final aes = AesGcm.with256bits();
   static final hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
   static List<int> random(int n) =>

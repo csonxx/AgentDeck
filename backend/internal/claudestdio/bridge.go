@@ -44,8 +44,7 @@ func private(path string, directory bool) error {
 	if err != nil {
 		return err
 	}
-	st, ok := s.Sys().(*syscall.Stat_t)
-	if !ok || st.Uid != uint32(os.Getuid()) || s.Mode().Perm()&0077 != 0 || s.IsDir() != directory || (!directory && !s.Mode().IsRegular()) {
+	if !owned(s) || s.Mode().Perm()&0077 != 0 || s.IsDir() != directory || (!directory && !s.Mode().IsRegular()) {
 		return errors.New("unsafe Claude stdin bridge path")
 	}
 	return nil

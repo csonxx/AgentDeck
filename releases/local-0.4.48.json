@@ -1,0 +1,140 @@
+{
+  "version": "0.4.48",
+  "build": 9065,
+  "source_sha256": "ee6ce9e997a8dc6182f5bf5428d3b20df7586cdff6d19cc96847f58224ef715a",
+  "publisher_public_key": "agentdeck-local-2026:E5o8lCz84U3xat80vjb7DwOpeRTT8c+YDlwRW3F7iDs=",
+  "targets": [
+    {
+      "release": {
+        "version": "0.4.48",
+        "build": 9065,
+        "os": "darwin",
+        "arch": "arm64",
+        "bytes": 21107138,
+        "sha256": "65f1afbe79a75709400e496ba1f3709079db0877efb5999fbeef94f68bbbc008",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.48/65f1afbe79a75709400e496ba1f3709079db0877efb5999fbeef94f68bbbc008/agentdeck-darwin-arm64",
+        "notes": "",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "C9oH6LijoBYlvpjp5ETMhAO/L4pxUZmtZNNr7hd/PltMcVAPp3uW7PFhbj08Z/gBxJmIg396V3MTVZQLWxwNCA=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.48-darwin-arm64.tar.gz",
+        "bytes": 7902554,
+        "sha256": "8fe9774ff74a940c2dc8dbff30c0eba3aef7968d8df291cbc890e7c84822051e",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.48/8fe9774ff74a940c2dc8dbff30c0eba3aef7968d8df291cbc890e7c84822051e/agentdeck-local-0.4.48-darwin-arm64.tar.gz"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.48",
+        "build": 9065,
+        "os": "darwin",
+        "arch": "amd64",
+        "bytes": 22200704,
+        "sha256": "30f754ea82b4a11f60cf35b7e131487834d1c6f897f29d7782f222587287377e",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.48/30f754ea82b4a11f60cf35b7e131487834d1c6f897f29d7782f222587287377e/agentdeck-darwin-amd64",
+        "notes": "",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "tu9FfpGYB1kXAUi/o4791KxRgRIHJ6xTo0l64KMphGy0tYRlamUiloqgYo0IB7jwnf6HNbsC6NlFPDRreGOWCw=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.48-darwin-amd64.tar.gz",
+        "bytes": 8449909,
+        "sha256": "e20a2ebf71aaf5bdca06f5dac2b082bea39e3f7519d0727701d364d91ffb646a",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.48/e20a2ebf71aaf5bdca06f5dac2b082bea39e3f7519d0727701d364d91ffb646a/agentdeck-local-0.4.48-darwin-amd64.tar.gz"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.48",
+        "build": 9065,
+        "os": "windows",
+        "arch": "amd64",
+        "bytes": 22387712,
+        "sha256": "8841a791ff37fd14988b2f480dbaaa025d2171d9ae422d2d2d1e49b2f52c40ca",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.48/8841a791ff37fd14988b2f480dbaaa025d2171d9ae422d2d2d1e49b2f52c40ca/agentdeck-windows-amd64.exe",
+        "notes": "",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "1opP4NzC9dE9J9RYZ1sgSzSqCtsO1GmvP8TysKyYEwzjEB1itM6RZYqgrg5mm+AKcH2MjLCEtJSXEk1Yh7TGBQ=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.48-windows-amd64.zip",
+        "bytes": 8558945,
+        "sha256": "8b41834c165fed309f21ca9b82d2f627a054369538b4bca969d1a007ac8021a4",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.48/8b41834c165fed309f21ca9b82d2f627a054369538b4bca969d1a007ac8021a4/agentdeck-local-0.4.48-windows-amd64.zip"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.48",
+        "build": 9065,
+        "os": "windows",
+        "arch": "arm64",
+        "bytes": 20844544,
+        "sha256": "4c63efd4331a9511b03d90f03c8a94498ee14f2a4c3c888a8e9121919b977ac4",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.48/4c63efd4331a9511b03d90f03c8a94498ee14f2a4c3c888a8e9121919b977ac4/agentdeck-windows-arm64.exe",
+        "notes": "",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "o58mIN+PfahStJRStK9apt08BVYfe2+F+nNGi9NzHTyixIa1PcHERAw1BdAdWbzSqSw1VqgfbV+5vQOUvFYxBw=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.48-windows-arm64.zip",
+        "bytes": 7713605,
+        "sha256": "8402aafcd9db8657b7de7856dabbfc2978c632c32464cf29295ad2d275faaa80",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.48/8402aafcd9db8657b7de7856dabbfc2978c632c32464cf29295ad2d275faaa80/agentdeck-local-0.4.48-windows-arm64.zip"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.48",
+        "build": 9065,
+        "os": "linux",
+        "arch": "amd64",
+        "bytes": 21749944,
+        "sha256": "18333083d83f858bcc67d737eb79cad4debff1e3f0f9256405b522f7379c7971",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.48/18333083d83f858bcc67d737eb79cad4debff1e3f0f9256405b522f7379c7971/agentdeck-linux-amd64",
+        "notes": "",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "j/WH23olHg7DdXujXRFI0KXBb+EENsoV78UyAFr2o+9GWDMCW3Xj4GI0AWKWKund0F3JwBuASeo9f/HeCovFDQ=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.48-linux-amd64.tar.gz",
+        "bytes": 8316076,
+        "sha256": "1ea62c7239d399e02fb06c5a9d301e8ee99bf8c851a583c6bf2d392724313c3e",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.48/1ea62c7239d399e02fb06c5a9d301e8ee99bf8c851a583c6bf2d392724313c3e/agentdeck-local-0.4.48-linux-amd64.tar.gz"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.48",
+        "build": 9065,
+        "os": "linux",
+        "arch": "arm64",
+        "bytes": 20512952,
+        "sha256": "5eecd1bc4b9ae372c4fb31b02d3aef65cbd71dac3bf11806ac9aae33f76803e8",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.48/5eecd1bc4b9ae372c4fb31b02d3aef65cbd71dac3bf11806ac9aae33f76803e8/agentdeck-linux-arm64",
+        "notes": "",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "fZHw6LJsMUw/UWDZqLBIrjbdfAnet9flpGOrhYs8ZWoPdg4XRiMMcw/SPLawSGfqbOYTUXwI62UTpV7ngjwQCw=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.48-linux-arm64.tar.gz",
+        "bytes": 7607643,
+        "sha256": "d66dc865a268c276f95c327220013820f86cb2f41c9448972f21477c3a59b897",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.48/d66dc865a268c276f95c327220013820f86cb2f41c9448972f21477c3a59b897/agentdeck-local-0.4.48-linux-arm64.tar.gz"
+      }
+    }
+  ]
+}

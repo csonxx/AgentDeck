@@ -10,6 +10,10 @@ Instructions for workstation setup, phone pairing, self-hosting and update publi
 
 Run commands from the repository root unless stated otherwise. For AI-assisted setup, provide the OS, project root, enabled agents, connection mode and gateway URL, and state whether an existing installation must be preserved. The user completes sign-in, code comparison and OS installation approval; credentials stay in protected local configuration.
 
+需要后台常驻和网关自动更新，优先使用[工作站安装器](LOCAL_UPDATES.md)，无需自行维护启动脚本。下面的源码 `serve` 适合开发或手动管理，不会自动替换程序。
+
+For managed background operation and gateway updates, use the [workstation installer](LOCAL_UPDATES.md). The source `serve` setup below is for development/manual management and does not replace its own executable.
+
 ## 环境准备与后端构建 / Prerequisites and backend build
 
 当前主要验收平台为 **macOS 工作站 + Android arm64-v8a 手机**。Go 服务可用于 Linux；桌面 IPC、macOS 自动打开原会话等能力受平台和原生版本限制。Flutter 使用 `dart:io`，不是 Web App；iOS/macOS 源码目录不代表已有同等实机验收。
@@ -102,7 +106,7 @@ Choose QR/pasted pairing in the app and use the generated PNG/JSON privately. In
 手机下载上方对应 APK，按 Android 提示允许该安装来源并安装。USB 安装也可使用 / Download an edition on the phone and approve its Android install source, or install with ADB:
 
 ```sh
-adb -s DEVICE_SERIAL install -r /absolute/path/to/agentdeck-0.4.46-arm64-v8a-lite.apk
+adb -s DEVICE_SERIAL install -r /absolute/path/to/agentdeck-0.4.47-arm64-v8a-lite.apk
 ```
 
 签名不一致会拒绝覆盖；不要通过自动卸载来“修复”，卸载会丢失手机配对和设置。/ A signing mismatch prevents replacement. Do not automatically uninstall to work around it; uninstalling loses phone pairing and preferences.
@@ -207,6 +211,14 @@ receipt 为上传后实际公网全量核验记录，包含 `url`、`bytes`、`s
 - **网关解绑 / Unlink:** 在电脑页解除关联；网关验证撤销并回执后清除本机关联。重新关联获得新身份，手机需重新选工作站及配对。网关不可用时保留原关联供重试。/ Unlink waits for authenticated gateway revocation; re-enrollment requires phone selection/pairing again. Failed unlink keeps the original association.
 - **保活 / Availability:** Mac 锁屏不等于休眠。电脑休眠、退出 Agent 或停止 Local 会影响执行/同步；不要用修改 Agent 登录和权限解决网络问题。/ Screen lock and sleep differ. Sleep, agent exit or stopping Local interrupts service; do not alter credentials/permissions to fix transport issues.
 
+## Codex 额度与重置卡 / Codex usage and reset cards
+
+此功能需要更新 App 和 S-LOCAL，并使用支持重置卡信息的 Codex CLI。/ Update both the App and S-LOCAL, and use a Codex CLI that exposes reset card information.
+
+在首页选择 Codex → **用量**，可查看可用重置卡的标题、说明、获得和到期时间，以及官方领取／使用记录。点「使用这张」后，App 会重新核对电脑登录账号和额度，再弹出确认；只有确认后才会使用一张。五小时或每周核心额度剩余不超过 10% 时可用，与电脑端条件相同。/ Select Codex → **Usage** on the home screen for available cards, descriptions, grant/expiry dates and official received/used history. Selecting a card checks the desktop account and fresh usage before asking for confirmation. Only confirmation uses a card. Either the five-hour or weekly core limit must have 10% or less remaining, matching the desktop requirement.
+
+发生断网或结果未知时，先刷新记录和额度，再用「核对原请求」处理。App 不会自动重试使用重置卡；手动核对会再次确认，并沿用同一请求编号，避免重复消耗。电脑 CLI 太旧或官方接口未返回字段时会显示暂不可读，不会将未知数量当作零。历史通过电脑登录态读取，手机和网关不会收到 Codex 登录凭据。/ If disconnected or the outcome is unknown, refresh history and usage before checking the original request. The app never retries card usage automatically. A manual retry asks again and preserves the original request ID. Missing fields or an old CLI are shown as unavailable, not zero. History is read using the workstation login; Codex credentials never reach the phone or gateway.
+
 ## 排障与验收 / Troubleshooting and acceptance
 
 | 现象 / Symptom | 检查 / Check |
@@ -223,6 +235,8 @@ receipt 为上传后实际公网全量核验记录，包含 `url`、`bytes`、`s
 | 启动后暂时无页面 / Slow initial startup | 大型已有 vault 的展示索引检查可延迟监听；查看启动进程/日志，避免反复强杀或重建数据 / Existing large vaults may delay serving during index checks; inspect progress rather than repeatedly killing/resetting |
 
 网关默认文本 INFO 日志，连接变化立即打印；每 30 秒输出 `connection_stats`（在线工作站、App 流及请求数）。`--log-level debug` 可辅助排障，仍不应记录凭据或会话正文。代理后真实 IP 仅信任 `AGENTDECK_TRUSTED_PROXY_CIDRS` 指定的来源。/ Gateway INFO text logs include immediate connection changes and a 30-second connection_stats summary. Debug logging remains credential/content safe; forwarded IPs require explicitly configured trusted proxy CIDRs. [日志与本机排障 / Diagnostics](WORKSTATION.md)
+
+0.4.47 的 App 与 S-LOCAL 会用 `request` 关联 `session_open`（本地排队、历史读取、写出）和 `session_open_client`（发送前等待、往返、接收排队、解密、应用数据、首帧显示）。计时使用手机单调时钟；日志只包含会话编号、耗时和数据量。排查“已连接但点开慢”时对照这两条记录，不能把本地读取耗时当作手机实际打开耗时。/ App and S-LOCAL 0.4.47 correlate `session_open` and `session_open_client` by request ID. They separate Local processing from client send/round-trip/receive-queue/decode/apply/first-paint time. Client timings use a monotonic clock; logs contain identifiers, durations and sizes only. Compare both records when a connected phone opens slowly; Local read time alone does not measure phone opening time.
 
 完整验收至少检查：手机看到真实历史 → 专用测试会话发送且在目标 Agent 原会话执行 → 输出/图片同步 → 后台恢复和断线补齐 → 需要时完整审批 → 已配对设备撤销。没有真实授权的 Agent 或没有现场执行的分支，标为未验收。/ Acceptance requires real history, execution in a dedicated intended chat, live output/images, background/reconnect recovery, applicable approval and device revocation. Mark unexercised agents/branches explicitly as unaccepted.
 

@@ -22,6 +22,7 @@ import 'download_manager.dart';
 import 'app_update.dart';
 import 'outbox.dart';
 import 'client_health.dart';
+import 'session_open_timing.dart';
 export 'client_health.dart';
 
 class AgentRequestException extends HttpException {
@@ -116,6 +117,27 @@ class AgentClient extends ChangeNotifier {
   @visibleForTesting
   final SecurityContext? trustedRoots;
   final ProtocolClock clock;
+  SessionOpenTiming? _sessionOpen;
+
+  // Called after a frame containing the received history has actually painted.
+  // The authenticated diagnostic packet is bounded metadata, never chat content.
+  void historyPresented(String session, int renderedRevision) {
+    final timing = _sessionOpen;
+    if (timing == null || timing.session != session || selected != session) {
+      return;
+    }
+    final metrics = timing.presented(clock.stamp, renderedRevision);
+    if (metrics == null || !connected) return;
+    unawaited(
+      send({
+        'method': 'client_timing',
+        'id': timing.request,
+        'session': session,
+        'timing': metrics,
+      }).catchError((Object _) {}),
+    );
+  }
+
   AgentClient({DeviceVault? vault, this.trustedRoots, ProtocolClock? clock})
     : vault = vault ?? DeviceVault(),
       clock = clock ?? ProtocolClock();
@@ -682,8 +704,11 @@ class AgentClient extends ChangeNotifier {
           // Validate expiry against arrival, not time spent decrypting earlier
           // frames in our serial queue (large attachments can take seconds).
           final arrivalEpoch = epoch;
+          final arrivalStamp = clock.stamp;
           _receiveQueue = _receiveQueue
-              .then((_) => _receive(data, generation, arrivalEpoch))
+              .then(
+                (_) => _receive(data, generation, arrivalEpoch, arrivalStamp),
+              )
               .catchError((Object failure) {
                 assert(() {
                   debugPrint(
@@ -843,14 +868,23 @@ class AgentClient extends ChangeNotifier {
       if (generation != _generation || !connected) {
         throw AgentRequestException('连接已更新', notSent: true);
       }
+      if (data['method'] == 'watch' && _sessionOpen?.request == data['id']) {
+        _sessionOpen?.sent = clock.stamp;
+      }
       _socket!.add(jsonEncode(b));
     });
     _sendQueue = task.catchError((Object _) {});
     return task;
   }
 
-  Future<void> _receive(dynamic raw, int generation, int arrivalEpoch) async {
+  Future<void> _receive(
+    dynamic raw,
+    int generation,
+    int arrivalEpoch,
+    int arrivalStamp,
+  ) async {
     if (generation != _generation) return;
+    final decodingStamp = clock.stamp;
     if (raw is! String || raw.length > 24 << 20) {
       throw const FormatException('Invalid frame');
     }
@@ -872,6 +906,7 @@ class AgentClient extends ChangeNotifier {
       b,
     );
     if (generation != _generation) return;
+    final decodedStamp = clock.stamp;
     _received = b['seq'] as int;
     switch (m['type']) {
       case 'device':
@@ -926,6 +961,17 @@ class AgentClient extends ChangeNotifier {
           transcripts
               .putIfAbsent(id, Transcript.new)
               .liveSnapshot(Map<String, dynamic>.from(m['page'] as Map));
+          final timing = _sessionOpen;
+          if (timing?.session == id && timing?.request == m['id']) {
+            timing!.received(
+              arrival: arrivalStamp,
+              decodeStart: decodingStamp,
+              decodeEnd: decodedStamp,
+              applyEnd: clock.stamp,
+              bytes: raw.length,
+              revision: transcripts[id]!.revision,
+            );
+          }
         }
       case 'events':
         final id = m['session'] as String;
@@ -987,11 +1033,56 @@ class AgentClient extends ChangeNotifier {
     }
   }
 
+  // Account reads and explicit reset requests share one lane. The server has
+  // two async slots; keep the other available for home goals/status queries.
+  // Queueing never retries a request, especially an explicit card redemption.
+  Future<void> _codexAccountQueue = Future.value();
+  Future<Map<String, dynamic>> _codexAccountRequest(
+    Map<String, dynamic> data, {
+    Duration timeout = const Duration(seconds: 70),
+  }) {
+    final task = _codexAccountQueue.then(
+      (_) async => Map<String, dynamic>.from(
+        await request({...data, 'agent': 'codex'}, timeout: timeout),
+      ),
+    );
+    _codexAccountQueue = task.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return task;
+  }
+
   Future<AccountUsage> accountUsage(String agent) async => AccountUsage(
-    Map<String, dynamic>.from(
-      await request({'method': 'usage', 'agent': agent}),
-    ),
+    agent == 'codex'
+        ? await _codexAccountRequest({'method': 'usage'})
+        : Map<String, dynamic>.from(
+            await request({'method': 'usage', 'agent': agent}),
+          ),
   );
+
+  Future<Map<String, dynamic>> codexResetState() =>
+      _codexAccountRequest({'method': 'usage_resets'});
+  Future<Map<String, dynamic>> codexResetHistory([String cursor = '']) =>
+      _codexAccountRequest({
+        'method': 'usage_reset_history',
+        'reset_cursor': cursor,
+      });
+  Future<Map<String, dynamic>> prepareCodexReset(
+    String credit,
+    String account,
+  ) => _codexAccountRequest({
+    'method': 'usage_reset_prepare',
+    'reset_credit': credit,
+    'reset_account': account,
+  });
+  Future<Map<String, dynamic>> consumeCodexReset(String intent, String id) =>
+      _codexAccountRequest({
+        'method': 'usage_reset_consume',
+        'reset_intent': intent,
+        'id': id,
+        'confirmed': true,
+      }, timeout: const Duration(seconds: 60));
 
   static String requestID() => List.generate(
     16,
@@ -1377,6 +1468,10 @@ class AgentClient extends ChangeNotifier {
   }
 
   Future<void> watch(String id) async {
+    final timing = id.isEmpty
+        ? null
+        : SessionOpenTiming(id, requestID(), clock.stamp);
+    _sessionOpen = timing;
     selected = id;
     final current = transcripts.remove(id) ?? Transcript();
     transcripts[id] = current;
@@ -1389,6 +1484,7 @@ class AgentClient extends ChangeNotifier {
     if (connected) {
       await send({
         'method': 'watch',
+        if (timing != null) 'id': timing.request,
         'session': id,
         'recent': true,
         'compact': true,
@@ -1477,6 +1573,7 @@ class AgentClient extends ChangeNotifier {
 
   Future<void> unwatch(String id) async {
     if (selected != id) return;
+    _sessionOpen = null;
     selected = '';
     if (connected) await send({'method': 'watch', 'session': ''});
   }

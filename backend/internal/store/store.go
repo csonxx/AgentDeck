@@ -3,6 +3,7 @@
 package store
 
 import (
+	"agentdeck/internal/localipc"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -77,10 +78,10 @@ type Store struct {
 	key []byte
 }
 
-var buckets = []string{"deliveries", "deliverypayloads", "events", "sessionevents", "transcript", "itemkeys", "outline", "sessions", "seen", "devices", "media", "checkpoints", "invites", "gwtenants", "gwnodes", "gwgrants", "relayconfig", "gwflows", "gwoauth", "gwaccounts", "relaypending", "commands", "agentconfig", "generation", "native_settings", "uploads", "uploadchunks", "mediaowners", "goals"}
+var buckets = []string{"pendingapprovals", "deliveries", "deliverypayloads", "events", "sessionevents", "transcript", "itemkeys", "outline", "sessions", "seen", "devices", "media", "checkpoints", "invites", "gwtenants", "gwnodes", "gwgrants", "relayconfig", "gwflows", "gwoauth", "gwaccounts", "relaypending", "commands", "agentconfig", "generation", "native_settings", "uploads", "uploadchunks", "mediaowners", "goals"}
 
 func New(dir string) (*Store, error) {
-	if e := os.MkdirAll(dir, 0700); e != nil {
+	if e := localipc.PrivateDir(dir); e != nil {
 		return nil, e
 	}
 	_ = os.Chmod(dir, 0700)
@@ -105,6 +106,7 @@ func New(dir string) (*Store, error) {
 	}
 	s := &Store{db, k}
 	e = db.Update(func(t *bolt.Tx) error {
+		rebuildApprovals := t.Bucket([]byte("pendingapprovals")) == nil
 		rebuildIndex := t.Bucket([]byte("sessionevents")) == nil
 		rebuildItems := t.Bucket([]byte("transcript")) == nil
 		rebuildOutline := t.Bucket([]byte("outline")) == nil
@@ -139,6 +141,17 @@ func New(dir string) (*Store, error) {
 					return err
 				}
 				return s.indexOutline(t, ev)
+			}); err != nil {
+				return err
+			}
+		}
+		if rebuildApprovals {
+			if err := t.Bucket([]byte("transcript")).ForEach(func(k, _ []byte) error {
+				var ev Event
+				if err := s.get(t, "transcript", string(k), &ev); err != nil {
+					return err
+				}
+				return s.indexPendingApproval(t, ev)
 			}); err != nil {
 				return err
 			}
@@ -504,6 +517,12 @@ func (s *Store) SetProject(id, project string) error {
 // source offsets, authorization records and event sequences remain intact.
 func (s *Store) RepairPresentation() error {
 	return s.db.Update(func(t *bolt.Tx) error {
+		var repaired bool
+		if err := s.get(t, "generation", "presentation-repair-v1", &repaired); err == nil && repaired {
+			return nil
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 		titles := map[string]string{}
 		changed := false
 		if err := t.Bucket([]byte("events")).ForEach(func(k, v []byte) error {
@@ -550,7 +569,7 @@ func (s *Store) RepairPresentation() error {
 				return err
 			}
 		}
-		return t.Bucket([]byte("sessions")).ForEach(func(k, v []byte) error {
+		if err := t.Bucket([]byte("sessions")).ForEach(func(k, v []byte) error {
 			var ss Session
 			if err := s.get(t, "sessions", string(k), &ss); err != nil {
 				return err
@@ -564,7 +583,10 @@ func (s *Store) RepairPresentation() error {
 			}
 			ss.Title = title
 			return s.put(t, "sessions", string(k), ss)
-		})
+		}); err != nil {
+			return err
+		}
+		return s.put(t, "generation", "presentation-repair-v1", true)
 	})
 }
 
@@ -587,16 +609,21 @@ func (s *Store) RecoverManaged() error {
 		}); err != nil {
 			return err
 		}
-		return t.Bucket([]byte("events")).ForEach(func(k, v []byte) error {
+		return t.Bucket([]byte("pendingapprovals")).ForEach(func(k, v []byte) error {
 			var ev Event
-			if e := s.get(t, "events", string(k), &ev); e != nil {
+			if e := s.get(t, "pendingapprovals", string(k), &ev); e != nil {
 				return e
 			}
 			if ev.Kind == "approval" && ev.Status == "pending" {
 				ev.Status = "resolved"
 				ev.Text = "工作站已重启，原审批失效"
 				updates = append(updates, ev)
-				return s.put(t, "events", string(k), ev)
+				if err := s.put(t, "events", seqKey(ev.Seq), ev); err != nil {
+					return err
+				}
+				// Append the resolved presentation event below; it removes the
+				// index entry atomically. Do not delete while ForEach is iterating.
+				return nil
 			}
 			return nil
 		})

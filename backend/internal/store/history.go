@@ -14,6 +14,9 @@ import (
 // Keep an encrypted, materialized item index alongside the original event log.
 // Paging never splits delta streams; agent resume/fork still uses the full log.
 func (s *Store) mergeItem(t *bolt.Tx, ev Event) error {
+	if err := s.indexPendingApproval(t, ev); err != nil {
+		return err
+	}
 	if ev.Kind == "status" {
 		return nil
 	}
@@ -227,4 +230,32 @@ func (s *Store) TranscriptItem(session, item, kind string) (Event, error) {
 		return nil
 	})
 	return out, err
+}
+
+// Keep only the latest unresolved approvals. Recovery no longer decrypts the
+// entire event archive on every unattended restart.
+func (s *Store) indexPendingApproval(t *bolt.Tx, ev Event) error {
+	if ev.Kind != "approval" {
+		return nil
+	}
+	item := ev.Item
+	if item == "" {
+		item = ev.ID
+	}
+	h := sha256.Sum256([]byte(ev.Session + "\x00" + item))
+	key := hex.EncodeToString(h[:])
+	if ev.Status == "pending" {
+		return s.put(t, "pendingapprovals", key, ev)
+	}
+	return t.Bucket([]byte("pendingapprovals")).Delete([]byte(key))
+}
+
+func (s *Store) HasPendingApprovals() (bool, error) {
+	pending := false
+	err := s.db.View(func(t *bolt.Tx) error {
+		k, _ := t.Bucket([]byte("pendingapprovals")).Cursor().First()
+		pending = k != nil
+		return nil
+	})
+	return pending, err
 }
