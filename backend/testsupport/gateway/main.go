@@ -172,6 +172,55 @@ func run(dir, listen string) error {
 		_ = g.RevokeGrant(req.Grant)
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	})
+	mux.HandleFunc("GET /agentdeck/fixture/transports", func(w http.ResponseWriter, r *http.Request) {
+		response, err := server.AdminClient(filepath.Join(dir, "local-state")).Get("http://unix/app-connections")
+		if err != nil {
+			http.Error(w, "unavailable", 503)
+			return
+		}
+		defer response.Body.Close()
+		var status struct {
+			Devices []struct {
+				Transports []string `json:"transports"`
+				IPs        []string `json:"ips"`
+			} `json:"devices"`
+		}
+		if json.NewDecoder(response.Body).Decode(&status) != nil {
+			http.Error(w, "bad status", 503)
+			return
+		}
+		counts := map[string]int{"webrtc": 0, "gateway": 0, "https": 0}
+		for _, d := range status.Devices {
+			for _, transport := range d.Transports {
+				counts[transport]++
+				if transport == "webrtc" && len(d.IPs) > 0 {
+					counts["webrtc_with_ip"]++
+				}
+			}
+		}
+		json.NewEncoder(w).Encode(counts)
+	})
+	mux.HandleFunc("POST /agentdeck/fixture/native-result", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16384))
+		var report map[string]any
+		if err != nil || json.Unmarshal(body, &report) != nil {
+			http.Error(w, "invalid", 400)
+			return
+		}
+		// Test counts/booleans only; never persist device credentials or chat bodies.
+		safe := map[string]any{}
+		for _, key := range []string{"native_android", "stun_servers", "synthetic_only", "initial_gateway", "direct_verified", "direct_ip_available", "image_over_direct", "download_handle_survived_handover", "fallback_verified", "download_resumed_after_fallback", "revocation_verified", "gateway_opaque", "passed", "failed_stage", "error_type"} {
+			if value, ok := report[key]; ok {
+				safe[key] = value
+			}
+		}
+		raw, _ := json.MarshalIndent(safe, "", "  ")
+		if os.WriteFile(filepath.Join(dir, "native-result.json"), raw, 0600) != nil {
+			http.Error(w, "write failed", 500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	})
 	mux.HandleFunc("GET /agentdeck/fixture/audit", func(w http.ResponseWriter, r *http.Request) {
 		empty := true
 		for _, b := range []string{"events", "sessions", "media", "devices"} {

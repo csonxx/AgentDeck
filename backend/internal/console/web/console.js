@@ -63,7 +63,7 @@
       const info=document.createElement('div'),name=document.createElement('strong'),meta=document.createElement('p'),badge=document.createElement('span'),actions=document.createElement('div');
       name.textContent=device.name||'未命名 App';
       meta.className='hint';
-      meta.textContent=device.online?'本次连接：'+date(device.connected_at):'最后连接：'+(device.last_connected?date(device.last_connected):'暂无记录');
+      meta.textContent=device.online?'本次连接：'+date(device.connected_at)+' · '+(device.transports||[]).map(t=>({webrtc:'点对点直连',gateway:'网关中继',https:'HTTPS 直连'}[t]||t)).join('、'):'最后连接：'+(device.last_connected?date(device.last_connected):'暂无记录');
       badge.className='badge '+(device.online?'online':'neutral');
       badge.textContent=device.online?'在线'+(device.connections>1?' · '+device.connections+' 个连接':''):'离线';
       const ip=document.createElement('p');ip.className='hint';ip.textContent=device.online?'连接 IP：'+(device.ips?.join('、')||'等待网关更新'):'配对时间：'+date(device.paired_at);

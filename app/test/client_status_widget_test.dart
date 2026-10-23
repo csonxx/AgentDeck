@@ -8,7 +8,37 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'widget_test.dart' show OperableClient;
 
+class TransportStatusClient extends OperableClient {
+  String transport = 'gateway';
+  @override
+  String get connectionMethod => transport;
+}
+
 void main() {
+  testWidgets(
+    'status displays the confirmed transport and explains relay fallback',
+    (t) async {
+      final c = TransportStatusClient();
+      addTearDown(c.dispose);
+      c.directNote = '直连未成功，继续使用网关中继';
+      for (final entry in {
+        'gateway': 'Gateway relay',
+        'webrtc': 'Peer-to-peer',
+        'https': 'Direct HTTPS',
+      }.entries) {
+        c.transport = entry.key;
+        await t.pumpWidget(
+          MaterialApp(
+            home: Scaffold(body: ClientStatusSheet(client: c)),
+          ),
+        );
+        await t.pumpAndSettle();
+        expect(find.byKey(const ValueKey('connection-method')), findsOneWidget);
+        expect(find.text(entry.value), findsOneWidget);
+        expect(t.takeException(), isNull);
+      }
+    },
+  );
   testWidgets(
     'status details remain usable on a narrow screen with large Russian text',
     (t) async {

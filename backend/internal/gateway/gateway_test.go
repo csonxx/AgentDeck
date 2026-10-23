@@ -33,13 +33,17 @@ type fixture struct {
 func setup(t *testing.T) *fixture {
 	return setupPrefix(t, "")
 }
-func setupPrefix(t *testing.T, prefix string) *fixture {
+func setupPrefix(t *testing.T, prefix string) *fixture { return setupPolicy(t, prefix, nil) }
+func setupPolicy(t *testing.T, prefix string, configure func(*Server)) *fixture {
 	t.Helper()
 	db, e := store.New(t.TempDir())
 	if e != nil {
 		t.Fatal(e)
 	}
 	g := New(db, "", "", "pin", time.Second)
+	if configure != nil {
+		configure(g)
+	}
 	ts := httptest.NewTLSServer(g.Handler())
 	g.URL = ts.URL + prefix
 	g.Pin = relay.Hash(ts.Certificate().RawSubjectPublicKeyInfo)

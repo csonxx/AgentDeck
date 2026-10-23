@@ -43,7 +43,9 @@ class ClientStatusButton extends StatelessWidget {
         const SizedBox(width: 6),
         Flexible(
           child: Text(
-            context.tr(client.state),
+            client.live && client.connectionMethodLabel.isNotEmpty
+                ? '${context.tr(client.state)} · ${context.tr(client.connectionMethodLabel)}'
+                : context.tr(client.state),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -166,6 +168,20 @@ class _ClientStatusSheetState extends State<ClientStatusSheet> {
               ),
               const SizedBox(height: 12),
               Text(context.tr(c.state)),
+              if (c.connectionMethodLabel.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  context.tr(c.connectionMethodLabel),
+                  key: const ValueKey('connection-method'),
+                ),
+              ],
+              if (c.directNote.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  context.tr(c.directNote),
+                  style: const TextStyle(fontSize: 12, color: DeckColors.muted),
+                ),
+              ],
               if (c.device?['url'] case final String endpoint?) ...[
                 const SizedBox(height: 8),
                 SelectableText(

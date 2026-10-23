@@ -47,6 +47,12 @@ type AssociationStatus struct {
 func (s *Server) EnableRelay(ctx context.Context) error {
 	a := &Association{ctx: ctx, s: s, phase: "unlinked"}
 	s.Association = a
+	s.DirectConfig = func() relay.DirectConfig {
+		if c := a.current(); c != nil {
+			return c.DirectConfig()
+		}
+		return relay.DirectConfig{Version: 1, Enabled: false, STUN: []string{}}
+	}
 	s.RelayClock = func() *secure.Clock {
 		if c := a.current(); c != nil {
 			return c.CurrentClock()

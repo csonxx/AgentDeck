@@ -11,6 +11,7 @@ import (
 )
 
 type appDeviceStatus struct {
+	Transports    []string `json:"transports"`
 	IPs           []string `json:"ips"`
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
@@ -30,6 +31,7 @@ type appConnectionStatus struct {
 // Count authenticated WebSockets, never tickets, pairing requests or the
 // workstation/gateway tunnel. Several streams from one device remain one App.
 type appStream struct {
+	Info  func() (string, string)
 	At    time.Time
 	IP    string
 	Close func()
@@ -49,7 +51,7 @@ func connectionIP(r *http.Request) string {
 	return ""
 }
 
-func (s *Server) trackAppConnection(id, ip string, closeStream func()) (func(), error) {
+func (s *Server) trackAppConnection(id, ip string, closeStream func(), info ...func() (string, string)) (func(), error) {
 	at := time.Now().UTC()
 	s.mu.Lock()
 	if s.appStreams == nil {
@@ -67,7 +69,11 @@ func (s *Server) trackAppConnection(id, ip string, closeStream func()) (func(), 
 	}
 	s.appStreamID++
 	stream := s.appStreamID
-	s.appStreams[id][stream] = appStream{at, ip, closeStream}
+	row := appStream{At: at, IP: ip, Close: closeStream}
+	if len(info) > 0 {
+		row.Info = info[0]
+	}
+	s.appStreams[id][stream] = row
 	s.mu.Unlock()
 	_ = s.Store.RecordDeviceConnection(id, at)
 	var once sync.Once
@@ -118,18 +124,29 @@ func (s *Server) appConnections() (appConnectionStatus, error) {
 		row := appDeviceStatus{ID: d.ID, Name: d.Name, Online: len(streams) > 0, Connections: len(streams), LastConnected: d.LastConnected, PairedAt: d.Created}
 		var earliest time.Time
 		seenIPs := map[string]bool{}
+		seenTransports := map[string]bool{}
+		row.Transports = []string{}
 		row.IPs = []string{}
 		for _, stream := range streams {
 			at := stream.At
-			if stream.IP != "" && !seenIPs[stream.IP] {
-				row.IPs = append(row.IPs, stream.IP)
-				seenIPs[stream.IP] = true
+			transport, ip := "https", stream.IP
+			if stream.Info != nil {
+				transport, ip = stream.Info()
+			}
+			if !seenTransports[transport] {
+				row.Transports = append(row.Transports, transport)
+				seenTransports[transport] = true
+			}
+			if ip != "" && !seenIPs[ip] {
+				row.IPs = append(row.IPs, ip)
+				seenIPs[ip] = true
 			}
 			if earliest.IsZero() || at.Before(earliest) {
 				earliest = at
 			}
 		}
 		sort.Strings(row.IPs)
+		sort.Strings(row.Transports)
 		if !earliest.IsZero() {
 			row.ConnectedAt = earliest.Format(time.RFC3339Nano)
 			out.Online++

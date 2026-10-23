@@ -34,6 +34,7 @@ type Node struct {
 	Owner   string `json:"owner,omitempty"`
 }
 type Server struct {
+	Direct             relay.DirectConfig
 	TrustedProxies     []netip.Prefix
 	Store              *store.Store
 	URL, Pin, TLSTrust string
@@ -61,7 +62,7 @@ func NewWithClock(db *store.Store, url, pin, trust string, rotation time.Duratio
 	if clock == nil {
 		clock = secure.NewClock()
 	}
-	g := &Server{Clock: clock, replay: relay.Replay{Clock: clock}, Store: db, URL: url, Pin: pin, TLSTrust: trust, Rotation: rotation, peers: map[string]*relay.Peer{}, active: map[string]int{}}
+	g := &Server{Direct: relay.DefaultDirectConfig(), Clock: clock, replay: relay.Replay{Clock: clock}, Store: db, URL: url, Pin: pin, TLSTrust: trust, Rotation: rotation, peers: map[string]*relay.Peer{}, active: map[string]int{}}
 	_ = g.ConfigureLogging(os.Stderr, "info")
 	return g
 }
@@ -269,7 +270,7 @@ func (g *Server) tunnel(w http.ResponseWriter, r *http.Request) {
 	defer ws.Close()
 	key, _ := secure.B64.DecodeString(n.Key)
 	salt := secure.Random(32)
-	box, e := secure.SealJSON(key, "tunnel-welcome/"+n.ID, 0, 0, map[string]any{"workstation_name": n.Name, "salt": secure.B64.EncodeToString(salt), "rotation_ms": g.Rotation.Milliseconds(), "server_time_ms": g.Clock.Millis(), "challenge": relay.Hash([]byte(r.Header.Get("X-Relay-Auth")))})
+	box, e := secure.SealJSON(key, "tunnel-welcome/"+n.ID, 0, 0, map[string]any{"direct": g.Direct, "workstation_name": n.Name, "salt": secure.B64.EncodeToString(salt), "rotation_ms": g.Rotation.Milliseconds(), "server_time_ms": g.Clock.Millis(), "challenge": relay.Hash([]byte(r.Header.Get("X-Relay-Auth")))})
 	if e != nil {
 		return
 	}

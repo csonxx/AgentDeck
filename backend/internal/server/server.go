@@ -2,6 +2,7 @@ package server
 
 import (
 	"agentdeck/internal/localipc"
+	"agentdeck/internal/peerwire"
 	"context"
 	"crypto/ecdh"
 	"crypto/sha256"
@@ -50,6 +51,7 @@ type ticket struct {
 	Clock   *secure.Clock
 }
 type Server struct {
+	DirectConfig   func() relay.DirectConfig
 	Stop           func()
 	updateDraining bool
 	Store          *store.Store
@@ -345,6 +347,8 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 }
 
 type Request struct {
+	SDP               string            `json:"sdp,omitempty"`
+	PeerID            string            `json:"peer_id,omitempty"`
 	ResetCredit       string            `json:"reset_credit,omitempty"`
 	ResetAccount      string            `json:"reset_account,omitempty"`
 	ResetIntent       string            `json:"reset_intent,omitempty"`
@@ -409,14 +413,23 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	up := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return r.Header.Get("Origin") == "" }}
-	conn, e := up.Upgrade(w, r, nil)
+	ws, e := up.Upgrade(w, r, nil)
 	if e != nil {
 		return
 	}
+	conn := peerwire.New(ws)
 	defer conn.Close()
 	disconnect, err := s.trackAppConnection(tk.Device, connectionIP(r), func() {
 		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4003, "pairing revoked"), time.Now().Add(time.Second))
 		_ = conn.Close()
+	}, func() (string, string) {
+		if conn.Direct() {
+			return "webrtc", conn.DirectIP()
+		}
+		if relay.ContextGrant(r.Context()) != "" {
+			return "gateway", connectionIP(r)
+		}
+		return "https", connectionIP(r)
 	})
 	if err != nil {
 		return
@@ -535,7 +548,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		raw, _ := json.Marshal(state)
 		nativeReadState = string(raw)
 		nativeReadCheck = time.Now()
-		return send(map[string]any{"type": "sessions", "id": id, "sessions": ss, "native_reads": state, "codex_desktop": s.Manager != nil && s.Manager.Desktop != nil, "agents": func() any {
+		return send(map[string]any{"type": "sessions", "id": id, "sessions": ss, "native_reads": state, "direct": s.connectionPolicy(), "codex_desktop": s.Manager != nil && s.Manager.Desktop != nil, "agents": func() any {
 			if s.Manager != nil {
 				info := s.Manager.Catalog()
 				encoded, _ := json.Marshal(info)
@@ -593,6 +606,49 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			switch req.Method {
+			case "peer_offer":
+				policy := s.connectionPolicy()
+				if !policy.Enabled {
+					if send(map[string]any{"type": "error", "id": req.ID, "message": "工作站直连已关闭"}) != nil {
+						return
+					}
+					continue
+				}
+				select {
+				case asyncSlots <- struct{}{}:
+					go func(req Request) {
+						defer func() { <-asyncSlots }()
+						ctx, cancel := context.WithTimeout(commandContext, 8*time.Second)
+						defer cancel()
+						answer, err := conn.Offer(ctx, req.SDP, policy.STUN)
+						response := map[string]any{"type": "result", "id": req.ID, "result": answer}
+						if err != nil {
+							response = map[string]any{"type": "error", "id": req.ID, "message": "直连协商未完成，继续使用网关中继"}
+						}
+						select {
+						case asyncResults <- response:
+						case <-stop:
+						}
+					}(req)
+				default:
+					if send(map[string]any{"type": "error", "id": req.ID, "message": "直连协商忙，继续使用网关中继"}) != nil {
+						return
+					}
+				}
+			case "peer_commit":
+				if !conn.Ready(req.PeerID) {
+					if send(map[string]any{"type": "error", "id": req.ID, "message": "直连尚未就绪，继续使用网关中继"}) != nil {
+						return
+					}
+					continue
+				}
+				if send(map[string]any{"type": "result", "id": req.ID, "result": map[string]any{"transport": "webrtc"}}) != nil {
+					return
+				}
+				if conn.Activate(req.PeerID) != nil {
+					return
+				}
+				slog.Info("app_transport_changed", "transport", "webrtc")
 			case "client_timing":
 				accepted := false
 				if time.Since(clientTimingCheck) >= time.Second {
@@ -1067,4 +1123,11 @@ func AdminClient(dir string) *http.Client {
 }
 func (s *Server) String() string {
 	return fmt.Sprintf("AgentDeck %s rotation=%s", s.PublicURL, s.Rotation)
+}
+
+func (s *Server) connectionPolicy() relay.DirectConfig {
+	if s.DirectConfig != nil {
+		return s.DirectConfig()
+	}
+	return relay.DefaultDirectConfig()
 }

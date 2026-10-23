@@ -1,7 +1,7 @@
 name: agentdeck
 description: Encrypted live coding-agent companion.
 publish_to: none
-version: 0.4.48+7065
+version: 0.4.49+7066
 environment:
   sdk: ^3.10.0
 dependencies:
@@ -24,6 +24,7 @@ dependencies:
   archive: ^4.3.0
   xml: ^6.6.1
   cryptography_flutter: 2.3.4
+  flutter_webrtc: 1.6.2+hotfix.4
 dev_dependencies:
   flutter_test:
     sdk: flutter

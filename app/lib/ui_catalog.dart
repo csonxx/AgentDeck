@@ -1,5 +1,38 @@
 // App-owned interface strings only. Conversation content is never translated.
 const uiCatalog = <String, List<String>>{
+  "直连切换未完成，正在恢复网关中继": [
+    "Direct handover interrupted; restoring gateway relay",
+    "直連切換未完成，正在恢復閘道中繼",
+    "Переход на прямое соединение прерван; восстанавливаем ретрансляцию",
+  ],
+  "点对点直连": ["Peer-to-peer", "點對點直連", "Прямое P2P"],
+  "网关中继": ["Gateway relay", "閘道中繼", "Ретрансляция"],
+  "HTTPS 直连": ["Direct HTTPS", "HTTPS 直連", "Прямое HTTPS"],
+  "正在尝试直连，当前使用网关中继": [
+    "Trying a direct connection; using gateway relay",
+    "正在嘗試直連，目前使用閘道中繼",
+    "Проверяем прямое соединение; используется ретрансляция",
+  ],
+  "直连已中断，已回退网关中继": [
+    "Direct connection lost; using gateway relay",
+    "直連已中斷，已回退閘道中繼",
+    "Прямое соединение потеряно; используется ретрансляция",
+  ],
+  "网关已关闭直连": [
+    "Direct connections disabled by gateway",
+    "閘道已關閉直連",
+    "Прямые соединения отключены шлюзом",
+  ],
+  "未配置 STUN，局域网或 IPv6 直连未成功，继续使用网关中继": [
+    "No STUN configured. LAN/IPv6 direct connection failed; using relay",
+    "未設定 STUN，區域網路或 IPv6 直連未成功，繼續使用閘道中繼",
+    "STUN не настроен. Прямое LAN/IPv6 соединение недоступно; используется ретрансляция",
+  ],
+  "直连未成功，继续使用网关中继": [
+    "Direct connection unavailable; using gateway relay",
+    "直連未成功，繼續使用閘道中繼",
+    "Прямое соединение недоступно; используется ретрансляция",
+  ],
   "重置卡": ["Reset cards", "重置卡", "Карты сброса"],
   "刷新重置卡": ["Refresh reset cards", "重新整理重置卡", "Обновить карты сброса"],
   "上次重置记录暂不可读，请先核对电脑使用记录": [

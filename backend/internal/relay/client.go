@@ -26,6 +26,7 @@ type Client struct {
 	timeMu sync.Mutex
 	peer   *Peer
 	status ConnectionStatus
+	direct DirectConfig
 }
 
 type ConnectionStatus struct {
@@ -139,14 +140,25 @@ func (c *Client) connect(ctx context.Context, handler http.Handler) error {
 		return errors.New("gateway tunnel welcome rejected")
 	}
 	var welcome struct {
-		Name      string `json:"workstation_name"`
-		Salt      string `json:"salt"`
-		Rotation  int64  `json:"rotation_ms"`
-		Challenge string `json:"challenge"`
+		Direct    *DirectConfig `json:"direct"`
+		Name      string        `json:"workstation_name"`
+		Salt      string        `json:"salt"`
+		Rotation  int64         `json:"rotation_ms"`
+		Challenge string        `json:"challenge"`
 	}
 	if json.Unmarshal(plain, &welcome) != nil || welcome.Challenge != Hash([]byte(proof)) || welcome.Rotation < 1000 {
 		return errors.New("gateway tunnel identity mismatch")
 	}
+	direct := DefaultDirectConfig()
+	if welcome.Direct != nil {
+		direct = *welcome.Direct
+	}
+	if direct.Validate() != nil {
+		return errors.New("invalid gateway direct connection policy")
+	}
+	c.mu.Lock()
+	c.direct = direct
+	c.mu.Unlock()
 	salt, e := secure.B64.DecodeString(welcome.Salt)
 	if e != nil || len(salt) != 32 {
 		return errors.New("invalid tunnel salt")
@@ -260,4 +272,15 @@ func (c *Client) CurrentClock() *secure.Clock {
 		return nil
 	}
 	return c.peer.Clock
+}
+
+func (c *Client) DirectConfig() DirectConfig {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v := c.direct
+	if v.Version == 0 {
+		return DefaultDirectConfig()
+	}
+	v.STUN = append([]string{}, v.STUN...)
+	return v
 }

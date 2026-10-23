@@ -1,5 +1,25 @@
 // App-owned backend messages. Keep wire values and conversation bodies unchanged.
 const backendUiMessages = <String, List<String>>{
+  "工作站直连已关闭": [
+    "Direct connections are disabled on the workstation.",
+    "工作站直連已關閉",
+    "Прямые соединения отключены на рабочей станции.",
+  ],
+  "直连协商未完成，继续使用网关中继": [
+    "Direct negotiation did not complete; using gateway relay.",
+    "直連協商未完成，繼續使用閘道中繼",
+    "Прямое соединение не установлено; используется ретрансляция.",
+  ],
+  "直连协商忙，继续使用网关中继": [
+    "Direct negotiation is busy; using gateway relay.",
+    "直連協商忙，繼續使用閘道中繼",
+    "Установка прямого соединения занята; используется ретрансляция.",
+  ],
+  "直连尚未就绪，继续使用网关中继": [
+    "Direct connection is not ready; using gateway relay.",
+    "直連尚未就緒，繼續使用閘道中繼",
+    "Прямое соединение не готово; используется ретрансляция.",
+  ],
   "暂时无法读取 Codex 重置卡，请检查电脑登录和 CLI 版本": [
     "Could not read Codex reset cards. Check desktop login and CLI version.",
     "暫時無法讀取 Codex 重置卡，請檢查電腦登入和 CLI 版本",

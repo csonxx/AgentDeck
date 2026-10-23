@@ -23,6 +23,8 @@ import 'app_update.dart';
 import 'outbox.dart';
 import 'client_health.dart';
 import 'session_open_timing.dart';
+import 'hybrid_socket.dart';
+import 'peer_channel.dart';
 export 'client_health.dart';
 
 class AgentRequestException extends HttpException {
@@ -138,9 +140,14 @@ class AgentClient extends ChangeNotifier {
     );
   }
 
-  AgentClient({DeviceVault? vault, this.trustedRoots, ProtocolClock? clock})
-    : vault = vault ?? DeviceVault(),
-      clock = clock ?? ProtocolClock();
+  AgentClient({
+    DeviceVault? vault,
+    this.trustedRoots,
+    ProtocolClock? clock,
+    PeerFactory? peerFactory,
+  }) : vault = vault ?? DeviceVault(),
+       clock = clock ?? ProtocolClock(),
+       peerFactory = peerFactory ?? NativePeerChannel.create;
   Map<String, dynamic>? device;
   List<AgentSession> sessions = [];
   SessionReads sessionReads = SessionReads();
@@ -311,7 +318,26 @@ class AgentClient extends ChangeNotifier {
   final Map<String, Transcript> transcripts = {};
   final Map<String, Uint8List> images = {};
   final Map<String, Completer<Uint8List>> _media = {};
-  WebSocket? _socket;
+  HybridSocket? _socket;
+  final PeerFactory peerFactory;
+  Timer? _directRetry;
+  int _directAttemptGeneration = -1, _directCooldownUntil = 0;
+  Map<String, dynamic>? _directPolicy;
+  String directNote = '';
+  String get connectionMethod => !connected || _socket == null
+      ? ''
+      : _socket?.direct == true
+      ? 'webrtc'
+      : device?['relay'] != null
+      ? 'gateway'
+      : 'https';
+  String get connectionMethodLabel => switch (connectionMethod) {
+    'webrtc' => '点对点直连',
+    'gateway' => '网关中继',
+    'https' => 'HTTPS 直连',
+    _ => '',
+  };
+
   HttpClient? _http;
   Timer? _retry, _heartbeat, _cacheTimer, _notifyTimer, _syncTimer;
   bool _cacheWriting = false;
@@ -612,6 +638,9 @@ class AgentClient extends ChangeNotifier {
     }
     if (device == null || _closed || demo || _connecting || _suspended) return;
     _connecting = true;
+    _directRetry?.cancel();
+    _directAttemptGeneration = -1;
+    _directPolicy = null;
     _retry?.cancel();
     final generation = ++_generation;
     _failPending();
@@ -676,15 +705,16 @@ class AgentClient extends ChangeNotifier {
         authorization: 'Bearer ${welcome['ticket']}',
         unixSeconds: clock.unix,
       );
-      final ws = await WebSocket.connect(
+      final nativeSocket = await WebSocket.connect(
         u.toString(),
         headers: headers,
         customClient: h,
       ).timeout(const Duration(seconds: 15));
       if (_closed || generation != _generation) {
-        await ws.close();
+        await nativeSocket.close();
         return;
       }
+      final ws = HybridSocket(nativeSocket);
       _socket = ws;
       _sent = 0;
       _received = 0;
@@ -776,6 +806,119 @@ class AgentClient extends ChangeNotifier {
     }
   }
 
+  Future<void> _tryDirect() async {
+    final generation = _generation;
+    final socket = _socket;
+    final policy = _directPolicy;
+    if (!live ||
+        _suspended ||
+        socket == null ||
+        socket.direct ||
+        device?['relay'] == null ||
+        policy?['version'] != 1 ||
+        _directAttemptGeneration == generation) {
+      return;
+    }
+    _directAttemptGeneration = generation;
+    if (policy?['enabled'] != true) {
+      directNote = '网关已关闭直连';
+      notifyListeners();
+      return;
+    }
+    final servers = (policy?['stun_servers'] as List? ?? [])
+        .whereType<String>()
+        .toList();
+    if (servers.length > 4 ||
+        servers.any((s) => !s.startsWith('stun:') || s.length > 512)) {
+      return;
+    }
+    if (clock.stamp < _directCooldownUntil) {
+      _scheduleDirectRetry(generation);
+      return;
+    }
+    PeerChannel? peer;
+    var commitStarted = false;
+    bool current() =>
+        !_closed && generation == _generation && identical(_socket, socket);
+    directNote = '正在尝试直连，当前使用网关中继';
+    notifyListeners();
+    try {
+      var abandoned = false;
+      final creating = peerFactory(servers);
+      unawaited(
+        creating.then<void>((value) {
+          if (abandoned || !current()) unawaited(value.close());
+        }, onError: (Object _, StackTrace _) {}),
+      );
+      try {
+        peer = await creating.timeout(const Duration(seconds: 5));
+      } catch (_) {
+        abandoned = true;
+        rethrow;
+      }
+      if (!current()) {
+        await peer.close();
+        return;
+      }
+      socket.attach(peer);
+      final offer = await peer.offer();
+      if (!current()) return;
+      final answer = Map<String, dynamic>.from(
+        await request({
+              'method': 'peer_offer',
+              'sdp': offer,
+            }, timeout: const Duration(seconds: 12))
+            as Map,
+      );
+      if (!current()) return;
+      final id = answer['peer_id'];
+      if (id is! String ||
+          id.isEmpty ||
+          id.length > 80 ||
+          answer['sdp'] is! String) {
+        throw const FormatException('Invalid peer negotiation');
+      }
+      await peer.answer(answer['sdp'] as String);
+      await peer.ready;
+      if (!current()) return;
+      commitStarted = true;
+      final result = await request({
+        'method': 'peer_commit',
+        'peer_id': id,
+      }, timeout: const Duration(seconds: 5));
+      if (!current()) return;
+      if (result is! Map || result['transport'] != 'webrtc') {
+        throw const FormatException('Invalid peer commit');
+      }
+      socket.activate();
+      directNote = '';
+      notifyListeners();
+    } catch (_) {
+      if (!current()) return;
+      directNote = servers.isEmpty
+          ? '未配置 STUN，局域网或 IPv6 直连未成功，继续使用网关中继'
+          : '直连未成功，继续使用网关中继';
+      if (commitStarted) {
+        _lost(failure: '直连切换未完成，正在恢复网关中继');
+      } else {
+        await socket.detach();
+        _scheduleDirectRetry(generation);
+        if (current()) notifyListeners();
+      }
+    } finally {
+      if (!current()) await peer?.close();
+    }
+  }
+
+  void _scheduleDirectRetry(int generation) {
+    _directRetry?.cancel();
+    _directRetry = Timer(const Duration(minutes: 2), () {
+      if (_closed || generation != _generation || !live || _suspended) return;
+      _directAttemptGeneration = -1;
+      unawaited(_tryDirect());
+    });
+  }
+
   Future<void> _syncGateway(
     HttpClient h,
     String origin,
@@ -813,6 +956,11 @@ class AgentClient extends ChangeNotifier {
 
   void _lost({String? failure}) {
     if (_closed || demo) return;
+    if (_socket?.direct == true) {
+      _directCooldownUntil = clock.stamp + 60000;
+      directNote = '直连已中断，已回退网关中继';
+    }
+    _directRetry?.cancel();
     ++_generation;
     final revoked = device?['revoked'] == true;
     health.transition(
@@ -871,7 +1019,7 @@ class AgentClient extends ChangeNotifier {
       if (data['method'] == 'watch' && _sessionOpen?.request == data['id']) {
         _sessionOpen?.sent = clock.stamp;
       }
-      _socket!.add(jsonEncode(b));
+      await _socket!.add(jsonEncode(b));
     });
     _sendQueue = task.catchError((Object _) {});
     return task;
@@ -912,6 +1060,10 @@ class AgentClient extends ChangeNotifier {
       case 'device':
         await _acceptDeviceName(m['name'] as String?);
       case 'sessions':
+        final direct = m['direct'];
+        _directPolicy = direct is Map
+            ? Map<String, dynamic>.from(direct)
+            : null;
         codexDesktop = m['codex_desktop'] == true;
         _updateAgents(m);
         projects = (m['projects'] as List? ?? [])
@@ -930,6 +1082,7 @@ class AgentClient extends ChangeNotifier {
         );
         health.synchronized();
         _syncTimer?.cancel();
+        unawaited(_tryDirect());
         _requests.remove(m['id'])?.complete(m);
       case 'agents':
         _updateAgents(m);
@@ -1928,6 +2081,7 @@ class AgentClient extends ChangeNotifier {
     _failPending();
     _retry?.cancel();
     _goalTimer?.cancel();
+    _directRetry?.cancel();
     _heartbeat?.cancel();
     _syncTimer?.cancel();
     _cacheTimer?.cancel();
@@ -2020,6 +2174,7 @@ class AgentClient extends ChangeNotifier {
     _failPending();
     _retry?.cancel();
     _goalTimer?.cancel();
+    _directRetry?.cancel();
     _heartbeat?.cancel();
     _syncTimer?.cancel();
     _cacheTimer?.cancel();

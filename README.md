@@ -30,6 +30,10 @@ S-LOCAL 也支持通过网关自动更新，覆盖 macOS、Windows、Linux 的 a
 
 S-LOCAL also supports gateway updates on macOS, Windows and Linux (arm64/amd64). See [installation and updates](docs/LOCAL_UPDATES.md) for setup, migration and publication.
 
+支持后台协商点对点直连，失败时继续使用网关中继，界面显示实际连接方式。未配置 STUN 时可尝试局域网 / IPv6；公网 NAT 打洞需要另配 STUN。配置、加密及验证方式见 [直连与回退](docs/PEER_CONNECTIONS.md)。
+
+Background peer-to-peer negotiation falls back to the gateway relay and shows the actual transport. Without STUN it can try LAN/IPv6; public NAT traversal needs a configured STUN server. See [direct connections and fallback](docs/PEER_CONNECTIONS.md).
+
 ## 怎么使用 / Getting started
 
 ### 1. 安装手机 App / Install the app

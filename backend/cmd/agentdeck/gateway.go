@@ -181,6 +181,9 @@ func configureGatewayFeishu(g *gateway.Server, public, id, secret string) error 
 }
 func serveGateway(db *store.Store, dir, addr, public, pin, trust, logLevel string, cert tls.Certificate, behindProxy bool, rotation, connectionLogInterval time.Duration) error {
 	g := gateway.New(db, public, pin, trust, rotation)
+	if err := g.ConfigureDirect(os.Getenv("AGENTDECK_P2P_ENABLED"), os.Getenv("AGENTDECK_STUN_SERVERS")); err != nil {
+		return err
+	}
 	if err := g.ConfigureProxyTrust(os.Getenv("AGENTDECK_TRUSTED_PROXY_CIDRS")); err != nil {
 		return err
 	}
