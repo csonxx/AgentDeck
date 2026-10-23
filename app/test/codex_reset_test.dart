@@ -107,12 +107,49 @@ void main() {
     await t.tap(find.byKey(const ValueKey('reset-use-a')));
     await t.pump();
     await t.pump(const Duration(milliseconds: 350));
-    expect(c.prepares, 1);
+    expect(c.prepares, 0);
+    expect(find.text('使用 Codex 重置卡？'), findsOneWidget);
     expect(c.consumes, 0);
     await t.tap(find.byKey(const ValueKey('reset-cancel')));
     await t.pumpAndSettle();
     expect(c.consumes, 0);
+    expect(c.prepares, 0);
   });
+  testWidgets('back dismisses confirmation without preparing or using a card', (
+    t,
+  ) async {
+    final c = ResetClient();
+    addTearDown(c.dispose);
+    await mount(t, c);
+    await t.tap(find.byKey(const ValueKey('reset-use-a')));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 350));
+    await t.binding.handlePopRoute();
+    await t.pumpAndSettle();
+    expect(find.text('使用 Codex 重置卡？'), findsNothing);
+    expect(c.prepares, 0);
+    expect(c.consumes, 0);
+  });
+  testWidgets(
+    'changing workstation while confirming never submits on the new binding',
+    (t) async {
+      final c = ResetClient();
+      addTearDown(c.dispose);
+      await mount(t, c);
+      await t.tap(find.byKey(const ValueKey('reset-use-a')));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 350));
+      c.device = {'url': 'https://other-workstation', 'device': 'other-device'};
+      await t.tap(find.byKey(const ValueKey('reset-confirm')));
+      await t.pumpAndSettle();
+      expect(c.prepares, 0);
+      expect(c.consumes, 0);
+      expect(
+        await c.vault.storage.read(key: 'agentdeck.codex.reset.pending'),
+        isNull,
+      );
+    },
+  );
   testWidgets('explicit confirmation persists one attempt before consume', (
     t,
   ) async {
@@ -123,9 +160,11 @@ void main() {
     await t.pump();
     await t.pump(const Duration(milliseconds: 350));
     expect(c.consumes, 0);
+    expect(c.prepares, 0);
     await t.tap(find.byKey(const ValueKey('reset-confirm')));
     await t.pumpAndSettle();
     expect(c.consumes, 1);
+    expect(c.prepares, 1);
     expect(find.text('已使用一张重置卡，额度已重置'), findsOneWidget);
     expect(
       await c.vault.storage.read(key: 'agentdeck.codex.reset.pending'),

@@ -62,6 +62,7 @@ class OutboxTestClient extends AgentClient {
   Object? failure;
   bool loseAckOnce = false;
   int uploads = 0;
+  int preparations = 0;
   OutboxTestClient(MemoryOutgoingVault vault, {Map<String, String>? executed})
     : executed = executed ?? {},
       super(vault: vault) {
@@ -81,6 +82,17 @@ class OutboxTestClient extends AgentClient {
     transcripts['a'] = Transcript();
     projects = [AgentProject(id: 'p', name: 'Fixture', path: '/fixture')];
   }
+  @override
+  Future<AgentSession> prepareOutgoingSession(
+    String agent,
+    String project,
+    String parent,
+    String id,
+  ) async {
+    preparations++;
+    return sessions.firstWhere((s) => s.id == parent);
+  }
+
   @override
   Future<void> watch(String id) async {
     selected = id;

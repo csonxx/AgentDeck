@@ -24,6 +24,7 @@ func (s *Store) AdoptCodexDesktop(id, project string) error {
 			return errors.New("desktop project mismatch")
 		}
 		current.Source = "desktop"
+		current.Managed = true
 		return s.put(t, "sessions", id, current)
 	})
 }

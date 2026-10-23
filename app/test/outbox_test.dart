@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:agentdeck/core/client.dart';
 import 'package:agentdeck/core/input.dart';
+import 'package:agentdeck/core/model.dart';
 import 'package:agentdeck/core/vault.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,8 +18,102 @@ Future<void> until(bool Function() done) async {
   fail('outbox did not reach expected state');
 }
 
+class SendDiagnosticClient extends OutboxTestClient {
+  final diagnostics = <Map<String, dynamic>>[];
+  SendDiagnosticClient() : super(MemoryOutgoingVault());
+  @override
+  Future<void> send(Map<String, dynamic> data) async {
+    diagnostics.add(data);
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'running timing requires both this input and native running status',
+    () async {
+      final c = SendDiagnosticClient();
+      addTearDown(c.dispose);
+      final t = await c.outbox.enqueue(
+        c.sessions.first,
+        'Synthetic diagnostic',
+        const TurnOptions(),
+        [],
+        'send',
+      );
+      await until(() => t.state == 'accepted');
+      expect(c.diagnostics.length, 1);
+      expect(c.diagnostics.single['send_timing']['running_ms'], isNull);
+      c.sessions = [
+        AgentSession(
+          id: 'a',
+          agent: 'opencode',
+          title: 'Fixture',
+          source: 'opencode-api',
+          status: 'running',
+          project: '/fixture',
+          managed: true,
+        ),
+      ];
+      c.notifyListeners();
+      expect(
+        c.diagnostics.length,
+        1,
+      ); // an old turn is not proof of new execution
+      c.transcripts['a']!.add({
+        'id': 'input',
+        'seq': 1,
+        'first': 1,
+        'item': '${t.id}:0',
+        'kind': 'message',
+        'role': 'user',
+        'mode': 'snapshot',
+        'text': t.text,
+      });
+      c.notifyListeners();
+      await until(() => c.diagnostics.length == 2);
+      final v = c.diagnostics.last['send_timing'] as Map;
+      expect(v['running_ms'], greaterThanOrEqualTo(v['total_ms']));
+      expect(c.diagnostics.last.containsKey('text'), false);
+      c.notifyListeners();
+      expect(c.diagnostics.length, 2);
+      expect(c.calls.length, 1); // diagnostics never resend the native input
+    },
+  );
+  test(
+    'atomic desktop send skips association round trip and retains original ID',
+    () async {
+      for (final supported in [false, true]) {
+        final c = OutboxTestClient(MemoryOutgoingVault())
+          ..atomicCodexSend = supported
+          ..codexDesktop = true;
+        addTearDown(c.dispose);
+        c.sessions = [
+          AgentSession(
+            id: 'a',
+            agent: 'codex',
+            title: 'Original',
+            source: 'log',
+            status: 'completed',
+            project: '/fixture',
+            managed: false,
+          ),
+        ];
+        final t = await c.outbox.enqueue(
+          c.sessions.first,
+          'Synthetic input',
+          const TurnOptions(),
+          [],
+          'send',
+        );
+        await until(() => t.state == 'accepted');
+        expect(c.preparations, supported ? 0 : 1);
+        expect(c.calls.length, 1);
+        expect(jsonDecode(c.calls.single['payload'])['session'], 'a');
+        expect(c.executed.length, 1);
+      }
+    },
+  );
   test(
     'ciphertext persists message and attachment across a new vault instance',
     () async {

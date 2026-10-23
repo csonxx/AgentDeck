@@ -521,7 +521,13 @@ func (m *Manager) SendInput(id, text, request string, o TurnOptions, files []Inp
 	if ss.Agent == "codex" {
 		m.releaseIdleCodex(id)
 	}
-	if ss.Agent == "codex" && ss.Source != "desktop" && m.Desktop != nil {
+	validated, atomicDesktop := m.Desktop.(interface {
+		SendValidatedInput(context.Context, string, string, string, string, TurnOptions, []any) error
+	})
+	// Imported originals can be validated and adopted as part of the send. The
+	// native bridge performs the same project/safety checks before starting a turn.
+	directOriginal := ss.Agent == "codex" && !ss.Managed && atomicDesktop
+	if ss.Agent == "codex" && ss.Source != "desktop" && m.Desktop != nil && !directOriginal {
 		localRun := m.liveRuntime(id)
 		if localRun == nil {
 			ctx, cancel := context.WithTimeout(nonNil(m.Context), 2*time.Second)
@@ -534,25 +540,29 @@ func (m *Manager) SendInput(id, text, request string, o TurnOptions, files []Inp
 			}
 		}
 	}
-	if m.Store.Get("sessions", id, &ss) == nil && ss.Source == "desktop" {
+	if m.Store.Get("sessions", id, &ss) == nil && (ss.Source == "desktop" || directOriginal) {
 		if m.Desktop == nil {
 			return errors.New("电脑 Codex 桥接未配置")
 		}
 		if _, err := m.allowed(ss.Project); err != nil {
 			return err
 		}
-		thread, err := readDesktopForInput(m.Desktop, m.Context, id)
-		if err != nil {
-			return err
-		}
-		if thread.Kind != "codex" || thread.Host != "local" || thread.ID != id || thread.Project != "" && thread.Project != ss.Project {
-			return errors.New("电脑会话与授权项目不匹配")
+		if !atomicDesktop {
+			thread, err := readDesktopForInput(m.Desktop, m.Context, id)
+			if err != nil {
+				return err
+			}
+			if thread.Kind != "codex" || thread.Host != "local" || thread.ID != id || thread.Project != "" && thread.Project != ss.Project {
+				return errors.New("电脑会话与授权项目不匹配")
+			}
 		}
 		inputs, display, e := m.prepareInput(id, text, request, files)
 		if e != nil {
 			return e
 		}
-		if sender, ok := m.Desktop.(interface {
+		if atomicDesktop {
+			err = validated.SendValidatedInput(m.Context, id, text, request, ss.Project, o, inputs)
+		} else if sender, ok := m.Desktop.(interface {
 			SendInput(context.Context, string, string, string, string, TurnOptions, []any) error
 		}); ok {
 			err = sender.SendInput(m.Context, id, text, request, ss.Project, o, inputs)
@@ -563,6 +573,11 @@ func (m *Manager) SendInput(id, text, request string, o TurnOptions, files []Inp
 		}
 		if err != nil {
 			return err
+		}
+		if directOriginal {
+			if err = m.Store.AdoptCodexDesktop(id, ss.Project); err != nil {
+				return err
+			}
 		}
 		_, _, err = m.Store.MarkDesktopAccepted(store.Event{ID: "desktop-accepted/" + request, Session: id, Agent: ss.Agent, Project: ss.Project, Kind: "status", Status: "pending", Source: "desktop-live"}, ss.Updated)
 		if err != nil {

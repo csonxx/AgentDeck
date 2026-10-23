@@ -355,6 +355,7 @@ type Request struct {
 	ResetCursor       string            `json:"reset_cursor,omitempty"`
 	Confirmed         bool              `json:"confirmed,omitempty"`
 	Timing            *clientOpenTiming `json:"timing,omitempty"`
+	SendTiming        *clientSendTiming `json:"send_timing,omitempty"`
 	Compact           bool              `json:"compact,omitempty"`
 	Item              string            `json:"item,omitempty"`
 	PermissionMode    string            `json:"permission_mode,omitempty"`
@@ -479,6 +480,8 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	var recentMode bool
 	var compactMode bool
 	var clientTimingCheck time.Time
+	var clientSendTimingCheck time.Time
+	clientSendTimingCount := 0
 	last := uint64(0)
 	send := func(v any) error {
 		sent++
@@ -548,7 +551,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		raw, _ := json.Marshal(state)
 		nativeReadState = string(raw)
 		nativeReadCheck = time.Now()
-		return send(map[string]any{"type": "sessions", "id": id, "sessions": ss, "native_reads": state, "direct": s.connectionPolicy(), "codex_desktop": s.Manager != nil && s.Manager.Desktop != nil, "agents": func() any {
+		return send(map[string]any{"type": "sessions", "id": id, "sessions": ss, "native_reads": state, "direct": s.connectionPolicy(), "codex_send_direct": s.Manager != nil && supportsAtomicDesktopInput(s.Manager.Desktop), "codex_desktop": s.Manager != nil && s.Manager.Desktop != nil, "agents": func() any {
 			if s.Manager != nil {
 				info := s.Manager.Catalog()
 				encoded, _ := json.Marshal(info)
@@ -651,7 +654,16 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				slog.Info("app_transport_changed", "transport", "webrtc")
 			case "client_timing":
 				accepted := false
-				if time.Since(clientTimingCheck) >= time.Second {
+				if req.Kind == "send" {
+					if time.Since(clientSendTimingCheck) >= time.Second {
+						clientSendTimingCheck = time.Now()
+						clientSendTimingCount = 0
+					}
+					if clientSendTimingCount < 2 {
+						accepted = logClientSendTiming(req)
+						clientSendTimingCount++
+					}
+				} else if time.Since(clientTimingCheck) >= time.Second {
 					accepted = logClientTiming(req)
 					if accepted {
 						clientTimingCheck = time.Now()
@@ -706,7 +718,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				}
 			case "session_permissions_change", "goal_change", "create", "send", "interrupt", "approve", "queue_cancel", "queue_edit", "queue_steer", "queue_delete":
 				select {
-				case commands <- streamCommand{request: req, hash: sha256.Sum256(plain)}:
+				case commands <- streamCommand{request: req, hash: sha256.Sum256(plain), received: incoming.arrived}:
 				default:
 					if send(map[string]any{"type": "error", "id": req.ID, "message": "输入服务正在处理，请稍后重试", "not_sent": true}) != nil {
 						return

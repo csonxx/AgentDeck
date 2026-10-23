@@ -9,10 +9,10 @@ View and continue your workstation's coding-agent chats from your phone. Project
 - 按 Agent、项目或最近会话查看对话，接收文字、图片和附件。
 - 发送消息、创建会话、停止执行，回答 Agent 的提问和权限请求。
 - 查看会话实际使用的模型、effort 和权限，修改 Agent 支持的选项。
-- 在 Codex 用量页查看重置卡详情和使用记录，手动确认后使用。
+- 在 Codex 用量页查看重置卡详情和使用记录，点击使用后弹出确认框，取消不提交。
 - 离开会话后继续发送；断线后恢复。工具过程默认折叠，点具体项再加载详情。
 
-Browse chats by agent, project or recency. Read text and attachments, send messages, create or stop chats, answer questions and approve tools. Model and permission controls follow each agent's capabilities. Sending survives leaving a chat; folded execution details load when opened. Codex Usage also shows reset card details and history, with explicit confirmation before use.
+Browse chats by agent, project or recency. Read text and attachments, send messages, create or stop chats, answer questions and approve tools. Model and permission controls follow each agent's capabilities. Sending survives leaving a chat; folded execution details load when opened. Codex Usage also shows reset card details and history, with a confirmation dialog before any reset request.
 
 | Agent | 接入情况 / Integration |
 | --- | --- |
@@ -38,14 +38,16 @@ Background peer-to-peer negotiation falls back to the gateway relay and shows th
 
 ### 1. 安装手机 App / Install the app
 
-| 0.4.48 · Android arm64 | 下载 / Download | 大小 / Size |
+| 0.4.50 · Android arm64 | 下载 / Download | 大小 / Size |
 | --- | --- | --- |
-| 轻量版 / Lite | [APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.48/99c1c4837b15c440b3387be8f68becd25e378b9780f1409c421a2850a252c8fd/agentdeck-0.4.48-arm64-v8a-lite.apk) | 33.3 MB |
-| 带语音版 / With voice | [APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.48/9c64099f512fc52ad62ee9e1b49a92aadf1583bb159269a4f2a79ce67fdcef45/agentdeck-0.4.48-arm64-v8a-voice.apk) | 273.3 MB |
+| 轻量版 / Lite | [APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.50/34201cc7699101d643ca74c7a7d225c076c63fbedf9bd56a054bf593ba27e6ec/agentdeck-0.4.50-arm64-v8a-lite.apk) | 45.9 MB |
+| 带语音版 / With voice | [APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.50/8df6d7409383841e9f9a8bf2f8214aa2e14afa66f755246586b3ceac80188907/agentdeck-0.4.50-arm64-v8a-voice.apk) | 286.0 MB |
 
 两版的会话功能相同，语音版增加手机离线识别。可覆盖切换并保留配对，不能同时安装。后续在 **设置 → 应用更新** 选择版本、下载和安装。
 
 Both editions have the same chat features; Voice adds offline speech recognition. They replace one another while retaining pairing. Use **Settings → App updates** for later downloads and edition changes.
+
+发送耗时排查见 [发送延迟](docs/SEND_LATENCY.md)。/ See [send latency diagnostics](docs/SEND_LATENCY.md).
 
 ### 2. 启动电脑后端 / Start the workstation backend
 

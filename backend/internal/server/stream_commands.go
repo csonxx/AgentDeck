@@ -1,18 +1,29 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"strings"
+	"time"
 
 	"agentdeck/internal/agent"
 	"agentdeck/internal/store"
 )
 
 type streamCommand struct {
-	request Request
-	hash    [sha256.Size]byte
+	request  Request
+	hash     [sha256.Size]byte
+	received time.Time
+}
+
+func supportsAtomicDesktopInput(d agent.DesktopController) bool {
+	_, ok := d.(interface {
+		SendValidatedInput(context.Context, string, string, string, string, agent.TurnOptions, []any) error
+	})
+	return ok
 }
 
 // Native commands can wait on an agent for seconds. Keep them off the socket
@@ -48,6 +59,17 @@ func (s *Server) streamCommand(owner string, command streamCommand, stop <-chan 
 	}
 	s.commandMu.Lock()
 	defer s.commandMu.Unlock()
+	acquired := time.Now()
+	if req.Method == "send" {
+		defer func() {
+			wait := time.Duration(0)
+			if !command.received.IsZero() {
+				wait = acquired.Sub(command.received)
+			}
+			slog.Info("agent_send", "session", req.Session, "request", req.ID,
+				"queue_ms", wait.Milliseconds(), "execute_ms", time.Since(acquired).Milliseconds())
+		}()
+	}
 	// A disconnected stream must not start more native work after waiting for
 	// another command. Already-started work records its outcome for safe retries.
 	select {

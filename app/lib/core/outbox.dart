@@ -27,6 +27,9 @@ class OutgoingMessage {
   List<DraftFile>? files;
   List<String> uploads;
   InputReceipt receipt;
+  int? _sendStarted;
+  Map<String, int>? _sendTiming;
+  bool _runningReported = false;
   OutgoingMessage({
     required this.id,
     required this.binding,
@@ -202,6 +205,17 @@ class OutboxManager {
       final session = client.sessions
           .where((s) => s.id == t.session)
           .firstOrNull;
+      if (!t._runningReported &&
+          t._sendStarted != null &&
+          t._sendTiming != null &&
+          session?.status == 'running' &&
+          t.receipt.observed(blocks)) {
+        t._runningReported = true;
+        _reportSendTiming(t, {
+          ...t._sendTiming!,
+          'running_ms': client.clock.stamp - t._sendStarted!,
+        });
+      }
       if (t.receipt.responded(blocks) ||
           t.receipt.observed(blocks) &&
               !t.receipt.waiting(
@@ -226,6 +240,21 @@ class OutboxManager {
     _restoring = null;
     _notify();
   });
+
+  void _reportSendTiming(OutgoingMessage t, Map<String, int> timing) {
+    unawaited(
+      client
+          .send({
+            'method': 'client_timing',
+            'kind': 'send',
+            'id': t.commandID,
+            'session': t.session,
+            'send_timing': timing,
+          })
+          .catchError((Object _) {}),
+    );
+  }
+
   Future<void> _restore() async {
     final generation = _generation;
     final rows = await client.vault.loadOutgoing();
@@ -284,6 +313,7 @@ class OutboxManager {
     List<DraftFile> files,
     String delivery,
   ) async {
+    final started = client.clock.stamp;
     if (s.issue?.blocksInput == true) {
       throw AgentRequestException(
         s.issue!.message,
@@ -326,6 +356,7 @@ class OutboxManager {
         baselineUpdated: s.updated,
       ),
     );
+    t._sendStarted = started;
     // Commit ciphertext before clearing the input or making any agent call.
     final generation = _generation;
     try {
@@ -468,7 +499,8 @@ class OutboxManager {
         t.state = 'preparing';
         t.stage = '正在准备发送…';
         _notify();
-        await _save(t);
+        // enqueue already committed the unchanged draft. The frozen command
+        // below is still fsynced before any send; avoid another identical write.
         if (!_valid(t, generation)) return;
         if (t.files == null) {
           final rows = t.fileInfo.isEmpty
@@ -489,7 +521,8 @@ class OutboxManager {
         }
         await client.validateAttachments(t.agent, t.session, t.files!);
         if (!_valid(t, generation)) return;
-        if (!t.managed) {
+        final directOriginal = t.agent == 'codex' && client.atomicCodexSend;
+        if (!t.managed && !directOriginal) {
           t.stage =
               (t.agent == 'codex' && client.codexDesktop || t.agent == 'claude')
               ? '正在连接电脑原会话…'
@@ -560,6 +593,7 @@ class OutboxManager {
       _notify();
       await _save(t);
       if (!_valid(t, generation)) return;
+      final dispatched = client.clock.stamp;
       await client.sendDelivery(
         t.session,
         t.text,
@@ -570,6 +604,17 @@ class OutboxManager {
       );
       if (!_valid(t, generation)) return;
       acknowledged = true;
+      if (t._sendStarted != null && t.attempts == 0) {
+        final ended = client.clock.stamp;
+        final timing = <String, int>{
+          'prepare_ms': dispatched - t._sendStarted!,
+          'request_ms': ended - dispatched,
+          'total_ms': ended - t._sendStarted!,
+        };
+        // Best-effort numeric diagnostics never gate delivery or trigger retry.
+        t._sendTiming = timing;
+        _reportSendTiming(t, timing);
+      }
       t.receipt.nativeMessageID = client.consumeSubmittedMessageID(t.commandID);
       if (client.consumeQueuedInput(t.commandID)) {
         t.state = 'queued';

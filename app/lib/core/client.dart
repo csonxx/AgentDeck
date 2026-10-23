@@ -252,6 +252,7 @@ class AgentClient extends ChangeNotifier {
   final Map<String, List<QueuedMessage>> queues = {};
   final Map<String, String> queueErrors = {};
   bool codexDesktop = false;
+  bool atomicCodexSend = false;
   List<AgentInfo> agents = defaultAgents();
   AgentVisibility agentVisibility = AgentVisibility();
   AgentVisibility _savedAgentVisibility = AgentVisibility();
@@ -1065,6 +1066,7 @@ class AgentClient extends ChangeNotifier {
             ? Map<String, dynamic>.from(direct)
             : null;
         codexDesktop = m['codex_desktop'] == true;
+        atomicCodexSend = m['codex_send_direct'] == true;
         _updateAgents(m);
         projects = (m['projects'] as List? ?? [])
             .map((p) => AgentProject.fromJson(Map<String, dynamic>.from(p)))

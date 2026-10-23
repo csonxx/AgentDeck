@@ -134,8 +134,9 @@ class _CodexResetPanelState extends State<CodexResetPanel> {
     if (busy || data == null || !resetReady || pending != null) return;
     setState(() => busy = true);
     try {
-      final quote = await c.prepareCodexReset(card?.id ?? '', data!.account);
-      if (!mounted) return;
+      // Confirm immediately, before any network request. Keep the selected
+      // account/workstation fixed across the dialog and fresh native checks.
+      final account = data!.account, originalBinding = binding;
       final selected = card?.title.isNotEmpty == true
           ? card!.title
           : context.tr('下一张可用重置卡');
@@ -143,7 +144,9 @@ class _CodexResetPanelState extends State<CodexResetPanel> {
         '使用 Codex 重置卡？',
         '$selected\n\n${context.tr('将消耗一张重置卡，重置当前账号符合条件的五小时和每周额度，影响该账号所有项目。周额度的下一次重置时间可能变化。此操作不能撤销。')}',
       );
-      if (!yes || !mounted) return;
+      if (!yes || !mounted || binding != originalBinding) return;
+      final quote = await c.prepareCodexReset(card?.id ?? '', account);
+      if (!mounted || binding != originalBinding) return;
       // Persist the exact attempt before sending. No background/automatic retry.
       final attempt = <String, dynamic>{
         'intent': quote['intent'],

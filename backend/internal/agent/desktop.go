@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -224,15 +225,34 @@ func (b *DesktopBridge) Read(ctx context.Context, id string) (DesktopThread, err
 func (b *DesktopBridge) Send(ctx context.Context, id, text, request, project string) error {
 	return b.SendInput(ctx, id, text, request, project, TurnOptions{}, []any{map[string]any{"type": "text", "text": text}})
 }
-func (b *DesktopBridge) SendInput(ctx context.Context, id, text, request, project string, o TurnOptions, inputs []any) error {
+
+// SendValidatedInput verifies the discovered native owner, exact thread/project
+// and current input restrictions on the same connection used to send. Callers
+// need not perform another discovery or fetch a second full snapshot first.
+func (b *DesktopBridge) SendValidatedInput(ctx context.Context, id, text, request, project string, o TurnOptions, inputs []any) error {
+	return b.SendInput(ctx, id, text, request, project, o, inputs)
+}
+
+func (b *DesktopBridge) SendInput(ctx context.Context, id, text, request, project string, o TurnOptions, inputs []any) (err error) {
+	started := time.Now()
+	connected, checked := started, started
+	stage := "connect"
+	defer func() {
+		slog.Info("codex_send", "session", id, "request", request, "stage", stage, "ok", err == nil,
+			"connect_ms", connected.Sub(started).Milliseconds(), "snapshot_ms", checked.Sub(connected).Milliseconds(),
+			"submit_ms", time.Since(checked).Milliseconds(), "total_ms", time.Since(started).Milliseconds())
+	}()
 	c, err := b.connectForInput(ctx, id)
+	connected, checked = time.Now(), time.Now()
 	if err != nil {
 		return err
 	}
 	defer c.conn.Close()
 	stop := context.AfterFunc(nonNil(ctx), func() { c.conn.Close() })
 	defer stop()
+	stage = "snapshot"
 	state, err := c.snapshot(id, project)
+	checked = time.Now()
 	if err != nil {
 		return &InputNotSentError{Err: err}
 	}
@@ -261,7 +281,11 @@ func (b *DesktopBridge) SendInput(ctx context.Context, id, text, request, projec
 		req["effort"] = o.Effort
 	}
 	applySpeed(req, o)
+	stage = "submit"
 	_, err = c.request("thread-follower-start-turn", 2, map[string]any{"conversationId": id, "turnStart": map[string]any{"request": req, "context": map[string]any{"inheritThreadSettings": true}}}, c.owner)
+	if err == nil {
+		stage = "accepted"
+	}
 	return err
 }
 

@@ -1,0 +1,140 @@
+{
+  "version": "0.4.50",
+  "build": 9067,
+  "source_sha256": "116503d3dc9f31fe228c4ca7bd81a07ec2f35516a2b02c364b7de6b1c67bf840",
+  "publisher_public_key": "agentdeck-local-2026:E5o8lCz84U3xat80vjb7DwOpeRTT8c+YDlwRW3F7iDs=",
+  "targets": [
+    {
+      "release": {
+        "version": "0.4.50",
+        "build": 9067,
+        "os": "darwin",
+        "arch": "arm64",
+        "bytes": 25066482,
+        "sha256": "17521aa12a21b94137008855ed6a182ccb3082cbe62f47c88f5b87717d06e34d",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/17521aa12a21b94137008855ed6a182ccb3082cbe62f47c88f5b87717d06e34d/agentdeck-darwin-arm64",
+        "notes": "Codex 原会话直接发送，减少重复关联和连接；增加端到端发送分段计时。重置卡点击后立即弹确认框，取消不联网提交。\nSend directly to the original Codex session with fewer round trips and correlated delivery timings. Reset cards prompt immediately; cancellation makes no preparation or consume request.\n",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "IAVUSdyvm18hYB29Rj1WsK/1mrjFJ/Vw0nVXxFKsPGQG/SWrerC/+c5J3u4FCsybZkY0NerYudR8XdU729HeBg=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.50-darwin-arm64.tar.gz",
+        "bytes": 9384329,
+        "sha256": "ca50bd754bfb25533b99ae2d8d9d445e77641296cfb028d98ae30a59163e49a1",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/ca50bd754bfb25533b99ae2d8d9d445e77641296cfb028d98ae30a59163e49a1/agentdeck-local-0.4.50-darwin-arm64.tar.gz"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.50",
+        "build": 9067,
+        "os": "darwin",
+        "arch": "amd64",
+        "bytes": 26453488,
+        "sha256": "f0b1578f06f3c3bbff51abf6c68a423cb94e31df6fe467c39f18dcf58850a0e9",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/f0b1578f06f3c3bbff51abf6c68a423cb94e31df6fe467c39f18dcf58850a0e9/agentdeck-darwin-amd64",
+        "notes": "Codex 原会话直接发送，减少重复关联和连接；增加端到端发送分段计时。重置卡点击后立即弹确认框，取消不联网提交。\nSend directly to the original Codex session with fewer round trips and correlated delivery timings. Reset cards prompt immediately; cancellation makes no preparation or consume request.\n",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "Dlte5sXs7CdFa556RpdPZfB1Rlq7jgZyI3q6UfEwyyvnvNAT/c5y/SdANxl/0r+gSO16GxDwmADRVqZe1CX/DA=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.50-darwin-amd64.tar.gz",
+        "bytes": 10050329,
+        "sha256": "984c62da5e0934b8e44c7bb408ff1cf342fa39138605cfa6c7ca11a20fc5dd80",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/984c62da5e0934b8e44c7bb408ff1cf342fa39138605cfa6c7ca11a20fc5dd80/agentdeck-local-0.4.50-darwin-amd64.tar.gz"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.50",
+        "build": 9067,
+        "os": "windows",
+        "arch": "amd64",
+        "bytes": 26505728,
+        "sha256": "2e0188c8b018df239714cd11d81a402bfb0140a567dad2fdbf1d9ac5e7291554",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/2e0188c8b018df239714cd11d81a402bfb0140a567dad2fdbf1d9ac5e7291554/agentdeck-windows-amd64.exe",
+        "notes": "Codex 原会话直接发送，减少重复关联和连接；增加端到端发送分段计时。重置卡点击后立即弹确认框，取消不联网提交。\nSend directly to the original Codex session with fewer round trips and correlated delivery timings. Reset cards prompt immediately; cancellation makes no preparation or consume request.\n",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "kaU0QUIc0Gpyd9nwFXMc8YwwqhHzqSpFpRSDLbJ96iJl9nXSmnQ6TGJ2wE0KrsUV/XYmdMkrbGRDBlyDMUq+BA=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.50-windows-amd64.zip",
+        "bytes": 10129901,
+        "sha256": "43f219c72b11a9dce6f46afc2ea821fdac7854e285418cf8bf3fc146f4e9a492",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/43f219c72b11a9dce6f46afc2ea821fdac7854e285418cf8bf3fc146f4e9a492/agentdeck-local-0.4.50-windows-amd64.zip"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.50",
+        "build": 9067,
+        "os": "windows",
+        "arch": "arm64",
+        "bytes": 24609280,
+        "sha256": "0aa6d46efb749b987ec3bc8e2237c69884bf51ca8be4a776b50f8bdd6a8fa6a4",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/0aa6d46efb749b987ec3bc8e2237c69884bf51ca8be4a776b50f8bdd6a8fa6a4/agentdeck-windows-arm64.exe",
+        "notes": "Codex 原会话直接发送，减少重复关联和连接；增加端到端发送分段计时。重置卡点击后立即弹确认框，取消不联网提交。\nSend directly to the original Codex session with fewer round trips and correlated delivery timings. Reset cards prompt immediately; cancellation makes no preparation or consume request.\n",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "tRRs6spdEhECVu+aemsx6bTyR8TN8EDvRGS2yE07i2MCbqQo3dcuHzYFynsjOottE5EesUbKftKGUM2cylaXBA=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.50-windows-arm64.zip",
+        "bytes": 9109571,
+        "sha256": "2d5f6dd654ac0db32a83e39571cb2ed3011c32e08a2180365a05e8b90cee8bc6",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/2d5f6dd654ac0db32a83e39571cb2ed3011c32e08a2180365a05e8b90cee8bc6/agentdeck-local-0.4.50-windows-arm64.zip"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.50",
+        "build": 9067,
+        "os": "linux",
+        "arch": "amd64",
+        "bytes": 25866424,
+        "sha256": "5cfaad35ce4fef8c66c328853e6e98f093c3929132b68c953bd69852433c2fbb",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/5cfaad35ce4fef8c66c328853e6e98f093c3929132b68c953bd69852433c2fbb/agentdeck-linux-amd64",
+        "notes": "Codex 原会话直接发送，减少重复关联和连接；增加端到端发送分段计时。重置卡点击后立即弹确认框，取消不联网提交。\nSend directly to the original Codex session with fewer round trips and correlated delivery timings. Reset cards prompt immediately; cancellation makes no preparation or consume request.\n",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "2WxMid4kbkL2F5PlqJaF99urY3TVn+SktLxRpwNjIyKHqAtuFpgA4/na5EjBuWY1jS/N6UWUiVK8kWKjhS/LBw=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.50-linux-amd64.tar.gz",
+        "bytes": 9883503,
+        "sha256": "cbd38055e866026819e26a8f1e9813cb1749fefcd5b234443fca5071b6f22942",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/cbd38055e866026819e26a8f1e9813cb1749fefcd5b234443fca5071b6f22942/agentdeck-local-0.4.50-linux-amd64.tar.gz"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.50",
+        "build": 9067,
+        "os": "linux",
+        "arch": "arm64",
+        "bytes": 24379576,
+        "sha256": "9319f96cb6fd0a0866d92e716af0ac63b653a549e2a203fbed5df28cef74cc30",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/9319f96cb6fd0a0866d92e716af0ac63b653a549e2a203fbed5df28cef74cc30/agentdeck-linux-arm64",
+        "notes": "Codex 原会话直接发送，减少重复关联和连接；增加端到端发送分段计时。重置卡点击后立即弹确认框，取消不联网提交。\nSend directly to the original Codex session with fewer round trips and correlated delivery timings. Reset cards prompt immediately; cancellation makes no preparation or consume request.\n",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "tD+cMvGbcCzzNqqGDpHF7y2YX6eG1eyM9YTsFNJt84LJjYexTu9m0HERImu8XLOTCwBPAhQv6dTUXRdyXGBsBg=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.50-linux-arm64.tar.gz",
+        "bytes": 9022216,
+        "sha256": "57c97de6ab3de9cd7ff414cf87ec86c31c62cc2c5c339e835e84ea80fbadc0fd",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/57c97de6ab3de9cd7ff414cf87ec86c31c62cc2c5c339e835e84ea80fbadc0fd/agentdeck-local-0.4.50-linux-arm64.tar.gz"
+      }
+    }
+  ]
+}

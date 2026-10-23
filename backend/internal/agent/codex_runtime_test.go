@@ -4,6 +4,7 @@ import (
 	"agentdeck/internal/store"
 	"database/sql"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -20,7 +21,24 @@ func ownershipFixture(t *testing.T) *Manager {
 		t.Fatal(e)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// Even a mistakenly invoked native runtime must never use the owner's
+	// account, session catalog or project settings during fixture acceptance.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
+	resolved, err := exec.LookPath("codex")
+	if err != nil || resolved != filepath.Join(bin, "codex") {
+		t.Fatal("ownership fixture must resolve its synthetic executable", err)
+	}
 	return connectorManager(t)
+}
+
+func TestOwnershipFixtureIsolatesNativeState(t *testing.T) {
+	originalHome, originalCodex := os.Getenv("HOME"), os.Getenv("CODEX_HOME")
+	_ = ownershipFixture(t)
+	if os.Getenv("HOME") == "" || os.Getenv("HOME") == originalHome ||
+		os.Getenv("CODEX_HOME") == "" || os.Getenv("CODEX_HOME") == originalCodex {
+		t.Fatal("fixture inherited native user state")
+	}
 }
 func awaitWriterExit(t *testing.T, m *Manager, id string, r *runtime) {
 	t.Helper()
@@ -105,8 +123,11 @@ func TestPhoneCodexCompletionReleasesAndSameIDResumes(t *testing.T) {
 		t.Fatal("idle permission edit failed", e)
 	}
 	m.releaseIdleCodex(s.ID)
-	if m.liveRuntime(s.ID) != nil {
-		t.Fatal("permission edit retained writer")
+	if edited := m.liveRuntime(s.ID); edited != nil {
+		// The response reader removes its pending RPC immediately after
+		// delivery. Under -race the caller can run before that cleanup; wait
+		// for the actual writer exit rather than asserting the scheduler order.
+		awaitWriterExit(t, m, s.ID, edited)
 	}
 }
 func TestPhoneCodexAfterCompletionFollowsDesktopOriginal(t *testing.T) {
