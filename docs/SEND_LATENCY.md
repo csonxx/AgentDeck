@@ -23,6 +23,18 @@ Client and server durations use monotonic clocks independently. Do not subtract 
 
 ## 已验证的优化 / Verified changes
 
+本机桥接会对 Codex 路由器的 `client-discovery-request` 明确回复 `canHandle: false`。AgentDeck 是会话旁观者，不持有执行权；不能忽略这类询问，否则查找未加载的原会话可能等待所有静默连接超时。回应逻辑覆盖请求等待、快照读取及空闲实时订阅，不会发送消息、创建分支或获取写锁。短消息在已加载会话上的结果不能覆盖这个场景。
+
+The bridge explicitly answers native `client-discovery-request` probes with `canHandle: false`. AgentDeck observes conversations and never owns execution. Ignoring probes makes discovery for an unloaded original wait for silent connections to time out. Requests, snapshots and idle live subscriptions all answer probes; doing so sends no input, creates no branch and acquires no writer lock. Fast sends to an already loaded thread do not cover this case.
+
+其他本机客户端也可能静默。手机明确发送时，首次执行端查找最多探测 1 秒，然后才尝试唤起同一个已保存的会话 ID 并再次确认所有者；不会把超时当作已收到消息，也不会创建其他执行器。发送前连接或校验失败明确记为未发送，提交后丢失回执仍保留未知结果，禁止盲目重发。
+
+Other local clients may also stay silent. Explicit phone input probes owner discovery for at most one second before waking the same saved ID and rediscovering its owner. A timeout is never an acknowledgement and never creates another executor. Pre-submit connection/validation failures are marked unsent; an acknowledgement lost after submission remains uncertain and is not blindly replayed.
+
+App 的设置 → 问题反馈可附带本机加密诊断记录；发送中、超时和未确认的请求也有编号。用反馈中的 `request_id` 关联下方本机日志。详见 [反馈](FEEDBACK.md)。
+
+Settings → Report a problem includes encrypted phone diagnostics, including in-flight and timed-out request IDs. Correlate their `request_id` with workstation logs below. See [Feedback](FEEDBACK.md).
+
 支持原子发送的本机后端会公布 `codex_send_direct`。App 直接发送到已有 Codex 会话，后端在同一个原生连接上校验项目、安全状态并投递，省去单独的关联请求和重复发现。旧后端继续走原流程。本地草稿仍在发送前加密持久化，去掉的是未改变草稿的重复写入。
 
 Workstations advertising `codex_send_direct` validate and send to the existing Codex conversation in one operation. This removes the extra association round trip and repeated discovery. Older workstations retain the previous flow. Drafts remain encrypted and durable before sending; only an unchanged, duplicate write is removed.

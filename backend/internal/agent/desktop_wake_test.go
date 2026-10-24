@@ -14,7 +14,7 @@ import (
 )
 
 func TestDesktopWakeOnlyForExplicitUnownedOriginalInput(t *testing.T) {
-	for _, mode := range []string{"wake", "owned", "passive", "rejected", "lost-ack", "invalid-id", "safety"} {
+	for _, mode := range []string{"wake", "discovery-stall", "owned", "passive", "rejected", "lost-ack", "invalid-id", "safety"} {
 		t.Run(mode, func(t *testing.T) {
 			dir, e := os.MkdirTemp("/tmp", "ad-wake-")
 			if e != nil {
@@ -54,6 +54,9 @@ func TestDesktopWakeOnlyForExplicitUnownedOriginalInput(t *testing.T) {
 								out["result"] = map[string]any{"clientId": "phone"}
 							case "thread-owner-discovery":
 								discoveries.Add(1)
+								if mode == "discovery-stall" && !ready.Load() {
+									continue
+								}
 								if !ready.Load() {
 									out["resultType"] = "error"
 									out["error"] = "no-client-found"
@@ -119,14 +122,14 @@ func TestDesktopWakeOnlyForExplicitUnownedOriginalInput(t *testing.T) {
 			} else {
 				err = b.Send(context.Background(), id, "fixture", UUID(), "/authorized/project")
 			}
-			if mode == "wake" || mode == "owned" {
+			if mode == "wake" || mode == "discovery-stall" || mode == "owned" {
 				if err != nil || turns.Load() != 1 {
 					t.Fatal("original input failed", err)
 				}
 			} else if err == nil {
 				t.Fatal("failure hidden")
 			}
-			if mode == "wake" {
+			if mode == "wake" || mode == "discovery-stall" {
 				if opened.Load() != 1 || discoveries.Load() != 2 {
 					t.Fatal("wake did not rediscover original owner")
 				}

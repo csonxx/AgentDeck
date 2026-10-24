@@ -1,8 +1,33 @@
-# 网关反馈存储 / Gateway feedback storage
+# 问题反馈 / Feedback
 
-S-GATEWAY 支持 MongoDB、MySQL、PostgreSQL 三种反馈存储，由启动环境变量选择。三者使用同一接口、加密格式、隔离和保留规则；默认关闭，不影响现有连接。**这是网关接口与存储能力；App 反馈页面和自动诊断采集尚未接入，不会自动上传聊天或日志。**
+## 手机怎么用 / From the App
 
-S-GATEWAY supports MongoDB, MySQL and PostgreSQL through one configurable feedback service. All backends share encryption, isolation and retention rules. It defaults off, preserving existing connections. **This implements gateway APIs and storage; the App feedback screen and automatic diagnostic collection are not integrated yet. Chats and logs are not automatically uploaded.**
+设置 → 问题反馈，填写发生时间和现象，保留「附带诊断记录」后发送。反馈通过当前加密连接保存到配对工作站，成功后显示 `AD-FB-...` 编号；把编号发给维护者即可关联手机与本机发送日志。此路径使用本机已有的加密 vault，不依赖网关数据库，网关仍只透传密文。手机和本机后端都需要更新到支持此功能的版本。
+
+Open Settings → Report a problem, describe what happened and when, then send with diagnostics enabled. Reports travel over the existing encrypted connection to the paired workstation. Give the returned `AD-FB-...` ID to the maintainer to correlate phone and workstation requests. This destination uses the existing encrypted Local vault and needs no gateway database; the gateway remains an opaque relay. Update both App and Local for this feature.
+
+手机加密保留最近 7 天、最多 500 条诊断：发送开始、回执、执行状态、打开历史的耗时及请求编号。失败和超时也保留，不收集对话、工具参数、附件、原始异常、URL 或密钥。用户填写的问题说明随反馈提交。提交未确认时保留相同编号、说明、诊断和目标工作站，重试不会重新采集或换工作站；不会自动重发 Agent 消息。也可点「复制诊断记录」后粘贴给维护者。
+
+The phone retains up to 500 encrypted metadata records for seven days, including send start/acknowledgement/running state, history presentation timings and request IDs. Errors/timeouts are retained; chats, tool arguments, attachments, raw exceptions, URLs and keys are excluded. The user's description is included. An unconfirmed report retains its original ID, payload and workstation for explicit retries; reporting never resends an agent message. Copy diagnostics is also available for pasting into a support message.
+
+本机管理员通过所有者 Unix socket 查询；公网与本机网页代理均不开放读取接口：
+
+The workstation owner reads reports over the protected Unix socket. Public HTTP and the web-console proxy do not expose them:
+
+```sh
+curl --unix-socket "$HOME/.agentdeck/control.sock" http://localhost/feedback
+curl --unix-socket "$HOME/.agentdeck/control.sock" http://localhost/feedback/AD-FB-REPLACE_WITH_REPORT_ID
+```
+
+本机每台配对设备最多保存 20 份，保留 30 天，提交和管理员列表查询时清理过期记录；可通过 `DELETE /feedback/{id}` 提前删除。报告中的 `request_id` 对应本机 `logs/local.stderr.log` 的 `request=`，可关联 `agent_send_client`、`agent_send`、`codex_send`。不要上传整个 `.agentdeck` 目录。
+
+Local retains up to 20 reports per paired device for 30 days, pruning expired reports on submission and owner listing. `DELETE /feedback/{id}` removes one early. Report request IDs match `request=` in `logs/local.stderr.log`, joining `agent_send_client`, `agent_send` and `codex_send`. Never upload the entire `.agentdeck` directory.
+
+## 可选的网关集中存储 / Optional gateway storage
+
+S-GATEWAY 支持 MongoDB、MySQL、PostgreSQL 三种反馈存储，由启动环境变量选择。三者使用同一接口、加密格式、隔离和保留规则；默认关闭。**App 反馈目前提交到本机后端，并非此集中存储；下方网关接口供另行配置的 SDK 接入使用。不会自动上传聊天内容。**
+
+S-GATEWAY supports MongoDB, MySQL and PostgreSQL through one configurable feedback service. All backends share encryption, isolation and retention rules. It defaults off. **The App feedback screen currently submits to Local, not this central service. The gateway APIs below are available for separately configured SDK integrations. Chat content is never automatically uploaded.**
 
 ## 配置 / Configuration
 

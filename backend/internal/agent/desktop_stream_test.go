@@ -176,6 +176,36 @@ type followingFixture struct {
 	stopped chan struct{}
 }
 
+type lateOwnerFixture struct {
+	desktopFixture
+	calls atomic.Int32
+	ready chan struct{}
+}
+
+func (f *lateOwnerFixture) Follow(ctx context.Context, _ string, _ func(map[string]any) error) error {
+	if f.calls.Add(1) == 1 {
+		return errDesktopDiscoveryTimeout
+	}
+	close(f.ready)
+	<-ctx.Done()
+	return ctx.Err()
+}
+func TestDesktopWatchPromptlyRetriesAnOwnerOpenedByInput(t *testing.T) {
+	n := setup(t)
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	n.Store.Put("sessions", "s", store.Session{ID: "s", Agent: "codex", Source: "desktop", Project: root, Managed: true})
+	f := &lateOwnerFixture{ready: make(chan struct{})}
+	m := &Manager{Store: n.Store, Normalizer: n, Roots: []string{root}, Desktop: f}
+	defer m.Close()
+	release := m.WatchDesktop(nil, "s")
+	defer release()
+	select {
+	case <-f.ready:
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("watch kept the old two-second retry gap after owner discovery timed out")
+	}
+}
+
 func (f *followingFixture) Follow(ctx context.Context, id string, consume func(map[string]any) error) error {
 	f.calls.Add(1)
 	close(f.started)

@@ -1,5 +1,37 @@
 // App-owned backend messages. Keep wire values and conversation bodies unchanged.
 const backendUiMessages = <String, List<String>>{
+  "电脑 Codex 原会话执行端探测超时": [
+    "Codex original-session owner lookup timed out.",
+    "電腦 Codex 原會話執行端探測逾時",
+    "Истекло время поиска владельца исходного сеанса Codex.",
+  ],
+
+  "反馈格式无效": [
+    "Invalid feedback format.",
+    "回饋格式無效",
+    "Недопустимый формат отчёта.",
+  ],
+  "反馈编号已被其他内容使用": [
+    "Report ID already belongs to different content.",
+    "回饋編號已被其他內容使用",
+    "ID отчёта уже использован для других данных.",
+  ],
+  "工作站反馈读取失败": [
+    "Could not read workstation reports.",
+    "工作站回饋讀取失敗",
+    "Не удалось прочитать отчёты станции.",
+  ],
+  "此设备的反馈记录已满，请先由工作站管理员清理": [
+    "Report limit reached. Ask the workstation owner to remove old reports.",
+    "此裝置的回饋記錄已滿，請先由工作站管理員清理",
+    "Лимит отчётов достигнут. Владелец станции должен удалить старые отчёты.",
+  ],
+  "工作站反馈保存失败": [
+    "Could not save the workstation report.",
+    "工作站回饋儲存失敗",
+    "Не удалось сохранить отчёт на станции.",
+  ],
+
   "工作站直连已关闭": [
     "Direct connections are disabled on the workstation.",
     "工作站直連已關閉",

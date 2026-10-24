@@ -16,6 +16,32 @@ import (
 const desktopFrameLimit = 32 << 20
 
 func readDesktopFrame(c net.Conn) (map[string]any, error) {
+	for {
+		frame, err := readDesktopWireFrame(c)
+		if err != nil {
+			return nil, err
+		}
+		if frame["type"] != "client-discovery-request" {
+			return frame, nil
+		}
+		// The native router probes EVERY registered client before concluding that
+		// a saved thread has no owner. We are a follower, never an executor. An
+		// unanswered probe holds native discovery until the router's timeout.
+		id, ok := frame["requestId"].(string)
+		if !ok || id == "" || len(id) > 128 {
+			return nil, errors.New("invalid desktop discovery request")
+		}
+		raw, _ := json.Marshal(map[string]any{"type": "client-discovery-response", "requestId": id, "response": map[string]bool{"canHandle": false}})
+		buf := make([]byte, 4+len(raw))
+		binary.LittleEndian.PutUint32(buf, uint32(len(raw)))
+		copy(buf[4:], raw)
+		if _, err = io.Copy(c, bytes.NewReader(buf)); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func readDesktopWireFrame(c net.Conn) (map[string]any, error) {
 	var h [4]byte
 	if _, err := io.ReadFull(c, h[:]); err != nil {
 		return nil, err
@@ -47,7 +73,10 @@ func (c *desktopConnection) following(id string, following bool) error {
 // Follow only subscribes to the discovered owner. It never starts/resumes a turn
 // or changes permissions. Raw desktop state remains in bounded process memory.
 func (b *DesktopBridge) Follow(ctx context.Context, id string, consume func(map[string]any) error) error {
-	c, err := b.connect(ctx, id)
+	// A watch started before explicit input may be probing an unloaded owner.
+	// Keep its read-only discovery short so the newly opened owner can be
+	// observed promptly instead of waiting on an obsolete ten-second fanout.
+	c, err := b.connectWithDiscoveryBudget(ctx, id, time.Second)
 	if err != nil {
 		return err
 	}
@@ -70,7 +99,9 @@ func (b *DesktopBridge) Follow(ctx context.Context, id string, consume func(map[
 	defer cancelRead()
 	go func() {
 		for {
-			c.conn.SetReadDeadline(time.Now().Add(45 * time.Second))
+			// Idle followers must still be able to WRITE discovery replies after
+			// connect's initial 20-second handshake deadline has elapsed.
+			c.conn.SetDeadline(time.Now().Add(45 * time.Second))
 			frame, err := readDesktopFrame(c.conn)
 			select {
 			case frames <- result{frame, err}:
@@ -487,12 +518,16 @@ func (m *Manager) WatchDesktop(ctx context.Context, id string) func() {
 			defer close(lease.done)
 			p := &desktopProjection{m: m, session: session, seen: map[string]string{}}
 			for life.Err() == nil {
+				retryDelay := 2 * time.Second
 				p.seen = map[string]string{}
 				p.itemSeen = map[string]string{}
 				if claude {
 					_ = m.followClaudeDesktop(life, session)
 				} else {
 					err := follow.Follow(life, id, p.publish)
+					if errors.Is(err, errDesktopNoOwner) || errors.Is(err, errDesktopDiscoveryTimeout) {
+						retryDelay = 200 * time.Millisecond
+					}
 					if err != nil && life.Err() == nil {
 						// Relay connectivity is not proof that the native owner
 						// can still be observed. Keep history, stop stale spinners.
@@ -502,7 +537,7 @@ func (m *Manager) WatchDesktop(ctx context.Context, id string) func() {
 				select {
 				case <-life.Done():
 					return
-				case <-time.After(2 * time.Second):
+				case <-time.After(retryDelay):
 				}
 			}
 		}()

@@ -6,18 +6,18 @@ S-LOCAL has macOS, Windows and Linux builds for arm64 and amd64. Install the mat
 
 ## 安装包 / Downloads
 
-0.4.50；安装器无需 Go 或 Git。以下文件已通过匿名 HTTPS 全量下载与 SHA-256 核验；[完整清单及校验值](../releases/local-0.4.50.json)。首次安装后从已关联的网关获取后续版本。
+0.4.51；安装器无需 Go 或 Git。以下文件已通过匿名 HTTPS 全量下载与 SHA-256 核验；[完整清单及校验值](../releases/local-0.4.51.json)。首次安装后从已关联的网关获取后续版本。
 
-Installers need neither Go nor Git. All downloads were fully verified over anonymous HTTPS; see the [manifest and checksums](../releases/local-0.4.50.json). Subsequent versions come from the linked gateway.
+Installers need neither Go nor Git. All downloads were fully verified over anonymous HTTPS; see the [manifest and checksums](../releases/local-0.4.51.json). Subsequent versions come from the linked gateway.
 
 | 系统 / OS | 架构 / CPU | 下载 / Download | 大小 / Size |
 | --- | --- | --- | --- |
-| macOS | Apple Silicon | [安装包 / Installer](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/ca50bd754bfb25533b99ae2d8d9d445e77641296cfb028d98ae30a59163e49a1/agentdeck-local-0.4.50-darwin-arm64.tar.gz) | 9.4 MB |
-| macOS | Intel | [安装包 / Installer](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/984c62da5e0934b8e44c7bb408ff1cf342fa39138605cfa6c7ca11a20fc5dd80/agentdeck-local-0.4.50-darwin-amd64.tar.gz) | 10.1 MB |
-| Windows | ARM64 | [安装包 / Installer](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/2d5f6dd654ac0db32a83e39571cb2ed3011c32e08a2180365a05e8b90cee8bc6/agentdeck-local-0.4.50-windows-arm64.zip) | 10.1 MB |
-| Windows | Intel / AMD x64 | [安装包 / Installer](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/43f219c72b11a9dce6f46afc2ea821fdac7854e285418cf8bf3fc146f4e9a492/agentdeck-local-0.4.50-windows-amd64.zip) | 9.1 MB |
-| Linux | ARM64 | [安装包 / Installer](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/57c97de6ab3de9cd7ff414cf87ec86c31c62cc2c5c339e835e84ea80fbadc0fd/agentdeck-local-0.4.50-linux-arm64.tar.gz) | 9.9 MB |
-| Linux | Intel / AMD x64 | [安装包 / Installer](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.50/cbd38055e866026819e26a8f1e9813cb1749fefcd5b234443fca5071b6f22942/agentdeck-local-0.4.50-linux-amd64.tar.gz) | 9.0 MB |
+| macOS | Apple Silicon | [安装包 / Installer](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/3c4f342acaa47d81c2c2b38ae4c0c69b84f3650d5e65a47f90649fde3e6528ed/agentdeck-local-0.4.51-darwin-arm64.tar.gz) | 9.4 MB |
+| macOS | Intel | [安装包 / Installer](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/7db1b6e025940ad76cc9dbf0f179c6b72ff97c8e09635bfb95ce4786efe153af/agentdeck-local-0.4.51-darwin-amd64.tar.gz) | 10.1 MB |
+| Windows | ARM64 | [安装包 / Installer](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/ab2773cf3f748fa880ec6f7c3f2ad4c73bdbf09b35f12e2c3543b84299fe464f/agentdeck-local-0.4.51-windows-arm64.zip) | 9.1 MB |
+| Windows | Intel / AMD x64 | [安装包 / Installer](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/1ebdfb3786952f6d1c25da3531824562226b910da6e787ae0daa55e61a88052b/agentdeck-local-0.4.51-windows-amd64.zip) | 10.1 MB |
+| Linux | ARM64 | [安装包 / Installer](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/d492ed8060873efc04c340163971af3989099ad12ea780d5eaedde6b197037b2/agentdeck-local-0.4.51-linux-arm64.tar.gz) | 9.0 MB |
+| Linux | Intel / AMD x64 | [安装包 / Installer](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/553164eba22548514ec4e5d7eea6ec68c62897ca0032b801fd133c4af35efdf6/agentdeck-local-0.4.51-linux-amd64.tar.gz) | 9.9 MB |
 
 验收范围：macOS 安装器和登录启动项已实测，Linux 已验证更新进程流程；Windows 两种架构已编译，尚未做 Windows 实机验收。/ Verified: macOS installer/login service and Linux updater runtime. Both Windows architectures build successfully; native Windows acceptance remains pending.
 
@@ -106,9 +106,9 @@ Build all six targets with the public key as `key-id:base64-public-key`. Go and 
 
 ```sh
 python3 scripts/build_local_releases.py \
-  --version 0.4.50 --build 9067 \
+  --version 0.4.51 --build 9068 \
   --gateway-url https://gateway.example.com/agentdeck \
-  --download-base https://cdn.example.com/agentdeck/local/0.4.50 \
+  --download-base https://cdn.example.com/agentdeck/local/0.4.51 \
   --publisher-key 'company-local-2026:PUBLIC_KEY_BASE64' \
   --signing-key "$HOME/.agentdeck-publisher/local-2026.key"
 ```

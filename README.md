@@ -38,16 +38,18 @@ Background peer-to-peer negotiation falls back to the gateway relay and shows th
 
 ### 1. 安装手机 App / Install the app
 
-| 0.4.50 · Android arm64 | 下载 / Download | 大小 / Size |
+| 0.4.51 · Android arm64 | 下载 / Download | 大小 / Size |
 | --- | --- | --- |
-| 轻量版 / Lite | [APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.50/34201cc7699101d643ca74c7a7d225c076c63fbedf9bd56a054bf593ba27e6ec/agentdeck-0.4.50-arm64-v8a-lite.apk) | 45.9 MB |
-| 带语音版 / With voice | [APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.50/8df6d7409383841e9f9a8bf2f8214aa2e14afa66f755246586b3ceac80188907/agentdeck-0.4.50-arm64-v8a-voice.apk) | 286.0 MB |
+| 轻量版 / Lite | [APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.51/73006e4316a5f34fe20a34357fa4def8d5e848c1b927399ca3aa927586139270/agentdeck-0.4.51-arm64-v8a-lite.apk) | 45.9 MB |
+| 带语音版 / With voice | [APK](https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/0.4.51/aa1788c8b53c65c902c150bd77c448fe6ebd9c830f931e8b36d0201f6373bab9/agentdeck-0.4.51-arm64-v8a-voice.apk) | 286.0 MB |
 
 两版的会话功能相同，语音版增加手机离线识别。可覆盖切换并保留配对，不能同时安装。后续在 **设置 → 应用更新** 选择版本、下载和安装。
 
 Both editions have the same chat features; Voice adds offline speech recognition. They replace one another while retaining pairing. Use **Settings → App updates** for later downloads and edition changes.
 
 发送耗时排查见 [发送延迟](docs/SEND_LATENCY.md)。/ See [send latency diagnostics](docs/SEND_LATENCY.md).
+
+遇到问题可在设置 → 问题反馈提交诊断并获得反馈编号，使用方法见 [反馈](docs/FEEDBACK.md)。/ Settings → Report a problem submits diagnostics and returns a report ID; see [Feedback](docs/FEEDBACK.md).
 
 ### 2. 启动电脑后端 / Start the workstation backend
 

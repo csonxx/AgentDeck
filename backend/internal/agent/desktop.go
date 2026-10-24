@@ -41,6 +41,7 @@ type DesktopBridge struct {
 }
 
 var errDesktopNoOwner = errors.New("电脑 Codex 尚未加载原会话")
+var errDesktopDiscoveryTimeout = errors.New("电脑 Codex 原会话执行端探测超时")
 
 // Explicit input may wake the saved native chat. Passive reads/follows never
 // navigate the user's desktop, and a sent turn is never retried here.
@@ -52,9 +53,12 @@ func (b *DesktopBridge) connectForInput(ctx context.Context, id string) (*deskto
 	lock := guard.(*sync.Mutex)
 	lock.Lock()
 	defer lock.Unlock()
-	c, err := b.connect(ctx, id)
-	if !errors.Is(err, errDesktopNoOwner) {
+	c, err := b.connectWithDiscoveryBudget(ctx, id, time.Second)
+	if !errors.Is(err, errDesktopNoOwner) && !errors.Is(err, errDesktopDiscoveryTimeout) {
 		return c, err
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 	if !claudeNativeID.MatchString(id) {
 		return nil, errors.New("Codex 原会话 ID 无效，无法自动唤起")
@@ -69,8 +73,8 @@ func (b *DesktopBridge) connectForInput(ctx context.Context, id string) (*deskto
 	life, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	for life.Err() == nil {
-		c, err = b.connect(life, id)
-		if !errors.Is(err, errDesktopNoOwner) {
+		c, err = b.connectWithDiscoveryBudget(life, id, time.Second)
+		if !errors.Is(err, errDesktopNoOwner) && !errors.Is(err, errDesktopDiscoveryTimeout) {
 			return c, err
 		}
 		select {
@@ -123,6 +127,14 @@ type desktopConnection struct {
 }
 
 func (b *DesktopBridge) connect(ctx context.Context, id string) (*desktopConnection, error) {
+	return b.connectWithDiscoveryBudget(ctx, id, 0)
+}
+
+// Owner discovery is read-only. Native fanout can wait ten seconds on ANY
+// silent third-party connection, even after all responsive owners decline.
+// Explicit input probes it briefly before opening the same saved UUID. Only
+// an authoritative owner response can proceed to snapshot validation and send.
+func (b *DesktopBridge) connectWithDiscoveryBudget(ctx context.Context, id string, budget time.Duration) (*desktopConnection, error) {
 	if err := b.Validate(); err != nil {
 		return nil, errors.New("电脑 Codex 未连接，请启动桌面端并检查工作站桥接配置")
 	}
@@ -149,11 +161,15 @@ func (b *DesktopBridge) connect(ctx context.Context, id string) (*desktopConnect
 		conn.Close()
 		return nil, errors.New("电脑 Codex 接口版本不支持")
 	}
+	if budget > 0 && time.Now().Add(budget).Before(deadline) {
+		conn.SetReadDeadline(time.Now().Add(budget))
+	}
 	v, err = c.request("thread-owner-discovery", 1, map[string]any{"hostId": "local", "conversationId": id}, "")
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
+	conn.SetReadDeadline(deadline)
 	c.owner = str(v["handledByClientId"])
 	if c.owner == "" {
 		conn.Close()
@@ -179,20 +195,12 @@ func (c *desktopConnection) request(method string, version int, params any, targ
 		return nil, errors.New("电脑 Codex 请求未确认，请检查原会话后再发送")
 	}
 	for frames := 0; frames < 1000; frames++ {
-		var head [4]byte
-		if _, err = io.ReadFull(c.conn, head[:]); err != nil {
-			break
-		}
-		size := binary.LittleEndian.Uint32(head[:])
-		if size == 0 || size > 8<<20 {
-			break
-		}
-		raw := make([]byte, size)
-		if _, err = io.ReadFull(c.conn, raw); err != nil {
-			break
-		}
-		var out map[string]any
-		if json.Unmarshal(raw, &out) != nil {
+		out, readErr := readDesktopFrame(c.conn)
+		if readErr != nil {
+			var timeout net.Error
+			if method == "thread-owner-discovery" && errors.As(readErr, &timeout) && timeout.Timeout() {
+				return nil, errDesktopDiscoveryTimeout
+			}
 			break
 		}
 		c.captureQueue(out)
@@ -245,7 +253,7 @@ func (b *DesktopBridge) SendInput(ctx context.Context, id, text, request, projec
 	c, err := b.connectForInput(ctx, id)
 	connected, checked = time.Now(), time.Now()
 	if err != nil {
-		return err
+		return &InputNotSentError{Err: err}
 	}
 	defer c.conn.Close()
 	stop := context.AfterFunc(nonNil(ctx), func() { c.conn.Close() })

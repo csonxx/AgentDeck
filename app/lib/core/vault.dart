@@ -211,6 +211,37 @@ class DeviceVault {
     await tmp.rename(f.path);
   }
 
+  Future<Map<String, dynamic>> _readDiagnosticFile(String name) async {
+    final file = File('${(await _directory()).path}/$name.vault');
+    if (!await file.exists()) return {};
+    return WireCrypto.open(
+      await _key(),
+      name,
+      Map<String, dynamic>.from(jsonDecode(await file.readAsString())),
+    );
+  }
+
+  Future<void> _writeDiagnosticFile(
+    String name,
+    Map<String, dynamic> value,
+  ) async {
+    final file = File('${(await _directory()).path}/$name.vault');
+    await file.parent.create(recursive: true);
+    final box = await WireCrypto.seal(await _key(), name, 0, 0, value);
+    final tmp = File('${file.path}.tmp');
+    await tmp.writeAsString(jsonEncode(box), flush: true);
+    await tmp.rename(file.path);
+  }
+
+  Future<Map<String, dynamic>> loadDiagnostics() =>
+      _readDiagnosticFile('diagnostics');
+  Future<void> saveDiagnostics(Map<String, dynamic> value) =>
+      _writeDiagnosticFile('diagnostics', value);
+  Future<Map<String, dynamic>> loadFeedback() =>
+      _readDiagnosticFile('feedback');
+  Future<void> saveFeedback(Map<String, dynamic> value) =>
+      _writeDiagnosticFile('feedback', value);
+
   Future<void> clear({bool keepGateway = false}) async {
     // Remove caches before forgetting their key, including any interrupted write.
     final f = await _cache();
@@ -220,6 +251,12 @@ class DeviceVault {
     }
     final outbox = Directory('${(await _directory()).path}/outbox');
     if (await outbox.exists()) await outbox.delete(recursive: true);
+    for (final name in ['diagnostics', 'feedback']) {
+      for (final suffix in ['.vault', '.vault.tmp']) {
+        final file = File('${(await _directory()).path}/$name$suffix');
+        if (await file.exists()) await file.delete();
+      }
+    }
     await storage.delete(key: 'agentdeck.device');
     await storage.delete(key: 'agentdeck.cache.key');
     _keyFuture = null;

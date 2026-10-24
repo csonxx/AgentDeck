@@ -1,0 +1,140 @@
+{
+  "version": "0.4.51",
+  "build": 9068,
+  "source_sha256": "b005572ddf0492295df873bdcfd39e18dd21473fa0a5934b975433202c1fc816",
+  "publisher_public_key": "agentdeck-local-2026:E5o8lCz84U3xat80vjb7DwOpeRTT8c+YDlwRW3F7iDs=",
+  "targets": [
+    {
+      "release": {
+        "version": "0.4.51",
+        "build": 9068,
+        "os": "darwin",
+        "arch": "arm64",
+        "bytes": 25083138,
+        "sha256": "817a0e1a8fd38112fec1dc3d51ccc9580904fdb7747e84ea8eedf36e78c0b042",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/817a0e1a8fd38112fec1dc3d51ccc9580904fdb7747e84ea8eedf36e78c0b042/agentdeck-darwin-arm64",
+        "notes": "修复 Codex 原会话执行端查找与实时订阅等待；增加设置中的问题反馈和手机加密诊断记录。\nFix delayed Codex original-session owner discovery and live observation. Add in-app feedback with encrypted phone diagnostics.\n",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "MM+qgR3ZhSvhbQoOB2VHVgsy+zwFlyhSGzg0kcXAJJJ4mdOBZ4A4yg/jfwtL470aTl8qxcrTb/JyyoT+9hHyCA=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.51-darwin-arm64.tar.gz",
+        "bytes": 9386652,
+        "sha256": "3c4f342acaa47d81c2c2b38ae4c0c69b84f3650d5e65a47f90649fde3e6528ed",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/3c4f342acaa47d81c2c2b38ae4c0c69b84f3650d5e65a47f90649fde3e6528ed/agentdeck-local-0.4.51-darwin-arm64.tar.gz"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.51",
+        "build": 9068,
+        "os": "darwin",
+        "arch": "amd64",
+        "bytes": 26470032,
+        "sha256": "df623450d8e83d06a9afcac4e1f9971830c99f02739930b6f0ef6ca8145c15dd",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/df623450d8e83d06a9afcac4e1f9971830c99f02739930b6f0ef6ca8145c15dd/agentdeck-darwin-amd64",
+        "notes": "修复 Codex 原会话执行端查找与实时订阅等待；增加设置中的问题反馈和手机加密诊断记录。\nFix delayed Codex original-session owner discovery and live observation. Add in-app feedback with encrypted phone diagnostics.\n",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "Fw8QTHwubr8IkW8XGW1QuDn6wR0e2iF+HzXuKVSuYvhwOXQmhJKAN1b1xTtWn3SOUnqUwwX+4dZ0CoJUTW7ZBg=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.51-darwin-amd64.tar.gz",
+        "bytes": 10058090,
+        "sha256": "7db1b6e025940ad76cc9dbf0f179c6b72ff97c8e09635bfb95ce4786efe153af",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/7db1b6e025940ad76cc9dbf0f179c6b72ff97c8e09635bfb95ce4786efe153af/agentdeck-local-0.4.51-darwin-amd64.tar.gz"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.51",
+        "build": 9068,
+        "os": "windows",
+        "arch": "amd64",
+        "bytes": 26526208,
+        "sha256": "d90f7c0c915cf1b45be2bd5429b745d697404434d3b142cbc247e096dbab0728",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/d90f7c0c915cf1b45be2bd5429b745d697404434d3b142cbc247e096dbab0728/agentdeck-windows-amd64.exe",
+        "notes": "修复 Codex 原会话执行端查找与实时订阅等待；增加设置中的问题反馈和手机加密诊断记录。\nFix delayed Codex original-session owner discovery and live observation. Add in-app feedback with encrypted phone diagnostics.\n",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "vHVbNZac7JJTgHp4xgPyXgUKEteSPB894emvsLCwu3e5B85exZiVldUaVRsCDJlXJhyE+Uyzvl3fximb4dL2Dw=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.51-windows-amd64.zip",
+        "bytes": 10138321,
+        "sha256": "1ebdfb3786952f6d1c25da3531824562226b910da6e787ae0daa55e61a88052b",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/1ebdfb3786952f6d1c25da3531824562226b910da6e787ae0daa55e61a88052b/agentdeck-local-0.4.51-windows-amd64.zip"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.51",
+        "build": 9068,
+        "os": "windows",
+        "arch": "arm64",
+        "bytes": 24627200,
+        "sha256": "bcdb88c7c80f65091b8d8c8b2d736710e50bc677b625bf748023fbd2d64e051a",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/bcdb88c7c80f65091b8d8c8b2d736710e50bc677b625bf748023fbd2d64e051a/agentdeck-windows-arm64.exe",
+        "notes": "修复 Codex 原会话执行端查找与实时订阅等待；增加设置中的问题反馈和手机加密诊断记录。\nFix delayed Codex original-session owner discovery and live observation. Add in-app feedback with encrypted phone diagnostics.\n",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "V/cXn/x/dYYyWaTks7JIujScKwTMZtjJABNPp4eSJQ39+lUutsSp1NnB1N6Dn/TM54SltJYbRNoJCN7GUBGkBg=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.51-windows-arm64.zip",
+        "bytes": 9118819,
+        "sha256": "ab2773cf3f748fa880ec6f7c3f2ad4c73bdbf09b35f12e2c3543b84299fe464f",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/ab2773cf3f748fa880ec6f7c3f2ad4c73bdbf09b35f12e2c3543b84299fe464f/agentdeck-local-0.4.51-windows-arm64.zip"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.51",
+        "build": 9068,
+        "os": "linux",
+        "arch": "amd64",
+        "bytes": 25886904,
+        "sha256": "509bd9894144801eb509cbeef887f5577f4caec1050990e079fca8a71e6b7e21",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/509bd9894144801eb509cbeef887f5577f4caec1050990e079fca8a71e6b7e21/agentdeck-linux-amd64",
+        "notes": "修复 Codex 原会话执行端查找与实时订阅等待；增加设置中的问题反馈和手机加密诊断记录。\nFix delayed Codex original-session owner discovery and live observation. Add in-app feedback with encrypted phone diagnostics.\n",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "ngjbscBXk3C66wTKzluLNcmSl5HndAGX2WU7+rfzMNF8SfhEhXAXals9scG7uQw48H+IbEZlqMdJL8jJrNySBQ=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.51-linux-amd64.tar.gz",
+        "bytes": 9893826,
+        "sha256": "553164eba22548514ec4e5d7eea6ec68c62897ca0032b801fd133c4af35efdf6",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/553164eba22548514ec4e5d7eea6ec68c62897ca0032b801fd133c4af35efdf6/agentdeck-local-0.4.51-linux-amd64.tar.gz"
+      }
+    },
+    {
+      "release": {
+        "version": "0.4.51",
+        "build": 9068,
+        "os": "linux",
+        "arch": "arm64",
+        "bytes": 24379576,
+        "sha256": "6aff1b0112b8540398d5d7e574e3f299022ccacdacc848502ce0528a95cbff07",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/6aff1b0112b8540398d5d7e574e3f299022ccacdacc848502ce0528a95cbff07/agentdeck-linux-arm64",
+        "notes": "修复 Codex 原会话执行端查找与实时订阅等待；增加设置中的问题反馈和手机加密诊断记录。\nFix delayed Codex original-session owner discovery and live observation. Add in-app feedback with encrypted phone diagnostics.\n",
+        "protocol": 1,
+        "state_schema": 1,
+        "key_id": "agentdeck-local-2026",
+        "signature": "DU2fBh80VCVX8Yyj+Ql+BBkIyaw1YFRMxj9VHenJS8ho47KOqaroDPNdoC6hLk9al7hojfrw0fFA/INORPDeDA=="
+      },
+      "installer": {
+        "file": "agentdeck-local-0.4.51-linux-arm64.tar.gz",
+        "bytes": 9030446,
+        "sha256": "d492ed8060873efc04c340163971af3989099ad12ea780d5eaedde6b197037b2",
+        "url": "https://xcdn.ukilive.com/mcp_file/custom_file/agentdeck/local/0.4.51/d492ed8060873efc04c340163971af3989099ad12ea780d5eaedde6b197037b2/agentdeck-local-0.4.51-linux-arm64.tar.gz"
+      }
+    }
+  ]
+}

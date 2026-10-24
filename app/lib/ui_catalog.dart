@@ -1,5 +1,118 @@
 // App-owned interface strings only. Conversation content is never translated.
 const uiCatalog = <String, List<String>>{
+  "问题反馈": ["Report a problem", "問題回饋", "Сообщить о проблеме"],
+  "附带发送耗时与连接诊断": [
+    "Include send timing and connection diagnostics",
+    "附帶傳送耗時與連線診斷",
+    "Время отправки и диагностика соединения",
+  ],
+  "反馈保存到当前配对的工作站，返回反馈编号后即可查询。": [
+    "Reports are saved to your paired workstation. Keep the returned report ID for diagnosis.",
+    "回饋儲存到目前配對的工作站，收到回饋編號後即可查詢。",
+    "Отчёт сохраняется на сопряжённой станции. Для диагностики используйте его номер.",
+  ],
+  "诊断仅包含时间、请求编号、连接状态和耗时，不包含对话、工具内容、附件或密钥。": [
+    "Diagnostics contain timestamps, request IDs, connection state and durations. Chats, tool content, attachments and keys are excluded.",
+    "診斷僅包含時間、請求編號、連線狀態及耗時，不含對話、工具內容、附件或金鑰。",
+    "Диагностика содержит время, ID запросов, состояние связи и длительность. Без переписки, содержимого инструментов, вложений и ключей.",
+  ],
+  "问题说明": ["Describe the problem", "問題說明", "Описание проблемы"],
+  "例如：今天 07:19，Codex 发送等待超过 20 秒": [
+    "Example: sending to Codex waited over 20 seconds at 07:19 today.",
+    "例如：今天 07:19，Codex 傳送等待超過 20 秒",
+    "Например: сегодня в 07:19 отправка в Codex заняла более 20 секунд.",
+  ],
+  "附带诊断记录": ["Include diagnostic records", "附帶診斷記錄", "Приложить диагностику"],
+  "最近 7 天，最多 500 条；加密保存在手机上": [
+    "Last 7 days, up to 500 records; encrypted on this phone.",
+    "最近 7 天，最多 500 筆；加密儲存在手機上",
+    "За 7 дней, до 500 записей; зашифрованы на телефоне.",
+  ],
+  "部分本机诊断未能保存，当前记录仍可复制": [
+    "Some diagnostics could not be saved; current records can still be copied.",
+    "部分本機診斷未能儲存，目前記錄仍可複製",
+    "Часть диагностики не сохранена; текущие записи можно скопировать.",
+  ],
+  "待确认反馈已保留，重试会使用相同编号与记录。": [
+    "Unconfirmed report retained. Retry uses the same ID and records.",
+    "待確認回饋已保留，重試會使用相同編號與記錄。",
+    "Отчёт сохранён. Повторная попытка использует тот же ID и данные.",
+  ],
+  "重试反馈": ["Retry report", "重試回饋", "Повторить отправку"],
+  "发送反馈": ["Send report", "傳送回饋", "Отправить отчёт"],
+  "复制诊断记录": ["Copy diagnostics", "複製診斷記錄", "Копировать диагностику"],
+  "放弃待确认反馈": [
+    "Discard unconfirmed report",
+    "捨棄待確認回饋",
+    "Удалить неподтверждённый отчёт",
+  ],
+  "最近反馈编号": ["Latest report ID", "最近回饋編號", "Последний номер отчёта"],
+  "查询位置：本机后端；网关只透传加密内容。": [
+    "Stored on the workstation; the gateway relays encrypted content.",
+    "查詢位置：本機後端；閘道只轉送加密內容。",
+    "Хранится на станции; шлюз передаёт зашифрованные данные.",
+  ],
+  "反馈已保存到工作站": [
+    "Report saved to workstation",
+    "回饋已儲存到工作站",
+    "Отчёт сохранён на станции",
+  ],
+  "诊断记录已复制，可粘贴到反馈消息": [
+    "Diagnostics copied. Paste them into your feedback message.",
+    "診斷記錄已複製，可貼到回饋訊息",
+    "Диагностика скопирована. Вставьте её в сообщение.",
+  ],
+  "诊断复制失败": [
+    "Could not copy diagnostics",
+    "診斷複製失敗",
+    "Не удалось скопировать диагностику",
+  ],
+  "反馈记录读取失败": [
+    "Could not read saved reports",
+    "回饋記錄讀取失敗",
+    "Не удалось прочитать отчёты",
+  ],
+  "请填写问题说明，最多 16 KiB": [
+    "Enter a description, up to 16 KiB.",
+    "請填寫問題說明，最多 16 KiB",
+    "Введите описание, до 16 КиБ.",
+  ],
+  "工作站已切换，请重新提交反馈": [
+    "Workstation changed. Submit a new report.",
+    "工作站已切換，請重新提交回饋",
+    "Станция изменилась. Создайте новый отчёт.",
+  ],
+  "请连接提交反馈时的工作站": [
+    "Connect to the original report workstation.",
+    "請連線到提交回饋時的工作站",
+    "Подключитесь к исходной станции отчёта.",
+  ],
+  "工作站未连接，反馈已保留，可稍后重试": [
+    "Workstation offline. Report retained for retry.",
+    "工作站未連線，回饋已保留，可稍後重試",
+    "Станция не в сети. Отчёт сохранён для повтора.",
+  ],
+  "请更新本机后端后提交，或复制诊断记录": [
+    "Update the workstation before submitting, or copy diagnostics.",
+    "請更新本機後端後提交，或複製診斷記錄",
+    "Обновите станцию или скопируйте диагностику.",
+  ],
+  "反馈回执校验失败，记录已保留": [
+    "Invalid report receipt. Report retained.",
+    "回饋回執驗證失敗，記錄已保留",
+    "Не удалось проверить квитанцию. Отчёт сохранён.",
+  ],
+  "反馈尚未确认，已保留，可重试": [
+    "Report not confirmed; retained for retry.",
+    "回饋尚未確認，已保留，可重試",
+    "Отчёт не подтверждён; сохранён для повтора.",
+  ],
+  "反馈记录保存失败": [
+    "Could not save report record",
+    "回饋記錄儲存失敗",
+    "Не удалось сохранить отчёт",
+  ],
+
   "直连切换未完成，正在恢复网关中继": [
     "Direct handover interrupted; restoring gateway relay",
     "直連切換未完成，正在恢復閘道中繼",

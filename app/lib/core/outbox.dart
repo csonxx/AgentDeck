@@ -242,6 +242,25 @@ class OutboxManager {
   });
 
   void _reportSendTiming(OutgoingMessage t, Map<String, int> timing) {
+    if (timing['running_ms'] case final int running) {
+      client.diagnosticLog.record(
+        'send_running',
+        request: t.commandID,
+        duration: running,
+      );
+    } else {
+      for (final entry in {
+        'prepare_ms': 'send_prepared',
+        'request_ms': 'send_round_trip',
+        'total_ms': 'send_total',
+      }.entries) {
+        client.diagnosticLog.record(
+          entry.value,
+          request: t.commandID,
+          duration: timing[entry.key] ?? 0,
+        );
+      }
+    }
     unawaited(
       client
           .send({

@@ -78,7 +78,7 @@ type Store struct {
 	key []byte
 }
 
-var buckets = []string{"pendingapprovals", "deliveries", "deliverypayloads", "events", "sessionevents", "transcript", "itemkeys", "outline", "sessions", "seen", "devices", "media", "checkpoints", "invites", "gwtenants", "gwnodes", "gwgrants", "relayconfig", "gwflows", "gwoauth", "gwaccounts", "relaypending", "commands", "agentconfig", "generation", "native_settings", "uploads", "uploadchunks", "mediaowners", "goals"}
+var buckets = []string{"feedback", "pendingapprovals", "deliveries", "deliverypayloads", "events", "sessionevents", "transcript", "itemkeys", "outline", "sessions", "seen", "devices", "media", "checkpoints", "invites", "gwtenants", "gwnodes", "gwgrants", "relayconfig", "gwflows", "gwoauth", "gwaccounts", "relaypending", "commands", "agentconfig", "generation", "native_settings", "uploads", "uploadchunks", "mediaowners", "goals"}
 
 func New(dir string) (*Store, error) {
 	if e := localipc.PrivateDir(dir); e != nil {

@@ -3,6 +3,7 @@ import 'app_update_page.dart';
 import 'device_name_setting.dart';
 import 'app_lock.dart';
 import 'display_setting.dart';
+import 'feedback_page.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'core/client.dart';
@@ -118,6 +119,7 @@ class _AgentSettingsPageState extends State<AgentSettingsPage> {
         padding: const EdgeInsets.all(20),
         children: [
           AppUpdateSetting(updater: widget.client.updates),
+          FeedbackSetting(client: widget.client),
           DeviceNameSetting(client: widget.client),
           const DisplaySizeSetting(),
           ListTile(

@@ -284,6 +284,9 @@ func (s *Server) markUploadsUsed(owner, session string, ids []string) error {
 }
 
 func (s *Server) inputRequest(owner string, req Request) (any, error) {
+	if req.Method == "feedback_submit" {
+		return s.submitFeedback(owner, req.Feedback)
+	}
 	if s.Manager == nil {
 		return nil, errors.New("工作站未启用会话输入")
 	}

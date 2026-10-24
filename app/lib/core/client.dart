@@ -25,6 +25,8 @@ import 'client_health.dart';
 import 'session_open_timing.dart';
 import 'hybrid_socket.dart';
 import 'peer_channel.dart';
+import 'diagnostics.dart';
+import 'feedback.dart';
 export 'client_health.dart';
 
 class AgentRequestException extends HttpException {
@@ -119,6 +121,31 @@ class AgentClient extends ChangeNotifier {
   @visibleForTesting
   final SecurityContext? trustedRoots;
   final ProtocolClock clock;
+  late final DiagnosticLog diagnosticLog = DiagnosticLog(vault, clock);
+  FeedbackManager? _feedback;
+  FeedbackManager get feedback => _feedback ??= FeedbackManager(
+    vault: vault,
+    log: diagnosticLog,
+    exchange: (data) => request(data),
+    binding: () => '${device?['url'] ?? ''}|${device?['device'] ?? 'unpaired'}',
+    connected: () => connected,
+    supported: () => localFeedback,
+    version: () async {
+      try {
+        final info = await AppUpdater.channel
+            .invokeMapMethod<String, dynamic>('info')
+            .timeout(const Duration(seconds: 2));
+        final v = '${info?['version'] ?? ''}+${info?['version_code'] ?? ''}';
+        if (RegExp(r'^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$').hasMatch(v)) {
+          return v;
+        }
+      } catch (_) {
+        /* Host builds lack Android package metadata. */
+      }
+      return 'unknown';
+    },
+  );
+  bool localFeedback = false;
   SessionOpenTiming? _sessionOpen;
 
   // Called after a frame containing the received history has actually painted.
@@ -130,6 +157,11 @@ class AgentClient extends ChangeNotifier {
     }
     final metrics = timing.presented(clock.stamp, renderedRevision);
     if (metrics == null || !connected) return;
+    diagnosticLog.record(
+      'history_presented',
+      request: timing.request,
+      duration: metrics['total_ms'] ?? 0,
+    );
     unawaited(
       send({
         'method': 'client_timing',
@@ -933,6 +965,7 @@ class AgentClient extends ChangeNotifier {
   );
 
   void suspend() {
+    unawaited(diagnosticLog.flush());
     setReadingForeground(false);
     _backgrounded = true;
     if (_downloadLeases > 0) return;
@@ -957,6 +990,7 @@ class AgentClient extends ChangeNotifier {
 
   void _lost({String? failure}) {
     if (_closed || demo) return;
+    diagnosticLog.record('disconnected');
     if (_socket?.direct == true) {
       _directCooldownUntil = clock.stamp + 60000;
       directNote = '直连已中断，已回退网关中继';
@@ -1061,6 +1095,7 @@ class AgentClient extends ChangeNotifier {
       case 'device':
         await _acceptDeviceName(m['name'] as String?);
       case 'sessions':
+        localFeedback = m['feedback_local'] == true;
         final direct = m['direct'];
         _directPolicy = direct is Map
             ? Map<String, dynamic>.from(direct)
@@ -1278,6 +1313,9 @@ class AgentClient extends ChangeNotifier {
     Duration timeout = const Duration(seconds: 70),
   }) async {
     final id = data['id'] as String? ?? requestID();
+    final started = clock.stamp;
+    final sending = data['method'] == 'send';
+    if (sending) diagnosticLog.record('send_started', request: id);
     final result = Completer<dynamic>();
     _requests[id] = result;
     final response = result.future.timeout(timeout);
@@ -1288,7 +1326,26 @@ class AgentClient extends ChangeNotifier {
     );
     try {
       await send({...data, 'id': id});
-      return await response;
+      final value = await response;
+      if (sending) {
+        diagnosticLog.record(
+          'send_ack',
+          request: id,
+          duration: clock.stamp - started,
+        );
+      }
+      return value;
+    } catch (e) {
+      diagnosticLog.record(
+        sending
+            ? 'send_error'
+            : e is TimeoutException
+            ? 'request_timeout'
+            : 'request_error',
+        request: id,
+        duration: clock.stamp - started,
+      );
+      rethrow;
     } finally {
       _requests.remove(id);
       if (!result.isCompleted) result.complete();
@@ -2079,6 +2136,7 @@ class AgentClient extends ChangeNotifier {
   }
 
   Future<void> forget() async {
+    diagnosticLog.enabled = false;
     ++_generation;
     _failPending();
     _retry?.cancel();
@@ -2095,7 +2153,11 @@ class AgentClient extends ChangeNotifier {
     await _layoutSaveQueue;
     await _downloads?.reset();
     await _outbox?.reset();
+    await _feedback?.reset();
+    await diagnosticLog.clear();
     await vault.clear();
+    localFeedback = false;
+    diagnosticLog.enabled = true;
     projectLayout = ProjectLayout();
     _savedProjectLayout = projectLayout;
     device = null;
@@ -2166,6 +2228,8 @@ class AgentClient extends ChangeNotifier {
 
   @override
   void dispose() {
+    _feedback?.dispose();
+    diagnosticLog.dispose();
     _updates?.dispose();
     _closed = true;
     _outbox?.dispose();

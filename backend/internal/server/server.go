@@ -51,6 +51,7 @@ type ticket struct {
 	Clock   *secure.Clock
 }
 type Server struct {
+	feedbackMu     sync.Mutex
 	DirectConfig   func() relay.DirectConfig
 	Stop           func()
 	updateDraining bool
@@ -347,6 +348,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 }
 
 type Request struct {
+	Feedback          json.RawMessage   `json:"feedback,omitempty"`
 	SDP               string            `json:"sdp,omitempty"`
 	PeerID            string            `json:"peer_id,omitempty"`
 	ResetCredit       string            `json:"reset_credit,omitempty"`
@@ -551,7 +553,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		raw, _ := json.Marshal(state)
 		nativeReadState = string(raw)
 		nativeReadCheck = time.Now()
-		return send(map[string]any{"type": "sessions", "id": id, "sessions": ss, "native_reads": state, "direct": s.connectionPolicy(), "codex_send_direct": s.Manager != nil && supportsAtomicDesktopInput(s.Manager.Desktop), "codex_desktop": s.Manager != nil && s.Manager.Desktop != nil, "agents": func() any {
+		return send(map[string]any{"type": "sessions", "id": id, "sessions": ss, "native_reads": state, "direct": s.connectionPolicy(), "feedback_local": true, "codex_send_direct": s.Manager != nil && supportsAtomicDesktopInput(s.Manager.Desktop), "codex_desktop": s.Manager != nil && s.Manager.Desktop != nil, "agents": func() any {
 			if s.Manager != nil {
 				info := s.Manager.Catalog()
 				encoded, _ := json.Marshal(info)
@@ -672,7 +674,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				if send(map[string]any{"type": "result", "id": req.ID, "result": map[string]bool{"accepted": accepted}}) != nil {
 					return
 				}
-			case "usage_resets", "usage_reset_history", "usage_reset_prepare", "usage_reset_consume", "goal_list", "usage", "models", "session_settings", "session_permissions", "input_capabilities", "transcribe", "transcribe_preview", "upload_preview":
+			case "feedback_submit", "usage_resets", "usage_reset_history", "usage_reset_prepare", "usage_reset_consume", "goal_list", "usage", "models", "session_settings", "session_permissions", "input_capabilities", "transcribe", "transcribe_preview", "upload_preview":
 				select {
 				case asyncSlots <- struct{}{}:
 					go func(req Request, owner string) {
@@ -988,6 +990,7 @@ func (s *Server) Admin(ctx context.Context, dir string) error {
 	}
 	m := http.NewServeMux()
 	s.updateRoutes(m, dir)
+	s.feedbackAdminRoutes(m)
 	m.HandleFunc("POST /ingest", func(w http.ResponseWriter, r *http.Request) {
 		if s.Normalizer == nil {
 			fail(w, 503)
